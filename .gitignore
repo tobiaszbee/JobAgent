@@ -1,0 +1,17 @@
+# Environment
+.env
+
+# Dependencies
+.venv/
+
+# Data (DB, Chrome profile, reports, CV)
+data/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# IDE
+.idea/
+.vscode/

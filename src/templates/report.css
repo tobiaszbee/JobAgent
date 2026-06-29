@@ -1,0 +1,49 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f0f2f5; color: #1a1a2e; }
+
+header { background: #0a66c2; color: white; padding: 24px 32px; }
+header h1 { font-size: 22px; font-weight: 600; }
+header p { font-size: 13px; opacity: 0.8; margin-top: 4px; }
+
+.stats { display: flex; gap: 16px; padding: 20px 32px; background: white; border-bottom: 1px solid #e0e0e0; flex-wrap: wrap; }
+.stat { text-align: center; min-width: 80px; }
+.stat .val { font-size: 28px; font-weight: 700; color: #0a66c2; }
+.stat .lbl { font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 2px; }
+
+.controls { display: flex; gap: 12px; padding: 16px 32px; background: white; border-bottom: 1px solid #e0e0e0; flex-wrap: wrap; align-items: center; }
+.controls input, .controls select { padding: 8px 12px; border: 1px solid #d0d0d0; border-radius: 6px; font-size: 13px; outline: none; }
+.controls input:focus, .controls select:focus { border-color: #0a66c2; }
+.controls input { width: 240px; }
+.count { margin-left: auto; font-size: 13px; color: #666; }
+
+.jobs { padding: 20px 32px; display: flex; flex-direction: column; gap: 12px; }
+
+.job-card { background: white; border-radius: 10px; padding: 20px 24px; border: 1px solid #e0e0e0; transition: box-shadow 0.15s; }
+.job-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.08); }
+
+.job-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.job-title { font-size: 16px; font-weight: 600; color: #0a66c2; text-decoration: none; }
+.job-title:hover { text-decoration: underline; }
+.job-company { font-size: 13px; color: #444; margin-top: 3px; }
+.job-location { font-size: 12px; color: #777; margin-top: 2px; }
+
+.score-badge { flex-shrink: 0; width: 52px; height: 52px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 700; color: white; }
+.score-high { background: #0a8a3c; }
+.score-mid { background: #e67e00; }
+.score-low { background: #c0392b; }
+.score-none { background: #999; }
+
+.job-reasoning { font-size: 13px; color: #444; margin-top: 12px; line-height: 1.5; padding: 10px 14px; background: #f8f9fa; border-radius: 6px; border-left: 3px solid #0a66c2; }
+
+.job-meta { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; align-items: center; }
+.tag { font-size: 11px; padding: 3px 10px; border-radius: 20px; font-weight: 500; }
+.tag-status { background: #f0faf4; color: #0a8a3c; }
+.tag-applied { background: #fff3e0; color: #e67e00; }
+.job-date { font-size: 11px; color: #999; margin-left: auto; }
+
+.no-results { text-align: center; padding: 60px; color: #999; font-size: 15px; }
+
+@media (max-width: 600px) {
+  .stats, .controls, .jobs { padding: 12px 16px; }
+  .controls input { width: 100%; }
+}
