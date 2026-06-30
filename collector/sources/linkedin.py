@@ -55,7 +55,7 @@ class LinkedInSource(JobSource):
 
     def login(self) -> None:
         """Navigate to LinkedIn and wait for manual login if session has expired."""
-        self._page.goto("https://www.linkedin.com/login", wait_until="networkidle", timeout=30_000)
+        self._goto("https://www.linkedin.com/login")
         if "feed" in self._page.url or "jobs" in self._page.url:
             return
         print("Please log in to LinkedIn in the browser window...")
