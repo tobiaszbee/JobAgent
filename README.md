@@ -5,12 +5,12 @@ An AI-powered job search assistant that scrapes LinkedIn job listings and scores
 ## How it works
 
 ```
-LinkedIn (Chrome) → scraper → SQLite → Claude evaluator → Flask dashboard
+LinkedIn (Chrome) → collector → SQLite → Claude evaluator → Flask dashboard
 ```
 
-1. **Scrape** — opens Google Chrome, searches LinkedIn for configured job titles and locations, collects listings from the last N days.
+1. **Collect** — opens Google Chrome, searches LinkedIn for configured job titles and locations, collects listings from the last N days and fetches their full descriptions.
 2. **Deduplicate** — skips jobs already seen (by URL and by title+company).
-3. **Evaluate** — fetches each job's full description, asks Claude to score it 0–10 based on your criteria. Claude also learns from examples: jobs you applied to (positive) and jobs you rejected (negative).
+3. **Evaluate** — asks Claude to score each job 0–10 based on your criteria. Claude also learns from examples: jobs you applied to (positive) and jobs you rejected (negative).
 4. **Auto-reject** — jobs with dealbreakers are immediately marked `auto_rejected` without needing manual review.
 5. **Review** — browse scored results in a web dashboard, mark jobs as `reviewed`, `applied`, or `rejected`.
 
@@ -19,7 +19,7 @@ LinkedIn (Chrome) → scraper → SQLite → Claude evaluator → Flask dashboar
 ```
 new → reviewed → applied
               ↘ rejected
-auto_rejected  (set by agent automatically)
+auto_rejected  (set by evaluator automatically)
 ```
 
 ---
@@ -59,22 +59,22 @@ ANTHROPIC_API_KEY=sk-ant-...
 
 ### 3. Adapt the candidate profile to yourself
 
-Open `src/evaluator.py` and find the system prompt around line 98. Edit the **CANDIDATE** section to match your profile — your stack, experience level, location, and employment preferences. This is what Claude uses to evaluate every job.
+Open `evaluator/scorer.py` and edit the `_CANDIDATE_PROFILE` constant at the top of the file. This is what Claude uses to evaluate every job — make it match your stack, experience level, location, and employment preferences.
 
 ```python
-return f"""You are evaluating job listings for a Senior PHP Engineer based in Poland, working fully remote.
-
+_CANDIDATE_PROFILE = """
 CANDIDATE:
 - Senior PHP Engineer, 8+ years experience
 - Stack: PHP 8, Symfony, Laravel, ...
+""".strip()
 ```
 
-Also review the **AUTOMATIC REJECTION** rules below it and adjust them to your situation (e.g. which countries/regions are off-limits for you).
+Also review the **AUTOMATIC REJECTION** rules in `build_system_prompt()` and adjust them to your situation (e.g. which countries/regions are off-limits for you).
 
 ### 4. Start the dashboard and set your search criteria
 
 ```bash
-python src/web/app.py
+python web/app.py
 ```
 
 Open `http://localhost:5000` and go to the **Criteria** tab. Add your search criteria before running the agent for the first time — **without at least one title and one location the agent will find nothing**.
@@ -102,16 +102,16 @@ Click **Run Agent** in the dashboard. A log panel opens and streams output live.
 
 ### From the CLI
 
-```bash
-python src/agent.py
-python src/agent.py --days 3 --max-jobs 20
-python src/agent.py --titles "Senior PHP Developer" "PHP Engineer" --locations "Poland" "Remote"
-```
-
-On macOS, wrap with `caffeinate -i` to prevent sleep during a long run:
+Run the collector and evaluator separately:
 
 ```bash
-caffeinate -i python src/agent.py
+# Collect new jobs from LinkedIn
+python collector/runner.py
+python collector/runner.py --days 3 --max-jobs 20
+python collector/runner.py --titles "Senior PHP Developer" "PHP Engineer" --locations "Poland" "Remote"
+
+# Score all unscored jobs (run after the collector)
+python evaluator/runner.py
 ```
 
 ### First run — LinkedIn login
@@ -126,55 +126,10 @@ Open `http://localhost:5000`. Jobs are sorted by score (highest first). For each
 
 - **Open on LinkedIn** — read the full posting
 - **Mark as reviewed** — you've read it, not yet applied
-- **Mark as applied** — records the application; the job is added as a positive example for future Claude evaluations
-- **Reject** — removes it from the main feed; the job and your implicit reasoning become a negative example for future evaluations
+- **Mark as applied** — records the application; the job becomes a positive few-shot example for future evaluations
+- **Reject** — removes it from the main feed; the job becomes a negative few-shot example for future evaluations
 
 The more you apply/reject, the better Claude's scores get over time (few-shot learning).
-
----
-
-## (Optional) Seed positive examples
-
-If you already applied to jobs on LinkedIn before setting up JobAgent, create `data/seed_urls.txt` with one URL per line. These are imported on the first agent run as positive few-shot examples.
-
-```
-# data/seed_urls.txt  (gitignored — stays local)
-https://www.linkedin.com/jobs/view/1234567890/
-https://www.linkedin.com/jobs/view/0987654321/
-```
-
----
-
-## Generate a standalone HTML report
-
-```bash
-python src/reporter.py
-```
-
-Saves a self-contained HTML file to `data/reports/` and opens it in the browser. Useful for sharing or archiving a snapshot of your job search.
-
----
-
-## Project structure
-
-```
-JobAgent/
-├── config.py                   # LinkedIn URL, agent paths, model name
-├── src/
-│   ├── agent.py                # Main loop: scrape → insert → evaluate
-│   ├── browser.py              # Chrome automation: login, search, pagination
-│   ├── evaluator.py            # Claude prompt + scoring + retry logic  ← edit candidate profile here
-│   ├── reporter.py             # HTML report generator
-│   ├── import_examples.py      # Imports applied-job examples for few-shot learning
-│   ├── seed_criteria.py        # One-time criteria seeding from config
-│   └── web/
-│       └── app.py              # Flask dashboard + WebSocket agent runner
-└── data/                       # All local data — gitignored
-    ├── agent.db                # SQLite database (auto-created)
-    ├── chrome_profile/         # Persistent Chrome session (auto-created)
-    ├── seed_urls.txt           # Your pre-existing applied jobs (optional)
-    └── reports/                # Generated HTML reports
-```
 
 ---
 
@@ -182,7 +137,7 @@ JobAgent/
 
 Claude scores each job 0–10. The prompt includes:
 
-- Your candidate profile (from `evaluator.py`)
+- Your candidate profile (from `evaluator/scorer.py`)
 - Active `required` criteria — job must mention all of them
 - Active `preferred` criteria — each match raises the score
 - Active `rejected` rules — any match triggers auto-rejection
@@ -193,12 +148,77 @@ Claude scores each job 0–10. The prompt includes:
 
 ---
 
+## Running tests
+
+```bash
+pytest
+```
+
+No API key or browser required — the test suite uses an in-memory SQLite database and mocks all Claude API calls.
+
+```
+tests/
+  conftest.py                     # shared fixtures: temp DB, Flask test client
+  unit/
+    test_filters.py               # apply_filters() — keyword filtering logic
+    test_scorer.py                # build_system_prompt(), prompt builder helpers
+  integration/
+    test_job_repository.py        # insert, dedup, get_unscored, search, stats
+    test_criteria_repository.py   # CRUD, toggle, get_active_dict
+    test_web_routes.py            # Flask endpoints: jobs, criteria, agent status
+    test_evaluator_runner.py      # evaluator flow with mocked score_job
+```
+
+---
+
+## Project structure
+
+```
+JobAgent/
+├── config.py                     # API key, model, paths
+├── collector/
+│   ├── base.py                   # JobSource ABC + RawJob dataclass
+│   ├── filters.py                # Keyword-based pre-filter
+│   ├── runner.py                 # CLI entry point: search → insert → fetch descriptions
+│   └── sources/
+│       └── linkedin.py           # LinkedIn scraper (Playwright + system Chrome)
+├── evaluator/
+│   ├── scorer.py                 # Claude prompt builder + scoring logic  ← edit candidate profile here
+│   └── runner.py                 # CLI entry point: score unscored jobs
+├── db/
+│   ├── connection.py             # SQLite connection factory
+│   ├── migrations.py             # CREATE TABLE IF NOT EXISTS schema
+│   └── repositories/
+│       ├── job_repository.py     # jobs CRUD
+│       ├── criteria_repository.py # criteria CRUD + toggle
+│       └── session_repository.py  # run session tracking
+├── web/
+│   ├── app.py                    # Flask app, blueprint registration
+│   ├── routes/
+│   │   ├── jobs.py               # GET /api/jobs, POST /api/jobs/<id>/status, GET /api/stats
+│   │   ├── criteria.py           # GET/POST /api/criteria, toggle, delete
+│   │   └── runner.py             # GET /api/agent/status, WebSocket /ws/agent
+│   ├── templates/
+│   │   └── dashboard.html
+│   └── static/
+│       ├── dashboard.js
+│       └── dashboard.css
+├── tests/                        # pytest test suite
+├── pytest.ini
+└── data/                         # All local data — gitignored
+    ├── agent.db                  # SQLite database (auto-created)
+    ├── chrome_profile/           # Persistent Chrome session (auto-created)
+    └── reports/                  # (reserved for future report generation)
+```
+
+---
+
 ## Troubleshooting
 
 **Agent finds no jobs** — check that you have at least one `title` and one `location` in the Criteria tab.
 
-**Scraping breaks / wrong jobs returned** — LinkedIn occasionally changes its HTML. Update the CSS selectors in `src/browser.py` (look for `.job-card-list__title--link`, `.artdeco-entity-lockup__subtitle`, `.scaffold-layout__list-item`).
+**Scraping breaks / wrong jobs returned** — LinkedIn occasionally changes its HTML. Update the CSS selectors in `collector/sources/linkedin.py` (look for `.job-card-list__title--link`, `.artdeco-entity-lockup__subtitle`, `.scaffold-layout__list-item`).
 
-**`overloaded` error from Claude** — the agent retries automatically (up to 3 times, 30s/60s wait). If it keeps failing, try again later.
+**`overloaded` error from Claude** — the evaluator retries automatically (up to 3 times, 30s/60s wait). If it keeps failing, try again later.
 
 **LinkedIn session expired** — delete `data/chrome_profile/` and log in again on the next run.

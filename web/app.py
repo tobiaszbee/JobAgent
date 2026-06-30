@@ -1,0 +1,29 @@
+import os
+import sys
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+
+from flask import Flask, render_template
+from db.migrations import init_db
+from web.routes import jobs, criteria, runner
+
+app = Flask(__name__, template_folder="templates", static_folder="static")
+
+app.register_blueprint(jobs.bp)
+app.register_blueprint(criteria.bp)
+app.register_blueprint(runner.bp)
+runner.init_sock(app)
+
+
+@app.get("/")
+def dashboard():
+    return render_template("dashboard.html")
+
+
+if __name__ == "__main__":
+    init_db()
+    print("Starting Job Agent Dashboard...")
+    print("Open: http://localhost:5000")
+    app.run(debug=False, port=5000)
