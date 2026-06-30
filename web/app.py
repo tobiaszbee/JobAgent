@@ -7,13 +7,14 @@ if ROOT not in sys.path:
 
 from flask import Flask, render_template
 from db.migrations import init_db
-from web.routes import jobs, criteria, runner
+from web.routes import jobs, criteria, runner, cv
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
 
 app.register_blueprint(jobs.bp)
 app.register_blueprint(criteria.bp)
 app.register_blueprint(runner.bp)
+app.register_blueprint(cv.bp)
 runner.init_sock(app)
 
 

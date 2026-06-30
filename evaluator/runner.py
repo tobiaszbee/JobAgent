@@ -8,6 +8,7 @@ if ROOT not in sys.path:
 from db.migrations import init_db
 from db.repositories import job_repository, criteria_repository
 from evaluator.scorer import score_job, build_system_prompt
+from evaluator.profile import load_active_profile
 
 
 def run(log=print) -> dict:
@@ -18,11 +19,17 @@ def run(log=print) -> dict:
         log("No unscored jobs to evaluate.")
         return {"jobs_scored": 0, "auto_rejected": 0}
 
+    try:
+        candidate_profile = load_active_profile()
+    except ValueError as e:
+        log(f"ERROR: {e}")
+        return {"jobs_scored": 0, "auto_rejected": 0}
+
     criteria = criteria_repository.get_active_dict()
     positive_examples, negative_examples = job_repository.get_examples()
 
     # Build the system prompt once — it's identical for every job in this batch.
-    system_prompt = build_system_prompt(criteria, positive_examples, negative_examples)
+    system_prompt = build_system_prompt(criteria, positive_examples, negative_examples, candidate_profile)
 
     log(f"Evaluating {len(pending)} job(s)...")
     log(f"Few-shot: {len(positive_examples)} applied, {len(negative_examples)} rejected")

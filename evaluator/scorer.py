@@ -4,21 +4,6 @@ import anthropic
 
 from config import ANTHROPIC_API_KEY, CLAUDE_MODEL
 
-# ---------------------------------------------------------------------------
-# Candidate profile — TEMPORARY HARDCODE. Replaced in Phase 2 (CV from DB).
-# Edit this section to match your own background before running.
-# ---------------------------------------------------------------------------
-_CANDIDATE_PROFILE = """
-CANDIDATE:
-- Senior PHP Engineer, 8+ years experience
-- Stack: PHP 8, Symfony, Laravel, Doctrine, MySQL, Docker, Kubernetes, RabbitMQ
-- Team Lead and Scrum Master experience
-- English C1, Polish citizen, works remotely from Poland
-- No visa or work permit needed anywhere — works remotely, never relocates
-- Open to: full-time employment, B2B contracts, freelance contracts
-""".strip()
-# ---------------------------------------------------------------------------
-
 _client: anthropic.Anthropic | None = None
 
 
@@ -51,7 +36,7 @@ def build_system_prompt(
     criteria: dict,
     positive_examples: list[dict],
     negative_examples: list[dict],
-    candidate_profile: str = _CANDIDATE_PROFILE,
+    candidate_profile: str = "",
 ) -> str:
     """Build the system prompt. Call once per batch and reuse across jobs."""
     examples_section = _build_examples_section(positive_examples, negative_examples)

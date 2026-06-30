@@ -33,7 +33,10 @@
   <div class="tab" data-status="applied">Applied</div>
   <div class="tab" data-status="rejected">Rejected</div>
   <div class="tab" data-status="auto_rejected">Auto-rejected</div>
-  <div class="tab tab-criteria" data-status="criteria">&#9881; Criteria</div>
+  <div class="tab-right-group">
+    <div class="tab" data-status="cv">&#9998; CV</div>
+    <div class="tab" data-status="criteria">&#9881; Criteria</div>
+  </div>
 </div>
 
 <div class="toolbar" id="jobs-toolbar">
@@ -57,6 +60,19 @@
 
 <div class="criteria-panel" id="criteria-panel" style="display:none">
   <div class="criteria-grid" id="criteria-grid"></div>
+</div>
+
+<div class="cv-panel" id="cv-panel" style="display:none">
+  <div class="cv-upload-section">
+    <h3>Upload CV</h3>
+    <p class="cv-hint">Upload a PDF — Claude will extract your stack, experience, and preferences to use when scoring jobs.</p>
+    <div class="cv-upload-row">
+      <input type="file" id="cv-file" accept=".pdf">
+      <button class="btn-cv-upload" id="btn-cv-upload" onclick="uploadCV()">Upload &amp; Parse</button>
+    </div>
+    <div id="cv-upload-status"></div>
+  </div>
+  <div id="cv-profiles"></div>
 </div>
 
 <!-- Run Modal -->

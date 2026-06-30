@@ -331,17 +331,88 @@ document.querySelectorAll('.tab').forEach(tab => {
     tab.classList.add('active');
     const status = tab.dataset.status;
     const isCriteria = status === 'criteria';
-    document.getElementById('jobs-toolbar').style.display   = isCriteria ? 'none' : '';
-    document.getElementById('jobs-container').style.display = isCriteria ? 'none' : '';
+    const isCV = status === 'cv';
+    const isJobs = !isCriteria && !isCV;
+    document.getElementById('jobs-toolbar').style.display   = isJobs ? '' : 'none';
+    document.getElementById('jobs-container').style.display = isJobs ? '' : 'none';
     document.getElementById('criteria-panel').style.display = isCriteria ? '' : 'none';
-    if (isCriteria) {
-      loadCriteria();
-    } else {
-      currentStatus = status;
-      loadJobs();
-    }
+    document.getElementById('cv-panel').style.display       = isCV ? '' : 'none';
+    if (isCriteria) loadCriteria();
+    else if (isCV)  loadCV();
+    else { currentStatus = status; loadJobs(); }
   });
 });
+
+// --- CV ---
+
+async function loadCV() {
+  const r = await fetch('/api/cv');
+  const profiles = await r.json();
+  const container = document.getElementById('cv-profiles');
+  if (!profiles.length) {
+    container.innerHTML = '<p class="cv-empty">No CV uploaded yet. Upload one above to enable job scoring.</p>';
+    return;
+  }
+  container.innerHTML = profiles.map(p => {
+    const parsed = p.parsed || {};
+    const stack  = (parsed.stack || []).join(', ') || '—';
+    const active = p.is_active ? '<span class="cv-badge-active">Active</span>' : '';
+    const activateBtn = p.is_active ? '' :
+      `<button class="btn-cv-activate" onclick="activateCV(${p.id})">Set active</button>`;
+    return `
+    <div class="cv-card ${p.is_active ? 'cv-card-active' : ''}" id="cv-card-${p.id}">
+      <div class="cv-card-header">
+        <div>
+          <span class="cv-filename">${esc(p.filename)}</span>
+          ${active}
+        </div>
+        ${activateBtn}
+      </div>
+      <div class="cv-fields">
+        <div class="cv-field"><span class="cv-label">Seniority</span><span>${esc(parsed.seniority || '—')}</span></div>
+        <div class="cv-field"><span class="cv-label">Experience</span><span>${esc(String(parsed.years_experience ?? '—'))} yrs</span></div>
+        <div class="cv-field"><span class="cv-label">Location</span><span>${esc(parsed.location || '—')}</span></div>
+        <div class="cv-field"><span class="cv-label">Remote</span><span>${esc(parsed.remote_preference || '—')}</span></div>
+      </div>
+      <div class="cv-stack">${esc(stack)}</div>
+      ${parsed.raw_summary ? `<div class="cv-summary">${esc(parsed.raw_summary)}</div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+async function uploadCV() {
+  const input  = document.getElementById('cv-file');
+  const status = document.getElementById('cv-upload-status');
+  const btn    = document.getElementById('btn-cv-upload');
+  if (!input.files.length) { showToast('Select a PDF file first'); return; }
+  const formData = new FormData();
+  formData.append('file', input.files[0]);
+  btn.disabled = true;
+  btn.textContent = 'Parsing…';
+  status.textContent = '';
+  try {
+    const r = await fetch('/api/cv/upload', { method: 'POST', body: formData });
+    const data = await r.json();
+    if (!r.ok) {
+      status.innerHTML = `<span class="cv-error">${esc(data.error)}</span>`;
+    } else {
+      input.value = '';
+      status.innerHTML = '<span class="cv-ok">CV uploaded and parsed successfully.</span>';
+      loadCV();
+    }
+  } catch (e) {
+    status.innerHTML = `<span class="cv-error">Upload failed: ${esc(String(e))}</span>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Upload & Parse';
+  }
+}
+
+async function activateCV(id) {
+  await fetch(`/api/cv/${id}/activate`, { method: 'POST' });
+  loadCV();
+  showToast('CV profile activated');
+}
 
 let searchTimeout;
 document.getElementById('search').addEventListener('input', () => {
