@@ -87,3 +87,22 @@ def agent_ws(ws):
         ws.send("\n__DONE__\n")
     except Exception:
         pass
+
+
+@sock.route("/ws/backfill")
+def backfill_ws(ws):
+    global _agent_process
+
+    if _agent_process is not None and _agent_process.poll() is None:
+        ws.send("ERROR: Agent is already running.\n")
+        return
+
+    script = os.path.join(ROOT, "scripts", "backfill_descriptions.py")
+    ws.send("=== BACKFILL DESCRIPTIONS ===\n")
+    _run_script(ws, script)
+
+    _agent_process = None
+    try:
+        ws.send("\n__DONE__\n")
+    except Exception:
+        pass

@@ -25,3 +25,9 @@ def update_status(job_id):
 @bp.get("/api/stats")
 def stats():
     return jsonify(job_repository.get_stats())
+
+
+@bp.get("/api/jobs/missing-descriptions")
+def missing_descriptions():
+    jobs = job_repository.get_missing_descriptions()
+    return jsonify({"count": len(jobs)})

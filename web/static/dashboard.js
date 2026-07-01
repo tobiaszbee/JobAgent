@@ -42,6 +42,75 @@ async function loadStats() {
   document.getElementById('s-avg').textContent           = s.avg_score || '—';
   const lastRun = s.last_run ? new Date(s.last_run + 'Z').toLocaleString('pl-PL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : 'never';
   document.getElementById('last-updated').textContent    = 'Last run: ' + lastRun;
+  checkMissingDescriptions();
+}
+
+async function checkMissingDescriptions() {
+  const r = await fetch('/api/jobs/missing-descriptions');
+  const d = await r.json();
+  const btn = document.getElementById('btn-backfill');
+  if (d.count > 0) {
+    document.getElementById('backfill-count').textContent = d.count;
+    btn.style.display = '';
+  } else {
+    btn.style.display = 'none';
+  }
+}
+
+function openBackfillModal() {
+  document.getElementById('backfill-log').textContent = '';
+  document.getElementById('backfill-progress').style.display = 'none';
+  document.getElementById('progress-bar').style.width = '0%';
+  document.getElementById('progress-label').textContent = '0 / 0';
+  document.getElementById('backfill-modal').style.display = 'flex';
+}
+
+function closeBackfillModal() {
+  document.getElementById('backfill-modal').style.display = 'none';
+}
+
+function startBackfill() {
+  const log  = document.getElementById('backfill-log');
+  const btn  = document.getElementById('btn-backfill-start');
+  const prog = document.getElementById('backfill-progress');
+  const bar  = document.getElementById('progress-bar');
+  const lbl  = document.getElementById('progress-label');
+
+  log.textContent = '';
+  prog.style.display = '';
+  btn.disabled = true;
+  btn.textContent = 'Running...';
+
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const ws = new WebSocket(`${proto}://${location.host}/ws/backfill`);
+
+  ws.onmessage = e => {
+    const line = e.data;
+    const m = line.match(/^PROGRESS:(\d+)\/(\d+)/);
+    if (m) {
+      const cur = parseInt(m[1]), tot = parseInt(m[2]);
+      const pct = tot > 0 ? Math.round(cur / tot * 100) : 0;
+      bar.style.width = pct + '%';
+      lbl.textContent = `${cur} / ${tot}  (${pct}%)`;
+      return;
+    }
+    if (line.includes('__DONE__')) {
+      btn.disabled = false;
+      btn.textContent = '▶ Start';
+      bar.style.width = '100%';
+      checkMissingDescriptions();
+      loadJobs();
+      return;
+    }
+    log.textContent += line;
+    log.scrollTop = log.scrollHeight;
+  };
+
+  ws.onerror = () => {
+    log.textContent += '\nWebSocket error.\n';
+    btn.disabled = false;
+    btn.textContent = '▶ Start';
+  };
 }
 
 async function loadJobs() {

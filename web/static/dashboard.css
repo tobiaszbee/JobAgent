@@ -54,6 +54,14 @@ header h1 { font-size: 20px; font-weight: 600; }
 .btn-toggle-rejected { font-size: 12px; color: #888; background: none; border: 1px solid #d0d0d0; border-radius: 5px; padding: 5px 10px; cursor: pointer; transition: all 0.15s; }
 .btn-toggle-rejected:hover { border-color: #999; color: #555; }
 .btn-toggle-rejected.active { background: #fff3e0; border-color: #e67e00; color: #e67e00; }
+.btn-backfill { font-size: 12px; color: #0a66c2; background: none; border: 1px solid #0a66c2; border-radius: 5px; padding: 5px 10px; cursor: pointer; transition: all 0.15s; }
+.btn-backfill:hover { background: #e8f0fb; }
+.modal-sm { max-width: 560px; }
+.backfill-info { font-size: 13px; color: #666; margin-bottom: 14px; }
+.backfill-progress { margin-bottom: 12px; }
+.progress-bar-wrap { height: 10px; background: #e0e0e0; border-radius: 5px; overflow: hidden; margin-bottom: 6px; }
+.progress-bar { height: 100%; background: #0a66c2; border-radius: 5px; transition: width 0.3s ease; }
+.progress-label { font-size: 12px; color: #555; text-align: right; }
 
 .job-footer { display: flex; gap: 8px; margin-top: 12px; align-items: center; flex-wrap: wrap; }
 .status-tag { font-size: 11px; padding: 2px 8px; border-radius: 12px; font-weight: 500; }
