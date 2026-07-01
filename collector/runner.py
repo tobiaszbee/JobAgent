@@ -16,6 +16,7 @@ def run(
     max_jobs: int | None = None,
     titles: list[str] | None = None,
     locations: list[str] | None = None,
+    search_queries_override: list[str] | None = None,
     log=print,
 ) -> dict:
     init_db()
@@ -25,6 +26,8 @@ def run(
         criteria["titles"] = titles
     if locations:
         criteria["locations"] = locations
+    if search_queries_override:
+        criteria["search_queries"] = search_queries_override
 
     search_queries = criteria["search_queries"] or criteria["titles"]
     if not search_queries or not criteria["locations"]:
@@ -107,10 +110,11 @@ if __name__ == "__main__":
     sys.stdout.reconfigure(line_buffering=True)
 
     parser = argparse.ArgumentParser(description="Collect job listings from LinkedIn")
-    parser.add_argument("--days",      type=int,  default=7,    help="Days back to search (default: 7)")
-    parser.add_argument("--max-jobs",  type=int,  default=None, help="Max new jobs to collect (default: unlimited)")
-    parser.add_argument("--titles",    nargs="*", default=None, help="Override search titles")
-    parser.add_argument("--locations", nargs="*", default=None, help="Override search locations")
+    parser.add_argument("--days",           type=int,  default=7,    help="Days back to search (default: 7)")
+    parser.add_argument("--max-jobs",       type=int,  default=None, help="Max new jobs to collect (default: unlimited)")
+    parser.add_argument("--titles",         nargs="*", default=None, help="Override job titles (scoring only)")
+    parser.add_argument("--locations",      nargs="*", default=None, help="Override search locations")
+    parser.add_argument("--search-queries", nargs="*", default=None, help="Override LinkedIn search queries")
     args = parser.parse_args()
 
     run(
@@ -118,4 +122,5 @@ if __name__ == "__main__":
         max_jobs=args.max_jobs,
         titles=args.titles,
         locations=args.locations,
+        search_queries_override=args.search_queries,
     )

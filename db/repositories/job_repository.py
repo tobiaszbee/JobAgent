@@ -175,5 +175,10 @@ def get_stats() -> dict:
             ROUND(AVG(CASE WHEN score IS NOT NULL THEN score END), 2) AS avg_score
         FROM jobs
     """).fetchone()
+    last = conn.execute(
+        "SELECT finished_at FROM sessions WHERE status = 'ok' ORDER BY finished_at DESC LIMIT 1"
+    ).fetchone()
     conn.close()
-    return dict(row)
+    result = dict(row)
+    result["last_run"] = last["finished_at"] if last else None
+    return result

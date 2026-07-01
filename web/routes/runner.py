@@ -59,17 +59,17 @@ def agent_ws(ws):
     except Exception:
         params = {}
 
-    days      = int(params.get("days", 7))
-    max_jobs  = params.get("max_jobs")
-    max_jobs  = int(max_jobs) if max_jobs else None
-    titles    = params.get("titles") or []
-    locations = params.get("locations") or []
+    days           = int(params.get("days", 1))
+    max_jobs       = params.get("max_jobs")
+    max_jobs       = int(max_jobs) if max_jobs else None
+    search_queries = params.get("search_queries") or []
+    locations      = params.get("locations") or []
 
     collector_args = ["--days", str(days)]
     if max_jobs:
         collector_args += ["--max-jobs", str(max_jobs)]
-    if titles:
-        collector_args += ["--titles"] + titles
+    if search_queries:
+        collector_args += ["--search-queries"] + search_queries
     if locations:
         collector_args += ["--locations"] + locations
 

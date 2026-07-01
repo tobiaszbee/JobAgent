@@ -1,6 +1,7 @@
 let ALL_JOBS = [];
 let currentStatus = 'all';
 let agentSocket = null;
+let showAutoRejected = false;
 
 function esc(s) {
   return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -39,7 +40,8 @@ async function loadStats() {
   document.getElementById('s-rejected').textContent      = s.rejected;
   document.getElementById('s-auto-rejected').textContent = s.auto_rejected;
   document.getElementById('s-avg').textContent           = s.avg_score || '—';
-  document.getElementById('last-updated').textContent    = 'Updated: ' + new Date().toLocaleTimeString();
+  const lastRun = s.last_run ? new Date(s.last_run + 'Z').toLocaleString('pl-PL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : 'never';
+  document.getElementById('last-updated').textContent    = 'Last run: ' + lastRun;
 }
 
 async function loadJobs() {
@@ -54,9 +56,18 @@ async function loadJobs() {
   render();
 }
 
+function toggleAutoRejected() {
+  showAutoRejected = !showAutoRejected;
+  const btn = document.getElementById('btn-toggle-rejected');
+  btn.textContent = showAutoRejected ? 'Hide auto-rejected' : 'Show auto-rejected';
+  btn.classList.toggle('active', showAutoRejected);
+  render();
+}
+
 function render() {
   const sort = document.getElementById('sort').value;
   let jobs = [...ALL_JOBS];
+  if (!showAutoRejected) jobs = jobs.filter(j => j.status !== 'auto_rejected');
 
   if (sort === 'score')   jobs.sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
   if (sort === 'date')    jobs.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
@@ -83,6 +94,9 @@ function render() {
         <div class="score-badge ${sc}">${score}</div>
       </div>
       ${j.score_reason ? `<div class="job-reason">${esc(j.score_reason)}</div>` : ''}
+      ${j.description ? `
+      <div class="job-desc-toggle" onclick="toggleDesc('${esc(j.id)}')">&#9660; Show description</div>
+      <div class="job-desc" id="desc-${esc(j.id)}" style="display:none">${esc(j.description)}</div>` : ''}
       <div class="job-footer">
         <span class="status-tag tag-${esc(j.status)}">${esc(j.status)}</span>
         <span class="job-date">${formatDate(j.created_at)}</span>
@@ -97,6 +111,14 @@ function render() {
       </div>
     </div>`;
   }).join('');
+}
+
+function toggleDesc(jobId) {
+  const el = document.getElementById(`desc-${jobId}`);
+  const toggle = el.previousElementSibling;
+  const visible = el.style.display !== 'none';
+  el.style.display = visible ? 'none' : 'block';
+  toggle.textContent = visible ? '▼ Show description' : '▲ Hide description';
 }
 
 async function setStatus(jobId, status) {
@@ -228,12 +250,12 @@ async function openRunModal() {
   const r = await fetch('/api/criteria');
   const all = await r.json();
 
-  const titles    = all.filter(c => c.type === 'title'    && c.is_active);
-  const locations = all.filter(c => c.type === 'location' && c.is_active);
+  const searchQueries = all.filter(c => c.type === 'search_query' && c.is_active);
+  const locations     = all.filter(c => c.type === 'location'     && c.is_active);
 
-  document.getElementById('run-titles').innerHTML = titles.map(c => `
+  document.getElementById('run-search-queries').innerHTML = searchQueries.map(c => `
     <label class="run-check">
-      <input type="checkbox" name="title" value="${esc(c.value)}" checked> ${esc(c.value)}
+      <input type="checkbox" name="search-query" value="${esc(c.value)}" checked> ${esc(c.value)}
     </label>`).join('');
 
   document.getElementById('run-locations').innerHTML = locations.map(c => `
@@ -277,11 +299,11 @@ function startAgent() {
   const btn     = document.getElementById('btn-start');
   const runBtn  = document.getElementById('btn-run');
 
-  const titles    = [...document.querySelectorAll('input[name="title"]:checked')].map(el => el.value);
-  const locations = [...document.querySelectorAll('input[name="location"]:checked')].map(el => el.value);
+  const searchQueries = [...document.querySelectorAll('input[name="search-query"]:checked')].map(el => el.value);
+  const locations     = [...document.querySelectorAll('input[name="location"]:checked')].map(el => el.value);
 
-  if (!titles.length || !locations.length) {
-    showToast('Select at least one title and location');
+  if (!searchQueries.length || !locations.length) {
+    showToast('Select at least one search query and location');
     return;
   }
 
@@ -296,9 +318,9 @@ function startAgent() {
 
   agentSocket.onopen = () => {
     agentSocket.send(JSON.stringify({
-      days:      parseInt(days),
-      max_jobs:  maxJobs ? parseInt(maxJobs) : null,
-      titles,
+      days:           parseInt(days),
+      max_jobs:       maxJobs ? parseInt(maxJobs) : null,
+      search_queries: searchQueries,
       locations
     }));
   };
