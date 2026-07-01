@@ -48,6 +48,16 @@ def insert(
     return job_id
 
 
+def get_missing_descriptions() -> list[dict]:
+    """Jobs without a description that are not yet scored — candidates for description retry."""
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT id, url FROM jobs WHERE (description IS NULL OR description = '') AND score IS NULL ORDER BY created_at DESC"
+    ).fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+
 def update_description(job_id: str, description: str) -> None:
     conn = get_connection()
     conn.execute(

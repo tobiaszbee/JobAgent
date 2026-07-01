@@ -86,10 +86,24 @@ def run(
 
             if new_job_ids:
                 log(f"\nFetching descriptions for {len(new_job_ids)} new job(s)...")
+                failed_desc: list[tuple[str, str]] = []
                 for job_id, url in new_job_ids:
                     description = source.fetch_description(url)
                     if description:
                         job_repository.update_description(job_id, description)
+                    else:
+                        failed_desc.append((job_id, url))
+                        log(f"  No description: {url}")
+
+                if failed_desc:
+                    log(f"\nRetrying {len(failed_desc)} job(s) with missing description...")
+                    for job_id, url in failed_desc:
+                        description = source.fetch_description(url)
+                        if description:
+                            job_repository.update_description(job_id, description)
+                            log(f"  Retry OK: {url}")
+                        else:
+                            log(f"  Retry failed: {url}")
 
         session_repository.finish(session_id, jobs_found=jobs_found, jobs_scored=0)
 

@@ -92,9 +92,22 @@ class LinkedInSource(JobSource):
 
         return self._page.evaluate("""
             () => {
+                // Try LinkedIn's structured description element first
+                const descEl = document.querySelector('.jobs-description__content, .jobs-box__html-content, .description__text');
+                if (descEl && descEl.innerText.trim().length > 100) {
+                    return descEl.innerText.trim().slice(0, 5000);
+                }
+                // Fall back to finding the section header (multilingual)
+                const headers = [
+                    'About the job', 'Über die Stelle', 'À propos du poste',
+                    'Over de functie', 'Sobre el trabajo', 'O tej pracy',
+                    'Om jobbet', 'Tietoja työpaikasta', 'Om stillingen',
+                ];
                 const body = document.body.innerText;
-                const idx = body.indexOf('About the job');
-                if (idx !== -1) return body.slice(idx, idx + 5000).trim();
+                for (const h of headers) {
+                    const idx = body.indexOf(h);
+                    if (idx !== -1) return body.slice(idx, idx + 5000).trim();
+                }
                 return '';
             }
         """) or None
