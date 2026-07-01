@@ -119,8 +119,30 @@ header h1 { font-size: 20px; font-weight: 600; }
 .cv-card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
 .cv-filename { font-weight: 600; font-size: 14px; margin-right: 8px; }
 .cv-badge-active { background: #e8f4fd; color: #0a66c2; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 12px; }
+.cv-card-actions { display: flex; gap: 8px; align-items: center; }
 .btn-cv-activate { padding: 5px 12px; background: white; color: #0a66c2; border: 1px solid #0a66c2; border-radius: 5px; font-size: 12px; cursor: pointer; }
 .btn-cv-activate:hover { background: #e8f4fd; }
+.btn-cv-suggest { padding: 5px 12px; background: #0a66c2; color: white; border: none; border-radius: 5px; font-size: 12px; cursor: pointer; }
+.btn-cv-suggest:hover { background: #0856a3; }
+.btn-cv-suggest:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.cv-suggest-header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 14px; }
+.cv-suggest-header h3 { font-size: 14px; font-weight: 600; }
+.cv-suggest-hint { font-size: 12px; color: #888; }
+.cv-suggest-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 14px; }
+.cv-suggest-group { background: #f8f9fa; border-radius: 6px; padding: 12px; }
+.cv-suggest-group strong { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: #666; margin-bottom: 8px; }
+.cv-suggest-tag { font-size: 10px; text-transform: none; letter-spacing: 0; color: #0a66c2; font-weight: 400; }
+.suggest-check { display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; padding: 3px 0; }
+.suggest-check input { cursor: pointer; }
+.cv-suggest-footer { display: flex; gap: 10px; }
+.btn-cv-apply { background: #0a8a3c; color: white; border: none; padding: 7px 18px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; }
+.btn-cv-apply:hover { background: #077532; }
+.btn-cv-apply:disabled { opacity: 0.6; cursor: not-allowed; }
+.btn-cv-cancel { background: white; color: #555; border: 1px solid #d0d0d0; padding: 7px 16px; border-radius: 6px; font-size: 13px; cursor: pointer; }
+.btn-cv-cancel:hover { background: #f5f5f5; }
+
+#cv-suggestions { background: white; border-radius: 8px; padding: 16px 20px; border: 1px solid #d0e8ff; border-left: 3px solid #0a66c2; margin-top: 12px; }
 
 .cv-fields { display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 10px; }
 .cv-field { display: flex; flex-direction: column; gap: 2px; }

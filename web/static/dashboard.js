@@ -116,11 +116,12 @@ async function setStatus(jobId, status) {
 }
 
 const CRITERIA_LABELS = {
-  title:     'Job Titles',
-  location:  'Locations',
-  required:  'Required',
-  preferred: 'Preferred',
-  rejected:  'Auto-reject keywords',
+  search_query: 'Search Queries',
+  title:        'Job Titles',
+  location:     'Locations',
+  required:     'Required',
+  preferred:    'Preferred',
+  rejected:     'Auto-reject keywords',
 };
 
 async function loadCriteria() {
@@ -359,6 +360,9 @@ async function loadCV() {
     const active = p.is_active ? '<span class="cv-badge-active">Active</span>' : '';
     const activateBtn = p.is_active ? '' :
       `<button class="btn-cv-activate" onclick="activateCV(${p.id})">Set active</button>`;
+    const suggestBtn = p.is_active
+      ? `<button class="btn-cv-suggest" onclick="suggestCriteria(${p.id})">Suggest criteria</button>`
+      : '';
     return `
     <div class="cv-card ${p.is_active ? 'cv-card-active' : ''}" id="cv-card-${p.id}">
       <div class="cv-card-header">
@@ -366,7 +370,10 @@ async function loadCV() {
           <span class="cv-filename">${esc(p.filename)}</span>
           ${active}
         </div>
-        ${activateBtn}
+        <div class="cv-card-actions">
+          ${activateBtn}
+          ${suggestBtn}
+        </div>
       </div>
       <div class="cv-fields">
         <div class="cv-field"><span class="cv-label">Seniority</span><span>${esc(parsed.seniority || '—')}</span></div>
@@ -412,6 +419,69 @@ async function activateCV(id) {
   await fetch(`/api/cv/${id}/activate`, { method: 'POST' });
   loadCV();
   showToast('CV profile activated');
+}
+
+async function suggestCriteria(id) {
+  const btn = document.querySelector(`#cv-card-${id} .btn-cv-suggest`);
+  const panel = document.getElementById('cv-suggestions');
+  if (btn) { btn.disabled = true; btn.textContent = 'Generating…'; }
+  panel.style.display = 'none';
+  try {
+    const r = await fetch(`/api/cv/${id}/suggest-criteria`, { method: 'POST' });
+    const data = await r.json();
+    if (!r.ok) { showToast(data.error || 'Failed to generate suggestions'); return; }
+
+    const renderChecks = (containerId, name, items) => {
+      document.getElementById(containerId).innerHTML = (items || []).map(v => `
+        <label class="suggest-check">
+          <input type="checkbox" name="${name}" value="${esc(v)}" checked> ${esc(v)}
+        </label>`).join('');
+    };
+    renderChecks('suggest-search-queries', 'suggest-search-query', data.search_queries);
+    renderChecks('suggest-titles',         'suggest-title',        data.titles);
+    renderChecks('suggest-locations',      'suggest-location',     data.locations);
+    renderChecks('suggest-required',       'suggest-required',     data.required);
+    renderChecks('suggest-preferred',      'suggest-preferred',    data.preferred);
+
+    panel.style.display = '';
+    panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Suggest criteria'; }
+  }
+}
+
+async function applySuggestions() {
+  const checked = name => [...document.querySelectorAll(`input[name="${name}"]:checked`)].map(el => el.value);
+  const searchQueries = checked('suggest-search-query');
+  const titles        = checked('suggest-title');
+  const locations     = checked('suggest-location');
+  const required      = checked('suggest-required');
+  const preferred     = checked('suggest-preferred');
+  if (!searchQueries.length && !titles.length && !locations.length && !required.length && !preferred.length) {
+    showToast('Nothing selected'); return;
+  }
+
+  const btn = document.getElementById('btn-cv-apply');
+  btn.disabled = true;
+  btn.textContent = 'Adding…';
+  try {
+    const r = await fetch('/api/cv/0/apply-criteria', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ search_queries: searchQueries, titles, locations, required, preferred }),
+    });
+    const data = await r.json();
+    if (r.ok) {
+      document.getElementById('cv-suggestions').style.display = 'none';
+      const total = (data.added_search_queries || 0) + data.added_titles + data.added_locations + data.added_required + data.added_preferred;
+      showToast(`Added ${total} criteria to Criteria tab`);
+    } else {
+      showToast(data.error || 'Failed to apply');
+    }
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Add selected to Criteria';
+  }
 }
 
 let searchTimeout;

@@ -1,6 +1,6 @@
 from db.connection import get_connection
 
-VALID_TYPES = {"title", "location", "required", "preferred", "rejected"}
+VALID_TYPES = {"title", "location", "required", "preferred", "rejected", "search_query"}
 
 
 def get_all() -> list[dict]:
@@ -24,11 +24,12 @@ def get_active(type_: str) -> list[str]:
 
 def get_active_dict() -> dict:
     return {
-        "titles":    get_active("title"),
-        "locations": get_active("location"),
-        "required":  get_active("required"),
-        "preferred": get_active("preferred"),
-        "rejected":  get_active("rejected"),
+        "search_queries": get_active("search_query"),
+        "titles":         get_active("title"),
+        "locations":      get_active("location"),
+        "required":       get_active("required"),
+        "preferred":      get_active("preferred"),
+        "rejected":       get_active("rejected"),
     }
 
 

@@ -26,16 +26,17 @@ def run(
     if locations:
         criteria["locations"] = locations
 
-    if not criteria["titles"] or not criteria["locations"]:
-        raise ValueError("At least one title and one location must be configured before running the collector.")
+    search_queries = criteria["search_queries"] or criteria["titles"]
+    if not search_queries or not criteria["locations"]:
+        raise ValueError("At least one search query (or job title) and one location must be configured before running the collector.")
 
     session_id = session_repository.start()
     jobs_found = 0
     jobs_new = 0
 
     log(f"Collector starting — last {days_back} day(s), limit: {max_jobs or 'unlimited'}")
-    log(f"Titles:    {', '.join(criteria['titles'])}")
-    log(f"Locations: {', '.join(criteria['locations'])}")
+    log(f"Search queries: {', '.join(search_queries)}")
+    log(f"Locations:      {', '.join(criteria['locations'])}")
     log("=" * 50)
 
     try:
@@ -44,7 +45,7 @@ def run(
 
             new_job_ids: list[tuple[str, str]] = []  # (job_id, url)
 
-            for title in criteria["titles"]:
+            for title in search_queries:
                 if max_jobs and jobs_new >= max_jobs:
                     break
                 for location in criteria["locations"]:

@@ -10,6 +10,7 @@ from db.migrations import init_db
 from web.routes import jobs, criteria, runner, cv
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
+app.config["TEMPLATES_AUTO_RELOAD"] = True
 
 app.register_blueprint(jobs.bp)
 app.register_blueprint(criteria.bp)

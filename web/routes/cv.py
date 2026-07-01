@@ -6,7 +6,7 @@ import anthropic
 from flask import Blueprint, jsonify, request
 
 from config import ANTHROPIC_API_KEY, CLAUDE_MODEL
-from db.repositories import cv_repository
+from db.repositories import cv_repository, criteria_repository
 
 bp = Blueprint("cv", __name__)
 
@@ -69,3 +69,85 @@ def upload_cv():
 def activate_profile(id):
     cv_repository.set_active(id)
     return jsonify({"ok": True})
+
+
+_SUGGEST_PROMPT = """Based on this candidate profile, suggest LinkedIn job search criteria.
+Respond ONLY with JSON, no other text:
+{{
+    "search_queries": ["1-3 broad search terms used as LinkedIn search queries — wide enough to catch relevant jobs, narrow enough to avoid noise"],
+    "titles": ["5-8 specific job titles used for scoring fit — what the candidate actually wants"],
+    "locations": ["2-4 locations or regions to search in"],
+    "required": ["3-6 must-have keywords — core technologies the candidate knows well and won't compromise on"],
+    "preferred": ["4-8 nice-to-have keywords — technologies, methodologies, or traits the candidate likes but aren't dealbreakers"]
+}}
+
+Rules:
+- search_queries: broad LinkedIn search terms, e.g. "PHP developer", "Backend developer", "Software Engineer". These are used to query LinkedIn, NOT for scoring. 1-3 terms max.
+- titles: specific job titles for scoring fit (e.g. "Senior PHP Developer", "Symfony Engineer"). These are NOT used as search queries.
+- For remote-friendly candidates, include "Remote" as a location; for on-site/hybrid use their city and country
+- Required: pick the candidate's strongest, most central technologies (language, main framework)
+- Preferred: pick secondary tools, methodologies (e.g. Docker, CI/CD, microservices, Agile), or domain keywords
+
+Candidate profile:
+{profile}"""
+
+
+def _suggest_with_claude(parsed: dict) -> dict:
+    profile_lines = [
+        f"Seniority: {parsed.get('seniority', 'not specified')}",
+        f"Years of experience: {parsed.get('years_experience', 'not specified')}",
+        f"Stack: {', '.join(parsed.get('stack') or []) or 'not specified'}",
+        f"Location: {parsed.get('location', 'not specified')}",
+        f"Remote preference: {parsed.get('remote_preference', 'not specified')}",
+    ]
+    summary = (parsed.get("raw_summary") or "").strip()
+    if summary:
+        profile_lines.append(f"Summary: {summary}")
+    profile_text = "\n".join(profile_lines)
+
+    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    response = client.messages.create(
+        model=CLAUDE_MODEL,
+        max_tokens=400,
+        messages=[{"role": "user", "content": _SUGGEST_PROMPT.format(profile=profile_text)}],
+    )
+    raw = response.content[0].text.strip()
+    raw = raw.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+    return json.loads(raw)
+
+
+@bp.post("/api/cv/<int:id>/suggest-criteria")
+def suggest_criteria(id):
+    profile = cv_repository.get_active() if id == 0 else next(
+        (p for p in cv_repository.list_all() if p["id"] == id), None
+    )
+    if not profile:
+        return jsonify({"error": "CV profile not found"}), 404
+    try:
+        suggestions = _suggest_with_claude(profile["parsed"])
+    except Exception as e:
+        return jsonify({"error": f"Failed to generate suggestions: {e}"}), 500
+    return jsonify(suggestions)
+
+
+@bp.post("/api/cv/<int:id>/apply-criteria")
+def apply_criteria(id):
+    data = request.get_json(force=True)
+    search_queries = data.get("search_queries") or []
+    titles         = data.get("titles") or []
+    locations      = data.get("locations") or []
+    required       = data.get("required") or []
+    preferred      = data.get("preferred") or []
+    if not any([search_queries, titles, locations, required, preferred]):
+        return jsonify({"error": "No criteria provided"}), 400
+    for v in search_queries: criteria_repository.insert("search_query", v)
+    for v in titles:         criteria_repository.insert("title",        v)
+    for v in locations:      criteria_repository.insert("location",     v)
+    for v in required:       criteria_repository.insert("required",     v)
+    for v in preferred:      criteria_repository.insert("preferred",    v)
+    return jsonify({
+        "ok": True,
+        "added_search_queries": len(search_queries),
+        "added_titles": len(titles), "added_locations": len(locations),
+        "added_required": len(required), "added_preferred": len(preferred),
+    })

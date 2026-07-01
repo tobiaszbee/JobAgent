@@ -73,6 +73,38 @@
     <div id="cv-upload-status"></div>
   </div>
   <div id="cv-profiles"></div>
+  <div id="cv-suggestions" style="display:none">
+    <div class="cv-suggest-header">
+      <h3>Suggested search criteria</h3>
+      <span class="cv-suggest-hint">Select which to add to Criteria</span>
+    </div>
+    <div class="cv-suggest-cols">
+      <div class="cv-suggest-group">
+        <strong>Search Queries <span class="cv-suggest-tag">used for LinkedIn search</span></strong>
+        <div id="suggest-search-queries"></div>
+      </div>
+      <div class="cv-suggest-group">
+        <strong>Job Titles <span class="cv-suggest-tag">used for scoring</span></strong>
+        <div id="suggest-titles"></div>
+      </div>
+      <div class="cv-suggest-group">
+        <strong>Locations</strong>
+        <div id="suggest-locations"></div>
+      </div>
+      <div class="cv-suggest-group">
+        <strong>Required keywords</strong>
+        <div id="suggest-required"></div>
+      </div>
+      <div class="cv-suggest-group">
+        <strong>Preferred keywords</strong>
+        <div id="suggest-preferred"></div>
+      </div>
+    </div>
+    <div class="cv-suggest-footer">
+      <button class="btn-cv-apply" id="btn-cv-apply" onclick="applySuggestions()">Add selected to Criteria</button>
+      <button class="btn-cv-cancel" onclick="document.getElementById('cv-suggestions').style.display='none'">Cancel</button>
+    </div>
+  </div>
 </div>
 
 <!-- Run Modal -->

@@ -4,7 +4,7 @@
 # Dependencies
 .venv/
 
-# Data (DB, Chrome profile, reports, CV)
+# Data (DB, Chrome profile, reports, CV, logs)
 data/
 
 # Python cache
@@ -15,3 +15,6 @@ __pycache__/
 # IDE
 .idea/
 .vscode/
+
+# Claude Code local settings (permissions, personal config)
+.claude/settings.local.json
