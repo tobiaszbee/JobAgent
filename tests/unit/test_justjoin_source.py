@@ -1,75 +1,85 @@
-"""Unit tests for the JustJoin.it source — no HTTP calls made."""
-from datetime import datetime, timezone, timedelta
+"""Unit tests for the JustJoin.it scraper — no HTTP calls made."""
+import json
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 from collector.sources.justjoin import (
     JustJoinSource,
+    _extract_ld_json,
     _match_location,
-    _match_query,
     _strip_html,
-    _format_location,
+    _tech_slug,
 )
 
 
-# ── helper functions ───────────────────────────────────────────────────────────
-
-class TestMatchLocation:
-    def _offer(self, city="Warsaw", country="PL", remote=False, remote_interview=False):
-        return {"city": city, "country_code": country,
-                "remote": remote, "remote_interview": remote_interview}
-
-    def test_poland_matches_pl_country(self):
-        assert _match_location(self._offer(country="PL"), "Poland")
-
-    def test_poland_does_not_match_de(self):
-        assert not _match_location(self._offer(country="DE"), "Poland")
-
-    def test_city_substring_match(self):
-        assert _match_location(self._offer(city="Warsaw"), "Warsaw")
-
-    def test_city_case_insensitive(self):
-        assert _match_location(self._offer(city="Warsaw"), "warsaw")
-
-    def test_city_no_match(self):
-        assert not _match_location(self._offer(city="Kraków"), "Warsaw")
-
-    def test_remote_match_on_remote_flag(self):
-        assert _match_location(self._offer(remote=True), "Remote")
-
-    def test_remote_match_on_remote_interview_flag(self):
-        assert _match_location(self._offer(remote_interview=True), "Remote")
-
-    def test_remote_no_match_for_non_remote(self):
-        assert not _match_location(self._offer(remote=False), "Remote")
+# ── _tech_slug ─────────────────────────────────────────────────────────────────
 
 
-class TestMatchQuery:
-    def _offer(self, title="PHP Developer", skills=None):
-        return {
-            "title": title,
-            "skills": [{"name": s} for s in (skills or [])],
-        }
+class TestTechSlug:
+    def test_php(self):
+        assert _tech_slug("PHP Developer") == "php"
 
-    def test_matches_technology_in_title(self):
-        assert _match_query(self._offer("PHP Developer"), "PHP Developer")
+    def test_python(self):
+        assert _tech_slug("Senior Python Engineer") == "python"
 
-    def test_matches_technology_in_skills(self):
-        assert _match_query(self._offer("Backend Developer", skills=["PHP"]), "PHP Developer")
+    def test_javascript_via_react(self):
+        assert _tech_slug("React Frontend Developer") == "javascript"
 
-    def test_no_match_different_technology(self):
-        assert not _match_query(self._offer("Java Engineer", skills=["Java"]), "PHP Developer")
+    def test_typescript(self):
+        assert _tech_slug("TypeScript Developer") == "javascript"
 
-    def test_generic_words_excluded(self):
-        # "Senior Developer" → filtered to empty → falls back to exact title check
-        offer = self._offer("Java Developer")
-        # "Senior Developer" has no tech keyword, falls back — should not match Java title
-        assert not _match_query(offer, "Senior Developer")
+    def test_csharp(self):
+        assert _tech_slug("C# .NET Developer") == "net"
 
-    def test_multi_word_any_match(self):
-        assert _match_query(self._offer("PHP Symfony Engineer"), "Symfony Backend")
+    def test_golang(self):
+        assert _tech_slug("Golang Backend") == "go"
 
     def test_case_insensitive(self):
-        assert _match_query(self._offer("php developer"), "PHP")
+        assert _tech_slug("php developer") == "php"
+
+    def test_fallback_to_all_locations(self):
+        assert _tech_slug("Software Engineer") == "all-locations"
+
+    def test_devops(self):
+        assert _tech_slug("DevOps Engineer") == "devops"
+
+
+# ── _match_location ────────────────────────────────────────────────────────────
+
+
+class TestMatchLocation:
+    def test_poland_matches_when_city_present(self):
+        assert _match_location("Warsaw", "Poland", False, "Poland")
+
+    def test_poland_matches_by_country_name(self):
+        assert _match_location("Wrocław", "Poland", False, "Poland")
+
+    def test_poland_no_match_wrong_country_and_empty_city(self):
+        assert not _match_location("", "Germany", False, "Poland")
+
+    def test_city_substring_match(self):
+        assert _match_location("Warsaw", "Poland", False, "Warsaw")
+
+    def test_city_case_insensitive(self):
+        assert _match_location("Warsaw", "Poland", False, "warsaw")
+
+    def test_city_no_match_different_city(self):
+        assert not _match_location("Kraków", "Poland", False, "Warsaw")
+
+    def test_remote_matches_when_remote_flag_set(self):
+        assert _match_location("Warsaw", "Poland", True, "Remote")
+
+    def test_remote_no_match_for_non_remote_offer(self):
+        assert not _match_location("Warsaw", "Poland", False, "Remote")
+
+    def test_zdalne_matches_remote_flag(self):
+        assert _match_location("", "Poland", True, "zdalne")
+
+    def test_city_in_country_bucket(self):
+        assert _match_location("Kraków", "Poland", False, "Kraków")
+
+
+# ── _strip_html ────────────────────────────────────────────────────────────────
 
 
 class TestStripHtml:
@@ -96,152 +106,188 @@ class TestStripHtml:
         assert _strip_html("no tags here") == "no tags here"
 
 
-class TestFormatLocation:
-    def test_city_only(self):
-        offer = {"city": "Warsaw", "remote": False, "remote_interview": False}
-        assert _format_location(offer, "Poland") == "Warsaw"
-
-    def test_remote_only(self):
-        offer = {"city": "", "remote": True, "remote_interview": False}
-        assert _format_location(offer, "Poland") == "Remote"
-
-    def test_city_and_remote(self):
-        offer = {"city": "Kraków", "remote": True, "remote_interview": False}
-        assert _format_location(offer, "Poland") == "Kraków / Remote"
-
-    def test_fallback_when_no_city(self):
-        offer = {"city": "", "remote": False, "remote_interview": False}
-        assert _format_location(offer, "Poland") == "Poland"
+# ── _extract_ld_json ───────────────────────────────────────────────────────────
 
 
-# ── JustJoinSource.search() with mocked HTTP ─────────────────────────────────
+def _ld_script(data: dict) -> str:
+    return f'<script type="application/ld+json">{json.dumps(data)}</script>'
 
-def _make_offer(
-    offer_id="acme-php-dev-warsaw",
-    title="PHP Developer",
-    company="Acme",
-    city="Warsaw",
-    country="PL",
-    remote=False,
-    skills=None,
-    body=None,
-    days_ago=0,
-):
-    pub = (datetime.now(timezone.utc) - timedelta(days=days_ago)).isoformat()
-    return {
-        "id": offer_id,
+
+class TestExtractLdJson:
+    def test_finds_matching_type(self):
+        html = _ld_script({"@type": "JobPosting", "title": "Dev"})
+        d = _extract_ld_json(html, "JobPosting")
+        assert d is not None
+        assert d["title"] == "Dev"
+
+    def test_returns_none_for_wrong_type(self):
+        html = _ld_script({"@type": "CollectionPage"})
+        assert _extract_ld_json(html, "JobPosting") is None
+
+    def test_finds_second_script_of_matching_type(self):
+        html = (
+            _ld_script({"@type": "WebPage"})
+            + _ld_script({"@type": "JobPosting", "title": "Dev"})
+        )
+        d = _extract_ld_json(html, "JobPosting")
+        assert d is not None
+
+    def test_returns_none_on_invalid_json(self):
+        html = '<script type="application/ld+json">{broken json}</script>'
+        assert _extract_ld_json(html, "JobPosting") is None
+
+    def test_returns_none_when_no_script_present(self):
+        assert _extract_ld_json("<html><body></body></html>", "JobPosting") is None
+
+
+# ── JustJoinSource.search() ────────────────────────────────────────────────────
+
+
+def _make_posting(
+    slug: str = "acme-php-dev-warsaw",
+    title: str = "PHP Developer",
+    company: str = "Acme",
+    city: str = "Warsaw",
+    country: str = "Poland",
+    is_remote: bool = False,
+    days_ago: int = 0,
+    description_html: str = "<p>Great job</p>",
+) -> tuple[str, dict]:
+    date_str = (datetime.now(timezone.utc) - timedelta(days=days_ago)).isoformat()
+    posting: dict = {
+        "@type": "JobPosting",
         "title": title,
-        "company_name": company,
-        "city": city,
-        "country_code": country,
-        "remote": remote,
-        "remote_interview": False,
-        "published_at": pub,
-        "skills": [{"name": s} for s in (skills or ["PHP"])],
-        "body": body or "",
+        "datePosted": date_str,
+        "description": description_html,
+        "hiringOrganization": {"@type": "Organization", "name": company},
+        "jobLocation": {
+            "@type": "Place",
+            "address": {
+                "@type": "PostalAddress",
+                "addressLocality": city,
+                "addressCountry": "PL",
+            },
+        },
+        "applicantLocationRequirements": {"@type": "Country", "name": country},
     }
+    if is_remote:
+        posting["jobLocationType"] = "TELECOMMUTE"
+    return slug, posting
 
 
-def _mock_client(offers: list[dict], detail_bodies: dict[str, str] | None = None):
-    """Return a mock httpx.Client that serves offers list and optional detail bodies."""
-    detail_bodies = detail_bodies or {}
-
-    def _get(url, **_):
-        resp = MagicMock()
-        resp.raise_for_status = MagicMock()
-        if url.endswith("/offers"):
-            resp.json.return_value = offers
-        elif "/offers/" in url:
-            offer_id = url.split("/offers/")[-1]
-            resp.json.return_value = {"body": detail_bodies.get(offer_id, "")}
-        return resp
-
-    client = MagicMock()
-    client.get.side_effect = _get
-    return client
+def _build_source(slugs_and_postings: list[tuple[str, dict]], days_back: int = 7) -> JustJoinSource:
+    """Return a JustJoinSource with HTTP methods replaced by MagicMocks."""
+    src = JustJoinSource(days_back=days_back)
+    src._client = MagicMock()
+    postings = {
+        f"https://justjoin.it/job-offer/{slug}": p
+        for slug, p in slugs_and_postings
+    }
+    src._get_listing_urls = MagicMock(return_value=list(postings.keys()))
+    src._get_job_posting = MagicMock(side_effect=lambda u: postings.get(u))
+    return src
 
 
 class TestJustJoinSourceSearch:
-    def _source(self, offers, detail_bodies=None, days_back=7):
-        src = JustJoinSource(days_back=days_back)
-        src._client = _mock_client(offers, detail_bodies)
-        src._cache = None
-        return src
-
     def test_returns_matching_offer(self):
-        offer = _make_offer()
-        src = self._source([offer])
+        src = _build_source([_make_posting()])
         results = src.search("PHP Developer", "Poland")
         assert len(results) == 1
         assert results[0].title == "PHP Developer"
         assert results[0].source == "justjoin"
 
+    def test_source_id_is_slug(self):
+        src = _build_source([_make_posting(slug="my-company-dev-warsaw")])
+        results = src.search("PHP Developer", "Poland")
+        assert results[0].source_id == "my-company-dev-warsaw"
+
+    def test_url_contains_job_offer_path(self):
+        src = _build_source([_make_posting(slug="acme-php-dev-warsaw")])
+        results = src.search("PHP Developer", "Poland")
+        assert results[0].url == "https://justjoin.it/job-offer/acme-php-dev-warsaw"
+
     def test_filters_by_location(self):
-        pl_offer = _make_offer(offer_id="pl-job", city="Warsaw", country="PL")
-        de_offer = _make_offer(offer_id="de-job", city="Berlin", country="DE")
-        src = self._source([pl_offer, de_offer])
+        pl = _make_posting(slug="pl-job", city="Warsaw", country="Poland")
+        de = _make_posting(slug="de-job", city="Berlin", country="Germany")
+        src = _build_source([pl, de])
         results = src.search("PHP Developer", "Poland")
         assert len(results) == 1
         assert results[0].source_id == "pl-job"
 
     def test_filters_by_days_back(self):
-        recent = _make_offer(offer_id="recent", days_ago=1)
-        old    = _make_offer(offer_id="old",    days_ago=10)
-        src = self._source([recent, old], days_back=7)
+        recent = _make_posting(slug="recent", days_ago=1)
+        old = _make_posting(slug="old", days_ago=10)
+        src = _build_source([recent, old], days_back=7)
         results = src.search("PHP Developer", "Poland")
         assert len(results) == 1
         assert results[0].source_id == "recent"
 
     def test_skips_known_urls(self):
-        offer = _make_offer()
+        src = _build_source([_make_posting(slug="acme-php-dev-warsaw")])
         known = {"https://justjoin.it/job-offer/acme-php-dev-warsaw"}
-        src = self._source([offer])
         results = src.search("PHP Developer", "Poland", known_urls=known)
         assert results == []
 
     def test_respects_max_results(self):
-        offers = [_make_offer(offer_id=f"job-{i}", title="PHP Developer") for i in range(10)]
-        src = self._source(offers)
+        postings = [_make_posting(slug=f"job-{i}") for i in range(10)]
+        src = _build_source(postings)
         results = src.search("PHP Developer", "Poland", max_results=3)
         assert len(results) == 3
 
-    def test_uses_body_from_list_when_present(self):
-        offer = _make_offer(body="<p>Great job</p>")
-        src = self._source([offer])
+    def test_description_stripped_from_html(self):
+        src = _build_source([_make_posting(description_html="<p>Great job</p>")])
         results = src.search("PHP Developer", "Poland")
         assert results[0].description == "Great job"
 
-    def test_fetches_detail_when_body_absent(self):
-        offer = _make_offer(body="")
-        src = self._source([offer], detail_bodies={"acme-php-dev-warsaw": "<p>Detail desc</p>"})
-        with patch("collector.sources.justjoin.time.sleep"):  # skip courtesy delay
-            results = src.search("PHP Developer", "Poland")
-        assert results[0].description == "Detail desc"
-
-    def test_description_none_when_no_body_anywhere(self):
-        offer = _make_offer(body="")
-        src = self._source([offer], detail_bodies={})
-        with patch("collector.sources.justjoin.time.sleep"):
-            results = src.search("PHP Developer", "Poland")
+    def test_description_none_when_html_empty(self):
+        src = _build_source([_make_posting(description_html="")])
+        results = src.search("PHP Developer", "Poland")
         assert results[0].description is None
 
-    def test_url_format(self):
-        offer = _make_offer(offer_id="acme-php-dev-warsaw")
-        src = self._source([offer])
-        results = src.search("PHP Developer", "Poland")
-        assert results[0].url == "https://justjoin.it/job-offer/acme-php-dev-warsaw"
-
-    def test_offers_cached_across_searches(self):
-        # body present → no detail fetch; both searches share one list call
-        offer = _make_offer(body="<p>desc</p>")
-        src = self._source([offer])
-        src.search("PHP Developer", "Poland")
-        src.search("PHP Developer", "Remote")
-        assert src._client.get.call_count == 1  # list fetched only once
-
-    def test_remote_location(self):
-        offer = _make_offer(city="Warsaw", remote=True)
-        src = self._source([offer])
+    def test_remote_offer_matches_remote_location(self):
+        src = _build_source([_make_posting(city="Warsaw", is_remote=True)])
         results = src.search("PHP Developer", "Remote")
         assert len(results) == 1
-        assert "Remote" in results[0].location
+
+    def test_non_remote_offer_does_not_match_remote_location(self):
+        src = _build_source([_make_posting(city="Warsaw", is_remote=False)])
+        results = src.search("PHP Developer", "Remote")
+        assert results == []
+
+    def test_remote_location_string_city_slash_remote(self):
+        src = _build_source([_make_posting(city="Kraków", is_remote=True)])
+        results = src.search("PHP Developer", "Remote")
+        assert results[0].location == "Kraków / Remote"
+
+    def test_remote_only_no_city(self):
+        src = _build_source([_make_posting(city="", is_remote=True)])
+        results = src.search("PHP Developer", "Remote")
+        assert results[0].location == "Remote"
+
+    def test_company_extracted_from_hiring_org(self):
+        src = _build_source([_make_posting(company="SuperCorp")])
+        results = src.search("PHP Developer", "Poland")
+        assert results[0].company == "SuperCorp"
+
+    def test_uses_php_tech_slug_for_php_query(self):
+        src = _build_source([_make_posting()])
+        src.search("PHP Developer", "Poland")
+        src._get_listing_urls.assert_called_once_with("php")
+
+    def test_uses_all_locations_slug_for_generic_query(self):
+        src = _build_source([_make_posting()])
+        src.search("Software Engineer", "Poland")
+        src._get_listing_urls.assert_called_once_with("all-locations")
+
+    def test_empty_listing_returns_empty(self):
+        src = _build_source([])
+        results = src.search("PHP Developer", "Poland")
+        assert results == []
+
+    def test_posting_fetch_failure_skips_offer(self):
+        src = _build_source([_make_posting(slug="good"), _make_posting(slug="bad")])
+        src._get_job_posting = MagicMock(
+            side_effect=lambda u: None if "bad" in u else _make_posting()[1]
+        )
+        results = src.search("PHP Developer", "Poland")
+        assert len(results) == 1

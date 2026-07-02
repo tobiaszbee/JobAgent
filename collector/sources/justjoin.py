@@ -1,3 +1,14 @@
+"""
+JustJoin.it scraper.
+
+Data strategy:
+  - Listing page (/job-offers/all-locations/{tech}) — JSON-LD CollectionPage
+    with one entry per offer (URL only).  Fetched once per search() call.
+  - Detail page (/job-offer/{slug}) — JSON-LD JobPosting with title, company,
+    location, datePosted, and full description.  Fetched only for unknown URLs.
+"""
+
+import json
 import re
 import time
 import httpx
@@ -7,11 +18,34 @@ from html.parser import HTMLParser
 from collector.base import JobSource, RawJob
 
 _BASE = "https://justjoin.it"
-_API  = "https://justjoin.it/api"
 
-_GENERIC_WORDS = {
-    "developer", "engineer", "senior", "junior", "mid", "lead",
-    "staff", "principal", "manager", "specialist", "architect",
+# Maps query keywords → JustJoin category slug
+_TECH_MAP: dict[str, str] = {
+    "php": "php",
+    "python": "python",
+    "javascript": "javascript", "js": "javascript",
+    "typescript": "javascript", "ts": "javascript",
+    "react": "javascript", "vue": "javascript",
+    "angular": "javascript", "node": "javascript",
+    "java": "java",
+    "ruby": "ruby",
+    "scala": "scala",
+    ".net": "net", "c#": "net", "csharp": "net",
+    "go": "go", "golang": "go",
+    "rust": "rust",
+    "kotlin": "kotlin",
+    "swift": "swift",
+    "c++": "c", "cpp": "c",
+    "backend": "backend",
+    "frontend": "frontend",
+    "fullstack": "fullstack",
+    "devops": "devops",
+    "data": "data", "analytics": "data",
+    "ai": "ai", "machine learning": "ai", "ml": "ai",
+    "mobile": "mobile", "android": "mobile", "ios": "mobile",
+    "testing": "testing", "qa": "testing",
+    "security": "security",
+    "ux": "ux",
 }
 
 
@@ -39,47 +73,39 @@ def _strip_html(html: str) -> str:
     return ex.get_text()
 
 
-def _match_location(offer: dict, location: str) -> bool:
+def _tech_slug(query: str) -> str:
+    q = query.lower()
+    for keyword, slug in _TECH_MAP.items():
+        if keyword in q:
+            return slug
+    return "all-locations"
+
+
+def _match_location(city: str, country: str, is_remote: bool, location: str) -> bool:
     loc = location.lower().strip()
     if loc in ("remote", "zdalne", "zdalnie", "zdalny"):
-        return bool(offer.get("remote_interview") or offer.get("remote"))
-    city = (offer.get("city") or "").lower()
-    country = (offer.get("country_code") or "").lower()
+        return is_remote
     if loc in ("poland", "polska", "pl"):
-        return country == "pl"
-    # simple substring match in both directions handles diacritics mismatch
-    return loc in city or city in loc
+        return country.lower() in ("poland", "pl", "polska")
+    city_l = city.lower()
+    return loc in city_l or city_l in loc
 
 
-def _match_query(offer: dict, query: str) -> bool:
-    offer_title = (offer.get("title") or "").lower()
-    skills_text = " ".join(s.get("name", "").lower() for s in (offer.get("skills") or []))
-    target = f"{offer_title} {skills_text}"
-
-    keywords = [
-        w.lower() for w in re.split(r"\W+", query)
-        if len(w) >= 3 and w.lower() not in _GENERIC_WORDS
-    ]
-    if not keywords:
-        return query.lower() in offer_title
-    return any(kw in target for kw in keywords)
-
-
-def _format_location(offer: dict, fallback: str) -> str:
-    city = offer.get("city") or offer.get("company_city") or ""
-    remote = bool(offer.get("remote_interview") or offer.get("remote"))
-    if city and remote:
-        return f"{city} / Remote"
-    if remote:
-        return "Remote"
-    return city or fallback
+def _extract_ld_json(html: str, target_type: str) -> dict | None:
+    for match in re.finditer(r'<script[^>]+type="application/ld\+json"[^>]*>(.*?)</script>', html, re.DOTALL):
+        try:
+            d = json.loads(match.group(1))
+            if d.get("@type") == target_type:
+                return d
+        except (json.JSONDecodeError, AttributeError):
+            pass
+    return None
 
 
 class JustJoinSource(JobSource):
     def __init__(self, days_back: int = 7, **_):
         self._days_back = days_back
         self._client: httpx.Client | None = None
-        self._cache: list[dict] | None = None
 
     @property
     def name(self) -> str:
@@ -87,7 +113,7 @@ class JustJoinSource(JobSource):
 
     def __enter__(self):
         self._client = httpx.Client(
-            headers={"User-Agent": "Mozilla/5.0 (compatible; JobAgent/1.0)"},
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36"},
             timeout=30,
             follow_redirects=True,
         )
@@ -97,26 +123,26 @@ class JustJoinSource(JobSource):
         if self._client:
             self._client.close()
         self._client = None
-        self._cache = None
 
     def login(self) -> None:
         pass
 
-    def _all_offers(self) -> list[dict]:
-        if self._cache is None:
-            resp = self._client.get(f"{_API}/offers")
-            resp.raise_for_status()
-            self._cache = resp.json()
-        return self._cache
+    def _get_listing_urls(self, tech_slug: str) -> list[str]:
+        url = f"{_BASE}/job-offers/all-locations" + (f"/{tech_slug}" if tech_slug != "all-locations" else "")
+        resp = self._client.get(url)
+        if resp.status_code != 200:
+            return []
+        data = _extract_ld_json(resp.text, "CollectionPage")
+        if data:
+            return [item["url"] for item in data.get("hasPart", []) if "url" in item]
+        return []
 
-    def _fetch_body(self, offer_id: str) -> str | None:
-        try:
-            resp = self._client.get(f"{_API}/offers/{offer_id}")
-            resp.raise_for_status()
-            html = resp.json().get("body") or ""
-            return _strip_html(html) if html else None
-        except Exception:
+    def _get_job_posting(self, url: str) -> dict | None:
+        time.sleep(0.2)
+        resp = self._client.get(url)
+        if resp.status_code != 200:
             return None
+        return _extract_ld_json(resp.text, "JobPosting")
 
     def search(
         self,
@@ -129,46 +155,58 @@ class JustJoinSource(JobSource):
         days = days_back if days_back is not None else self._days_back
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
-        results: list[RawJob] = []
+        slug = _tech_slug(title)
+        urls = self._get_listing_urls(slug)
 
-        for offer in self._all_offers():
-            pub = offer.get("published_at")
-            if pub:
+        results: list[RawJob] = []
+        for url in urls:
+            if max_results and len(results) >= max_results:
+                break
+            if known_urls is not None and url in known_urls:
+                continue
+
+            posting = self._get_job_posting(url)
+            if not posting:
+                continue
+
+            # Date filter
+            date_str = posting.get("datePosted", "")
+            if date_str:
                 try:
-                    dt = datetime.fromisoformat(pub.replace("Z", "+00:00"))
+                    dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
                     if dt < cutoff:
                         continue
                 except ValueError:
                     pass
 
-            if not _match_location(offer, location):
+            # Location
+            addr = posting.get("jobLocation", {}).get("address", {})
+            city = addr.get("addressLocality", "")
+            country_req = posting.get("applicantLocationRequirements") or {}
+            if isinstance(country_req, list):
+                country_req = country_req[0] if country_req else {}
+            country = country_req.get("name", "")
+            is_remote = posting.get("jobLocationType", "").upper() == "TELECOMMUTE"
+
+            if not _match_location(city, country, is_remote, location):
                 continue
-            if not _match_query(offer, title):
-                continue
 
-            offer_id = offer.get("id", "")
-            url = f"{_BASE}/job-offer/{offer_id}"
+            if city and is_remote:
+                loc_str = f"{city} / Remote"
+            elif is_remote:
+                loc_str = "Remote"
+            else:
+                loc_str = city or location
 
-            if known_urls is not None and url in known_urls:
-                continue
-
-            # Description: use `body` from list if present, else fetch detail
-            body = offer.get("body") or ""
-            if not body:
-                body = self._fetch_body(offer_id) or ""
-                time.sleep(0.3)  # courtesy delay for detail fetches
-
+            desc_html = posting.get("description", "")
             results.append(RawJob(
-                title=offer["title"],
-                company=offer.get("company_name", ""),
-                location=_format_location(offer, location),
+                title=posting.get("title", ""),
+                company=(posting.get("hiringOrganization") or {}).get("name", ""),
+                location=loc_str,
                 url=url,
                 source="justjoin",
-                source_id=offer_id,
-                description=_strip_html(body) if body else None,
+                source_id=url.split("/job-offer/")[-1],
+                description=_strip_html(desc_html) if desc_html else None,
             ))
-
-            if max_results and len(results) >= max_results:
-                break
 
         return results
