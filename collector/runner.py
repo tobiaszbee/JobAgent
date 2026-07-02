@@ -11,6 +11,7 @@ from config import STEALTH
 from db.migrations import init_db
 from db.repositories import job_repository, session_repository, criteria_repository
 from collector.filters import apply_filters
+from collector.sources import available as available_sources, make as make_source
 from collector.sources.linkedin import LinkedInSource
 
 
@@ -80,6 +81,7 @@ def run(
     titles: list[str] | None = None,
     locations: list[str] | None = None,
     search_queries_override: list[str] | None = None,
+    source_ids: list[str] | None = None,
     log=print,
 ) -> dict:
     init_db()
@@ -96,73 +98,82 @@ def run(
     if not search_queries or not criteria["locations"]:
         raise ValueError("At least one search query (or job title) and one location must be configured before running the collector.")
 
+    selected_sources = source_ids or [s["id"] for s in available_sources()]
+
     session_id = session_repository.start()
     jobs_found = 0
     jobs_new = 0
 
     log(f"Collector starting — last {days_back} day(s), limit: {max_jobs or 'unlimited'}")
+    log(f"Sources:        {', '.join(selected_sources)}")
     log(f"Search queries: {', '.join(search_queries)}")
     log(f"Locations:      {', '.join(criteria['locations'])}")
     log("=" * 50)
 
     try:
-        # ── Phase 1: collect job cards (no description fetching) ──────────────
+        # ── Phase 1: collect job cards ────────────────────────────────────────
+        # Jobs whose source returns no description go here for Phase 2 fetching.
         new_job_ids: list[tuple[str, str]] = []
         known_urls = job_repository.get_all_urls()
         log(f"Loaded {len(known_urls)} known URLs for early-stop deduplication.")
 
-        with LinkedInSource(days_back=days_back) as source:
-            source.login()
+        for source_id in selected_sources:
+            log(f"\n[{source_id}] Starting source...")
+            source = make_source(source_id, days_back=days_back)
 
-            first_search = True
-            for title in search_queries:
-                if max_jobs and jobs_new >= max_jobs:
-                    break
-                for location in criteria["locations"]:
+            with source:
+                source.login()
+
+                first_search = True
+                for title in search_queries:
                     if max_jobs and jobs_new >= max_jobs:
                         break
-
-                    # Pause before each search except the first to avoid rate-limiting
-                    if not first_search:
-                        pause = random.uniform(
-                            STEALTH["search_pause_min"],
-                            STEALTH["search_pause_max"],
-                        )
-                        log(f"  [stealth] Pausing {pause:.0f}s before next search...")
-                        time.sleep(pause)
-                    first_search = False
-
-                    log(f"\nSearching: {title!r} in {location!r}")
-                    remaining = (max_jobs - jobs_new) if max_jobs else None
-                    raw_jobs = source.search(title, location, max_results=remaining, known_urls=known_urls)
-                    jobs_found += len(raw_jobs)
-
-                    filtered = apply_filters(raw_jobs, criteria["rejected"])
-                    skipped = len(raw_jobs) - len(filtered)
-                    if skipped:
-                        log(f"  Filtered out {skipped} job(s) by keyword")
-
-                    for raw in filtered:
+                    for location in criteria["locations"]:
                         if max_jobs and jobs_new >= max_jobs:
                             break
-                        job_id = job_repository.insert(
-                            title=raw.title,
-                            company=raw.company,
-                            location=raw.location,
-                            url=raw.url,
-                            source=raw.source,
-                            source_id=raw.source_id,
-                        )
-                        if job_id is None:
-                            log(f"  Skip (duplicate): {raw.title} @ {raw.company}")
-                            continue
 
-                        jobs_new += 1
-                        new_job_ids.append((job_id, raw.url))
-                        known_urls.add(raw.url)
-                        log(f"  [{jobs_new}{'/' + str(max_jobs) if max_jobs else ''}] {raw.title} @ {raw.company}")
+                        if not first_search:
+                            pause = random.uniform(
+                                STEALTH["search_pause_min"],
+                                STEALTH["search_pause_max"],
+                            )
+                            log(f"  [stealth] Pausing {pause:.0f}s before next search...")
+                            time.sleep(pause)
+                        first_search = False
 
-        # Browser closed here — short cooldown before opening again for descriptions
+                        log(f"\nSearching: {title!r} in {location!r}")
+                        remaining = (max_jobs - jobs_new) if max_jobs else None
+                        raw_jobs = source.search(title, location, max_results=remaining, known_urls=known_urls)
+                        jobs_found += len(raw_jobs)
+
+                        filtered = apply_filters(raw_jobs, criteria["rejected"])
+                        skipped = len(raw_jobs) - len(filtered)
+                        if skipped:
+                            log(f"  Filtered out {skipped} job(s) by keyword")
+
+                        for raw in filtered:
+                            if max_jobs and jobs_new >= max_jobs:
+                                break
+                            job_id = job_repository.insert(
+                                title=raw.title,
+                                company=raw.company,
+                                location=raw.location,
+                                url=raw.url,
+                                source=raw.source,
+                                source_id=raw.source_id,
+                                description=raw.description,
+                            )
+                            if job_id is None:
+                                log(f"  Skip (duplicate): {raw.title} @ {raw.company}")
+                                continue
+
+                            jobs_new += 1
+                            known_urls.add(raw.url)
+                            if not raw.description:
+                                new_job_ids.append((job_id, raw.url))
+                            log(f"  [{jobs_new}{'/' + str(max_jobs) if max_jobs else ''}] {raw.title} @ {raw.company}")
+
+        # ── Phase 2: fetch descriptions for jobs that need it (browser sources) ─
         if new_job_ids:
             cooldown = random.uniform(30, 90)
             log(f"\n[stealth] Cooldown {cooldown:.0f}s before fetching descriptions...")
@@ -187,12 +198,13 @@ if __name__ == "__main__":
 
     sys.stdout.reconfigure(line_buffering=True)
 
-    parser = argparse.ArgumentParser(description="Collect job listings from LinkedIn")
+    parser = argparse.ArgumentParser(description="Collect job listings")
     parser.add_argument("--days",           type=int,  default=7,    help="Days back to search (default: 7)")
     parser.add_argument("--max-jobs",       type=int,  default=None, help="Max new jobs to collect (default: unlimited)")
     parser.add_argument("--titles",         nargs="*", default=None, help="Override job titles (scoring only)")
     parser.add_argument("--locations",      nargs="*", default=None, help="Override search locations")
-    parser.add_argument("--search-queries", nargs="*", default=None, help="Override LinkedIn search queries")
+    parser.add_argument("--search-queries", nargs="*", default=None, help="Override search queries")
+    parser.add_argument("--sources",        nargs="*", default=None, help="Sources to use (default: all)")
     args = parser.parse_args()
 
     run(
@@ -201,4 +213,5 @@ if __name__ == "__main__":
         titles=args.titles,
         locations=args.locations,
         search_queries_override=args.search_queries,
+        source_ids=args.sources,
     )

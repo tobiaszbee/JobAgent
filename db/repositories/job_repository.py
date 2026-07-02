@@ -157,6 +157,7 @@ def search(
     status: str | None = None,
     min_score: float | None = None,
     query: str | None = None,
+    source: str | None = None,
 ) -> list[dict]:
     conn = get_connection()
     sql = "SELECT * FROM jobs WHERE 1=1"
@@ -173,6 +174,10 @@ def search(
     if query:
         sql += " AND (title LIKE ? OR company LIKE ? OR location LIKE ?)"
         params += [f"%{query}%"] * 3
+
+    if source:
+        sql += " AND source = ?"
+        params.append(source)
 
     sql += " ORDER BY score DESC NULLS LAST, created_at DESC"
     rows = conn.execute(sql, params).fetchall()

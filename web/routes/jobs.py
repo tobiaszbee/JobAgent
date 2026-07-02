@@ -9,7 +9,8 @@ def list_jobs():
     status    = request.args.get("status", "all")
     min_score = request.args.get("min_score", type=float)
     query     = request.args.get("search", "").strip() or None
-    return jsonify(job_repository.search(status=status, min_score=min_score, query=query))
+    source    = request.args.get("source", "").strip() or None
+    return jsonify(job_repository.search(status=status, min_score=min_score, query=query, source=source))
 
 
 @bp.post("/api/jobs/<job_id>/status")

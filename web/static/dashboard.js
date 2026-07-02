@@ -5,6 +5,9 @@ let showAutoRejected = false;
 let currentPage = 1;
 const JOBS_PER_PAGE = 25;
 
+let _availableSources = [];
+let _sourcesMap = {};
+
 function esc(s) {
   return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
@@ -115,12 +118,24 @@ function startBackfill() {
   };
 }
 
+async function _loadSources() {
+  const r = await fetch('/api/sources');
+  _availableSources = await r.json();
+  _sourcesMap = Object.fromEntries(_availableSources.map(s => [s.id, s.name]));
+
+  const sel = document.getElementById('source-filter');
+  while (sel.options.length > 1) sel.remove(1);
+  _availableSources.forEach(s => sel.add(new Option(s.name, s.id)));
+}
+
 async function loadJobs() {
   const search   = document.getElementById('search').value;
   const minScore = document.getElementById('min-score').value;
+  const source   = document.getElementById('source-filter').value;
   const params   = new URLSearchParams({ status: currentStatus });
   if (search)   params.set('search', search);
   if (minScore) params.set('min_score', minScore);
+  if (source)   params.set('source', source);
 
   const r = await fetch('/api/jobs?' + params);
   ALL_JOBS = await r.json();
@@ -192,14 +207,16 @@ function render() {
   const pageJobs = jobs.slice(start, start + JOBS_PER_PAGE);
 
   container.innerHTML = pageJobs.map(j => {
-    const score = j.score != null ? j.score.toFixed(1) : '—';
-    const sc    = scoreClass(j.score);
+    const score   = j.score != null ? j.score.toFixed(1) : '—';
+    const sc      = scoreClass(j.score);
+    const srcName = _sourcesMap[j.source] || j.source || '';
+    const srcBadge = srcName ? `<span class="source-badge source-${esc(j.source)}">${esc(srcName)}</span>` : '';
     return `
     <div class="job-card status-${esc(j.status)}" id="card-${esc(j.id)}">
       <div class="job-header">
         <div class="job-info">
           <a class="job-title" href="${safeUrl(j.url)}" target="_blank">${esc(j.title)}</a>
-          <div class="job-sub">${esc(j.company)} &nbsp;&middot;&nbsp; &#128205; ${esc(j.location)}</div>
+          <div class="job-sub">${esc(j.company)} &nbsp;&middot;&nbsp; &#128205; ${esc(j.location)} ${srcBadge}</div>
         </div>
         <div class="score-badge ${sc}">${score}</div>
       </div>
@@ -377,6 +394,11 @@ async function openRunModal() {
       <input type="checkbox" name="location" value="${esc(c.value)}" checked> ${esc(c.value)}
     </label>`).join('');
 
+  document.getElementById('run-sources').innerHTML = _availableSources.map(s => `
+    <label class="run-check">
+      <input type="checkbox" name="source" value="${esc(s.id)}" checked> ${esc(s.name)}
+    </label>`).join('');
+
   checkAgentStatus();
 }
 
@@ -479,9 +501,14 @@ function startAgent() {
 
   const searchQueries = [...document.querySelectorAll('input[name="search-query"]:checked')].map(el => el.value);
   const locations     = [...document.querySelectorAll('input[name="location"]:checked')].map(el => el.value);
+  const sources       = [...document.querySelectorAll('input[name="source"]:checked')].map(el => el.value);
 
   if (!searchQueries.length || !locations.length) {
     showToast('Select at least one search query and location');
+    return;
+  }
+  if (!sources.length) {
+    showToast('Select at least one source');
     return;
   }
 
@@ -499,7 +526,8 @@ function startAgent() {
       days:           parseInt(days),
       max_jobs:       maxJobs ? parseInt(maxJobs) : null,
       search_queries: searchQueries,
-      locations
+      locations,
+      sources,
     }));
   };
 
@@ -690,8 +718,9 @@ document.getElementById('search').addEventListener('input', () => {
   searchTimeout = setTimeout(loadJobs, 300);
 });
 document.getElementById('min-score').addEventListener('change', loadJobs);
+document.getElementById('source-filter').addEventListener('change', loadJobs);
 document.getElementById('sort').addEventListener('change', () => { currentPage = 1; render(); });
 
 loadStats();
-loadJobs();
+_loadSources().then(loadJobs);
 pollAgentStatus();

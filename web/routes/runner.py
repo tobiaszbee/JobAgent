@@ -89,6 +89,7 @@ def agent_ws(ws):
     max_jobs       = int(max_jobs) if max_jobs else None
     search_queries = params.get("search_queries") or []
     locations      = params.get("locations") or []
+    sources        = params.get("sources") or []
 
     collector_args = ["--days", str(days)]
     if max_jobs:
@@ -97,6 +98,8 @@ def agent_ws(ws):
         collector_args += ["--search-queries"] + search_queries
     if locations:
         collector_args += ["--locations"] + locations
+    if sources:
+        collector_args += ["--sources"] + sources
 
     with _open_log() as lf:
         header = f"=== COLLECTOR (days={days}, max_jobs={max_jobs or 'unlimited'}) ===\n"

@@ -52,6 +52,9 @@
     <option value="7">Score &ge; 7</option>
     <option value="8">Score &ge; 8</option>
   </select>
+  <select id="source-filter">
+    <option value="">All sources</option>
+  </select>
   <select id="sort">
     <option value="score">Sort by score</option>
     <option value="date">Sort by date</option>
@@ -148,6 +151,13 @@
             <button class="btn-select-all" onclick="toggleRunAll('location')">Toggle all</button>
           </div>
           <div id="run-locations" class="run-checks"></div>
+        </div>
+        <div class="run-criteria-group">
+          <div class="run-criteria-header">
+            <strong>Sources</strong>
+            <button class="btn-select-all" onclick="toggleRunAll('source')">Toggle all</button>
+          </div>
+          <div id="run-sources" class="run-checks"></div>
         </div>
       </div>
 
