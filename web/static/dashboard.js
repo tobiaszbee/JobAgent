@@ -354,6 +354,10 @@ function toggleRunAll(name) {
 }
 
 async function openRunModal() {
+  if (_agentRunning) {
+    openActivityModal();
+    return;
+  }
   document.getElementById('run-modal').style.display = 'flex';
   document.getElementById('run-log').textContent = '';
 
@@ -384,6 +388,9 @@ function closeRunModal() {
   }
 }
 
+let _agentRunning = false;
+let _activityPollTimer = null;
+
 async function checkAgentStatus() {
   const r = await fetch('/api/agent/status');
   const s = await r.json();
@@ -400,6 +407,67 @@ async function checkAgentStatus() {
     runBtn.classList.remove('running');
     runBtn.textContent = 'Run Agent';
   }
+}
+
+function _updateAgentIndicator(running) {
+  const indicator = document.getElementById('agent-indicator');
+  const runBtn    = document.getElementById('btn-run');
+  const wasRunning = _agentRunning;
+  _agentRunning = running;
+
+  indicator.style.display = running ? 'flex' : 'none';
+  runBtn.classList.toggle('running', running);
+  runBtn.textContent = running ? 'Running...' : '▶ Run Agent';
+
+  if (wasRunning && !running) {
+    loadStats();
+    loadJobs();
+  }
+}
+
+function pollAgentStatus() {
+  fetch('/api/agent/status')
+    .then(r => r.json())
+    .then(s => _updateAgentIndicator(s.running))
+    .catch(() => {})
+    .finally(() => setTimeout(pollAgentStatus, 5000));
+}
+
+function openActivityModal() {
+  document.getElementById('activity-modal').style.display = 'flex';
+  _loadActivityLogs();
+}
+
+function closeActivityModal() {
+  document.getElementById('activity-modal').style.display = 'none';
+  clearTimeout(_activityPollTimer);
+  _activityPollTimer = null;
+}
+
+function _loadActivityLogs() {
+  fetch('/api/agent/logs')
+    .then(r => r.json())
+    .then(data => {
+      const log = document.getElementById('activity-log');
+      const atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 20;
+      log.textContent = data.lines.length ? data.lines.join('\n') : 'No logs yet.';
+      if (atBottom) log.scrollTop = log.scrollHeight;
+
+      const badge = document.getElementById('activity-status-badge');
+      if (_agentRunning) {
+        badge.textContent = 'Running';
+        badge.className = 'activity-status-badge running';
+        _activityPollTimer = setTimeout(_loadActivityLogs, 2000);
+      } else {
+        badge.textContent = 'Done';
+        badge.className = 'activity-status-badge done';
+      }
+    })
+    .catch(() => {
+      if (_agentRunning) {
+        _activityPollTimer = setTimeout(_loadActivityLogs, 2000);
+      }
+    });
 }
 
 function startAgent() {
@@ -626,3 +694,4 @@ document.getElementById('sort').addEventListener('change', () => { currentPage =
 
 loadStats();
 loadJobs();
+pollAgentStatus();

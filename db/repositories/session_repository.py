@@ -24,6 +24,17 @@ def finish(session_id: int, jobs_found: int, jobs_scored: int, status: str = "do
     conn.close()
 
 
+def has_active_run() -> bool:
+    """True if a session started within the last 6 hours is still running."""
+    conn = get_connection()
+    row = conn.execute(
+        """SELECT id FROM sessions WHERE status = 'running'
+           AND started_at > datetime('now', '-6 hours')"""
+    ).fetchone()
+    conn.close()
+    return row is not None
+
+
 def get_latest() -> dict | None:
     conn = get_connection()
     row = conn.execute(

@@ -21,18 +21,22 @@ from evaluator.runner import run as evaluate
 
 
 def _make_log(log_path: str | None):
-    os.makedirs(os.path.dirname(log_path), exist_ok=True) if log_path else None
-    fh = open(log_path, "a", encoding="utf-8") if log_path else None
+    current_log = os.path.join(ROOT, "data", "logs", "current_run.log")
+    os.makedirs(os.path.join(ROOT, "data", "logs"), exist_ok=True)
+    current_fh = open(current_log, "w", encoding="utf-8")
+    user_fh = open(log_path, "a", encoding="utf-8") if log_path else None
 
     def log(msg: str = ""):
         ts = datetime.now().strftime("%H:%M:%S")
         line = f"[{ts}] {msg}" if msg.strip() else msg
         print(line)
-        if fh:
-            fh.write(line + "\n")
-            fh.flush()
+        current_fh.write(line + "\n")
+        current_fh.flush()
+        if user_fh:
+            user_fh.write(line + "\n")
+            user_fh.flush()
 
-    return log, fh
+    return log, (current_fh, user_fh)
 
 
 def main() -> int:
@@ -89,8 +93,10 @@ def main() -> int:
         return 0
 
     finally:
-        if fh:
-            fh.close()
+        current_fh, user_fh = fh
+        current_fh.close()
+        if user_fh:
+            user_fh.close()
 
 
 if __name__ == "__main__":

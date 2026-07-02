@@ -243,7 +243,7 @@ class LinkedInSource(JobSource):
             new_total += new_on_page
             print(f"  Page {page_num}: {len(cards)} cards ({new_on_page} new, total: {len(results)})")
 
-            if known_urls is not None and new_on_page == 0:
+            if known_urls is not None and new_on_page == 0 and len(cards) > 0:
                 print("  All cards on this page are known — stopping early.")
                 break
 

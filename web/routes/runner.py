@@ -9,6 +9,7 @@ bp = Blueprint("runner", __name__)
 sock = Sock()
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+LOG_FILE = os.path.join(ROOT, "data", "logs", "current_run.log")
 
 _agent_process: subprocess.Popen | None = None
 
@@ -17,14 +18,30 @@ def init_sock(app):
     sock.init_app(app)
 
 
+def _is_run_active() -> bool:
+    if _agent_process is not None and _agent_process.poll() is None:
+        return True
+    from db.repositories import session_repository
+    return session_repository.has_active_run()
+
+
 @bp.get("/api/agent/status")
 def agent_status():
-    running = _agent_process is not None and _agent_process.poll() is None
-    return {"running": running}
+    return {"running": _is_run_active()}
 
 
-def _run_script(ws, script_path: str, extra_args: list[str] = []) -> int:
-    """Run a script as a subprocess, stream output to ws. Returns exit code."""
+@bp.get("/api/agent/logs")
+def agent_logs():
+    try:
+        with open(LOG_FILE, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        return {"lines": [l.rstrip("\n") for l in lines[-200:]]}
+    except FileNotFoundError:
+        return {"lines": []}
+
+
+def _run_script(ws, script_path: str, extra_args: list[str] = [], _log_file=None) -> int:
+    """Run a script as a subprocess, stream output to ws and optionally to log file."""
     global _agent_process
     cmd = [sys.executable, "-u", script_path] + extra_args
     _agent_process = subprocess.Popen(
@@ -36,6 +53,9 @@ def _run_script(ws, script_path: str, extra_args: list[str] = []) -> int:
         cwd=ROOT,
     )
     for line in _agent_process.stdout:
+        if _log_file:
+            _log_file.write(line)
+            _log_file.flush()
         try:
             ws.send(line)
         except Exception:
@@ -45,11 +65,16 @@ def _run_script(ws, script_path: str, extra_args: list[str] = []) -> int:
     return _agent_process.returncode
 
 
+def _open_log():
+    os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
+    return open(LOG_FILE, "w", encoding="utf-8")
+
+
 @sock.route("/ws/agent")
 def agent_ws(ws):
     global _agent_process
 
-    if _agent_process is not None and _agent_process.poll() is None:
+    if _is_run_active():
         ws.send("ERROR: Agent is already running.\n")
         return
 
@@ -73,14 +98,21 @@ def agent_ws(ws):
     if locations:
         collector_args += ["--locations"] + locations
 
-    ws.send(f"=== COLLECTOR (days={days}, max_jobs={max_jobs or 'unlimited'}) ===\n")
-    rc = _run_script(ws, os.path.join(ROOT, "collector", "runner.py"), collector_args)
+    with _open_log() as lf:
+        header = f"=== COLLECTOR (days={days}, max_jobs={max_jobs or 'unlimited'}) ===\n"
+        lf.write(header)
+        ws.send(header)
+        rc = _run_script(ws, os.path.join(ROOT, "collector", "runner.py"), collector_args, _log_file=lf)
 
-    if rc != 0:
-        ws.send(f"\nCollector failed (exit code {rc}). Skipping evaluator.\n")
-    else:
-        ws.send("\n=== EVALUATOR ===\n")
-        _run_script(ws, os.path.join(ROOT, "evaluator", "runner.py"))
+        if rc != 0:
+            msg = f"\nCollector failed (exit code {rc}). Skipping evaluator.\n"
+            lf.write(msg)
+            ws.send(msg)
+        else:
+            msg = "\n=== EVALUATOR ===\n"
+            lf.write(msg)
+            ws.send(msg)
+            _run_script(ws, os.path.join(ROOT, "evaluator", "runner.py"), _log_file=lf)
 
     _agent_process = None
     try:
@@ -93,17 +125,23 @@ def agent_ws(ws):
 def backfill_ws(ws):
     global _agent_process
 
-    if _agent_process is not None and _agent_process.poll() is None:
+    if _is_run_active():
         ws.send("ERROR: Agent is already running.\n")
         return
 
     script = os.path.join(ROOT, "scripts", "backfill_descriptions.py")
-    ws.send("=== BACKFILL DESCRIPTIONS ===\n")
-    rc = _run_script(ws, script)
 
-    if rc == 0:
-        ws.send("\n=== EVALUATOR ===\n")
-        _run_script(ws, os.path.join(ROOT, "evaluator", "runner.py"))
+    with _open_log() as lf:
+        header = "=== BACKFILL DESCRIPTIONS ===\n"
+        lf.write(header)
+        ws.send(header)
+        rc = _run_script(ws, script, _log_file=lf)
+
+        if rc == 0:
+            msg = "\n=== EVALUATOR ===\n"
+            lf.write(msg)
+            ws.send(msg)
+            _run_script(ws, os.path.join(ROOT, "evaluator", "runner.py"), _log_file=lf)
 
     _agent_process = None
     try:

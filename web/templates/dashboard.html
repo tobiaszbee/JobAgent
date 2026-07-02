@@ -12,6 +12,10 @@
   <h1>Job Agent Dashboard</h1>
   <div class="header-right">
     <span id="last-updated"></span>
+    <div class="agent-indicator" id="agent-indicator" style="display:none" onclick="openActivityModal()">
+      <span class="agent-dot"></span>
+      <span>Running</span>
+    </div>
     <button class="btn-run" id="btn-run" onclick="openRunModal()">&#9654; Run Agent</button>
   </div>
 </header>
@@ -176,6 +180,22 @@
     <div class="modal-footer">
       <button class="btn-start" id="btn-backfill-start" onclick="startBackfill()">&#9654; Start</button>
       <button class="btn-cancel" onclick="closeBackfillModal()">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Activity Modal -->
+<div class="modal-overlay" id="activity-modal" style="display:none">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>Agent Activity <span class="activity-status-badge" id="activity-status-badge"></span></h2>
+      <button class="modal-close" onclick="closeActivityModal()">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <div class="run-log" id="activity-log">No logs yet.</div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-cancel" onclick="closeActivityModal()">Close</button>
     </div>
   </div>
 </div>
