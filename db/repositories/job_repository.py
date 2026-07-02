@@ -48,6 +48,14 @@ def insert(
     return job_id
 
 
+def get_all_urls() -> set[str]:
+    """Return all known job URLs as a set for fast duplicate checking."""
+    conn = get_connection()
+    rows = conn.execute("SELECT url FROM jobs").fetchall()
+    conn.close()
+    return {row["url"] for row in rows}
+
+
 def get_missing_descriptions() -> list[dict]:
     """Jobs without a description that are not yet scored — candidates for description retry."""
     conn = get_connection()

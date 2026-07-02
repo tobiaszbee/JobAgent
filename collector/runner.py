@@ -107,6 +107,8 @@ def run(
     try:
         # ── Phase 1: collect job cards (no description fetching) ──────────────
         new_job_ids: list[tuple[str, str]] = []
+        known_urls = job_repository.get_all_urls()
+        log(f"Loaded {len(known_urls)} known URLs for early-stop deduplication.")
 
         with LinkedInSource(days_back=days_back) as source:
             source.login()
@@ -131,7 +133,7 @@ def run(
 
                     log(f"\nSearching: {title!r} in {location!r}")
                     remaining = (max_jobs - jobs_new) if max_jobs else None
-                    raw_jobs = source.search(title, location, max_results=remaining)
+                    raw_jobs = source.search(title, location, max_results=remaining, known_urls=known_urls)
                     jobs_found += len(raw_jobs)
 
                     filtered = apply_filters(raw_jobs, criteria["rejected"])

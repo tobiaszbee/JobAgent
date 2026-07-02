@@ -70,7 +70,7 @@ class LinkedInSource(JobSource):
         print("Logged in.")
         self._wait()
 
-    def search(self, title: str, location: str, days_back: int | None = None, max_results: int | None = None) -> list[RawJob]:
+    def search(self, title: str, location: str, days_back: int | None = None, max_results: int | None = None, known_urls: set[str] | None = None) -> list[RawJob]:
         days = days_back if days_back is not None else self._days_back
         seconds = days * 24 * 3600
         url = (
@@ -82,7 +82,7 @@ class LinkedInSource(JobSource):
         )
         self._goto(url)
         self._wait()
-        return self._collect_cards(max_jobs=max_results)
+        return self._collect_cards(max_jobs=max_results, known_urls=known_urls)
 
     def fetch_description(self, url: str) -> str | None:
         self._jitter_mouse()
@@ -190,7 +190,7 @@ class LinkedInSource(JobSource):
             self._page.evaluate(f"window.scrollTo(0, {scroll_pos})")
             time.sleep(random.uniform(0.2, 0.8))
 
-    def _collect_cards(self, max_jobs: int | None = None) -> list[RawJob]:
+    def _collect_cards(self, max_jobs: int | None = None, known_urls: set[str] | None = None) -> list[RawJob]:
         results: list[RawJob] = []
         page_num = 0
 
@@ -237,7 +237,12 @@ class LinkedInSource(JobSource):
                 ))
 
             page_num += 1
-            print(f"  Page {page_num}: {len(cards)} cards (total: {len(results)})")
+            new_on_page = sum(1 for c in cards if c["url"] not in known_urls) if known_urls is not None else len(cards)
+            print(f"  Page {page_num}: {len(cards)} cards ({new_on_page} new, total: {len(results)})")
+
+            if known_urls is not None and new_on_page == 0:
+                print("  All cards on this page are known — stopping early.")
+                break
 
             if max_jobs and len(results) >= max_jobs:
                 break
