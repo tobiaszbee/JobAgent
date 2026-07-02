@@ -364,6 +364,14 @@ document.addEventListener('keydown', e => {
   }
 });
 
+function toggleRunSpec(forceOpen) {
+  const body  = document.getElementById('run-spec-body');
+  const arrow = document.getElementById('run-spec-arrow');
+  const open  = forceOpen !== undefined ? forceOpen : body.style.display === 'none';
+  body.style.display  = open ? '' : 'none';
+  arrow.style.transform = open ? '' : 'rotate(-90deg)';
+}
+
 function toggleRunAll(name) {
   const boxes = document.querySelectorAll(`input[name="${name}"]`);
   const allChecked = [...boxes].every(b => b.checked);
@@ -377,6 +385,7 @@ async function openRunModal() {
   }
   document.getElementById('run-modal').style.display = 'flex';
   document.getElementById('run-log').textContent = '';
+  toggleRunSpec(true);
 
   const r = await fetch('/api/criteria');
   const all = await r.json();
@@ -513,6 +522,7 @@ function startAgent() {
   }
 
   log.textContent = '';
+  toggleRunSpec(false);
   btn.disabled = true;
   btn.textContent = 'Running...';
   runBtn.classList.add('running');
