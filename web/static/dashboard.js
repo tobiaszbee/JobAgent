@@ -2,8 +2,11 @@ let ALL_JOBS = [];
 let currentStatus = 'all';
 let agentSocket = null;
 let showAutoRejected = false;
-let currentPage = 1;
-const JOBS_PER_PAGE = 25;
+
+let _renderedCount = 0;
+const BATCH_SIZE = 25;
+let _lazyJobs = [];
+let _lazyObserver = null;
 
 let _availableSources = [];
 let _sourcesMap = {};
@@ -139,7 +142,6 @@ async function loadJobs() {
 
   const r = await fetch('/api/jobs?' + params);
   ALL_JOBS = await r.json();
-  currentPage = 1;
   render();
 }
 
@@ -148,98 +150,101 @@ function toggleAutoRejected() {
   const btn = document.getElementById('btn-toggle-rejected');
   btn.textContent = showAutoRejected ? 'Hide auto-rejected' : 'Show auto-rejected';
   btn.classList.toggle('active', showAutoRejected);
-  currentPage = 1;
   render();
 }
 
-function goToPage(n) {
-  currentPage = n;
-  render();
-  window.scrollTo({ top: 0, behavior: 'smooth' });
+// ── Card rendering ─────────────────────────────────────────────────────────────
+
+function _renderCard(j) {
+  const score    = j.score != null ? j.score.toFixed(1) : '—';
+  const sc       = scoreClass(j.score);
+  const srcName  = _sourcesMap[j.source] || j.source || '';
+  const srcBadge = srcName ? `<span class="source-badge source-${esc(j.source)}">${esc(srcName)}</span>` : '';
+  return `
+  <div class="job-card status-${esc(j.status)}" id="card-${esc(j.id)}">
+    <div class="job-header">
+      <div class="job-info">
+        <a class="job-title" href="${safeUrl(j.url)}" target="_blank">${esc(j.title)}</a>
+        <div class="job-sub">${esc(j.company)} &nbsp;&middot;&nbsp; &#128205; ${esc(j.location)} ${srcBadge}</div>
+      </div>
+      <div class="score-badge ${sc}">${score}</div>
+    </div>
+    ${j.score_reason ? `<div class="job-reason">${esc(j.score_reason)}</div>` : ''}
+    ${j.rejection_reason ? `<div class="job-rejection-reason">&#128683; ${esc(j.rejection_reason)}</div>` : ''}
+    ${j.description ? `
+    <div class="job-desc-toggle" onclick="toggleDesc('${esc(j.id)}')">&#9660; Show description</div>
+    <div class="job-desc" id="desc-${esc(j.id)}" style="display:none">${esc(j.description)}</div>` : ''}
+    <div class="job-footer">
+      <span class="status-tag tag-${esc(j.status)}">${esc(j.status)}</span>
+      <span class="job-date">${formatDate(j.created_at)}</span>
+      <div class="actions">
+        <button class="btn btn-reviewed ${j.status === 'reviewed' ? 'active' : ''}"
+          onclick="setStatus('${esc(j.id)}', 'reviewed')">Reviewed</button>
+        <button class="btn btn-applied ${j.status === 'applied' ? 'active' : ''}"
+          onclick="setStatus('${esc(j.id)}', 'applied')">Applied &#10003;</button>
+        <button class="btn btn-rejected ${j.status === 'rejected' ? 'active' : ''}"
+          onclick="showRejectReason('${esc(j.id)}', this)">Reject &#10007;</button>
+      </div>
+    </div>
+  </div>`;
 }
 
-function renderPagination(total, page) {
-  const pages = Math.ceil(total / JOBS_PER_PAGE);
-  const el = document.getElementById('pagination');
-  if (pages <= 1) { el.innerHTML = ''; return; }
-
-  const range = [];
-  for (let i = 1; i <= pages; i++) {
-    if (i === 1 || i === pages || (i >= page - 2 && i <= page + 2)) {
-      range.push(i);
-    } else if (range[range.length - 1] !== '…') {
-      range.push('…');
-    }
-  }
-
-  const btn = (label, p, disabled = false, active = false) =>
-    `<button class="pg-btn${active ? ' pg-active' : ''}" ${disabled || active ? 'disabled' : `onclick="goToPage(${p})"`}>${label}</button>`;
-
-  el.innerHTML =
-    btn('‹ Prev', page - 1, page === 1) +
-    range.map(r => r === '…' ? `<span class="pg-ellipsis">…</span>` : btn(r, r, false, r === page)).join('') +
-    btn('Next ›', page + 1, page >= pages);
-}
+// ── Lazy-loading render ────────────────────────────────────────────────────────
 
 function render() {
+  if (_lazyObserver) { _lazyObserver.disconnect(); _lazyObserver = null; }
+
   const sort = document.getElementById('sort').value;
-  let jobs = [...ALL_JOBS];
-  if (!showAutoRejected) jobs = jobs.filter(j => j.status !== 'auto_rejected');
+  _lazyJobs = [...ALL_JOBS];
+  if (!showAutoRejected) _lazyJobs = _lazyJobs.filter(j => j.status !== 'auto_rejected');
+  if (sort === 'score')   _lazyJobs.sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
+  if (sort === 'date')    _lazyJobs.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  if (sort === 'company') _lazyJobs.sort((a, b) => (a.company || '').localeCompare(b.company || ''));
 
-  if (sort === 'score')   jobs.sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
-  if (sort === 'date')    jobs.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-  if (sort === 'company') jobs.sort((a, b) => (a.company || '').localeCompare(b.company || ''));
-
-  const total = jobs.length;
-  const maxPage = Math.max(1, Math.ceil(total / JOBS_PER_PAGE));
-  if (currentPage > maxPage) currentPage = maxPage;
-
-  document.getElementById('count').textContent = `${total} job${total !== 1 ? 's' : ''}`;
-  renderPagination(total, currentPage);
+  document.getElementById('count').textContent = `${_lazyJobs.length} job${_lazyJobs.length !== 1 ? 's' : ''}`;
+  _renderedCount = 0;
 
   const container = document.getElementById('jobs-container');
-  if (!jobs.length) {
+  container.innerHTML = '';
+
+  if (!_lazyJobs.length) {
     container.innerHTML = '<div class="no-results">No jobs found.</div>';
     return;
   }
 
-  const start = (currentPage - 1) * JOBS_PER_PAGE;
-  const pageJobs = jobs.slice(start, start + JOBS_PER_PAGE);
-
-  container.innerHTML = pageJobs.map(j => {
-    const score   = j.score != null ? j.score.toFixed(1) : '—';
-    const sc      = scoreClass(j.score);
-    const srcName = _sourcesMap[j.source] || j.source || '';
-    const srcBadge = srcName ? `<span class="source-badge source-${esc(j.source)}">${esc(srcName)}</span>` : '';
-    return `
-    <div class="job-card status-${esc(j.status)}" id="card-${esc(j.id)}">
-      <div class="job-header">
-        <div class="job-info">
-          <a class="job-title" href="${safeUrl(j.url)}" target="_blank">${esc(j.title)}</a>
-          <div class="job-sub">${esc(j.company)} &nbsp;&middot;&nbsp; &#128205; ${esc(j.location)} ${srcBadge}</div>
-        </div>
-        <div class="score-badge ${sc}">${score}</div>
-      </div>
-      ${j.score_reason ? `<div class="job-reason">${esc(j.score_reason)}</div>` : ''}
-      ${j.rejection_reason ? `<div class="job-rejection-reason">&#128683; ${esc(j.rejection_reason)}</div>` : ''}
-      ${j.description ? `
-      <div class="job-desc-toggle" onclick="toggleDesc('${esc(j.id)}')">&#9660; Show description</div>
-      <div class="job-desc" id="desc-${esc(j.id)}" style="display:none">${esc(j.description)}</div>` : ''}
-      <div class="job-footer">
-        <span class="status-tag tag-${esc(j.status)}">${esc(j.status)}</span>
-        <span class="job-date">${formatDate(j.created_at)}</span>
-        <div class="actions">
-          <button class="btn btn-reviewed ${j.status === 'reviewed' ? 'active' : ''}"
-            onclick="setStatus('${esc(j.id)}', 'reviewed')">Reviewed</button>
-          <button class="btn btn-applied ${j.status === 'applied' ? 'active' : ''}"
-            onclick="setStatus('${esc(j.id)}', 'applied')">Applied &#10003;</button>
-          <button class="btn btn-rejected ${j.status === 'rejected' ? 'active' : ''}"
-            onclick="showRejectReason('${esc(j.id)}', this)">Reject &#10007;</button>
-        </div>
-      </div>
-    </div>`;
-  }).join('');
+  _appendBatch(container);
 }
+
+function _appendBatch(container) {
+  const batch = _lazyJobs.slice(_renderedCount, _renderedCount + BATCH_SIZE);
+  _renderedCount += batch.length;
+
+  const frag = document.createDocumentFragment();
+  batch.forEach(j => {
+    const tmp = document.createElement('div');
+    tmp.innerHTML = _renderCard(j).trim();
+    frag.appendChild(tmp.firstChild);
+  });
+  container.appendChild(frag);
+
+  if (_renderedCount < _lazyJobs.length) {
+    const sentinel = document.createElement('div');
+    sentinel.className = 'lazy-sentinel';
+    container.appendChild(sentinel);
+
+    _lazyObserver = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting) {
+        _lazyObserver.disconnect();
+        _lazyObserver = null;
+        sentinel.remove();
+        _appendBatch(container);
+      }
+    }, { rootMargin: '300px' });
+    _lazyObserver.observe(sentinel);
+  }
+}
+
+// ── Description toggle ────────────────────────────────────────────────────────
 
 function toggleDesc(jobId) {
   const el = document.getElementById(`desc-${jobId}`);
@@ -248,6 +253,8 @@ function toggleDesc(jobId) {
   el.style.display = visible ? 'none' : 'block';
   toggle.textContent = visible ? '▼ Show description' : '▲ Hide description';
 }
+
+// ── Reject popover ────────────────────────────────────────────────────────────
 
 function showRejectReason(jobId, btn) {
   document.querySelectorAll('.reject-popover').forEach(el => el.remove());
@@ -281,26 +288,62 @@ async function confirmReject(jobId) {
   await setStatus(jobId, 'rejected', reason);
 }
 
+// ── Status update ─────────────────────────────────────────────────────────────
+
 async function setStatus(jobId, status, rejectionReason = null) {
   const body = { status };
   if (status === 'rejected' && rejectionReason !== null) body.rejection_reason = rejectionReason;
   const r = await fetch(`/api/jobs/${jobId}/status`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
   });
-  if (r.ok) {
-    const job = ALL_JOBS.find(j => j.id === jobId);
-    if (job) {
-      job.status = status;
-      if (status === 'rejected' && rejectionReason !== null) job.rejection_reason = rejectionReason;
-    }
-    render();
-    loadStats();
-    const labels = { reviewed: 'Marked as reviewed', applied: 'Marked as applied', rejected: 'Rejected' };
-    showToast(labels[status] || 'Updated');
+  if (!r.ok) return;
+
+  // Update local data
+  const job = ALL_JOBS.find(j => j.id === jobId);
+  if (job) {
+    job.status = status;
+    if (status === 'rejected' && rejectionReason !== null) job.rejection_reason = rejectionReason;
   }
+
+  // Does the job still belong in the current filtered view?
+  const belongs = currentStatus === 'all' || status === currentStatus;
+
+  if (!belongs) {
+    // Remove from both local arrays
+    const ai = ALL_JOBS.findIndex(j => j.id === jobId);
+    if (ai !== -1) ALL_JOBS.splice(ai, 1);
+    const li = _lazyJobs.findIndex(j => j.id === jobId);
+    if (li !== -1) _lazyJobs.splice(li, 1);
+
+    // Animate card out then remove
+    const card = document.getElementById(`card-${jobId}`);
+    if (card) {
+      card.style.transition = 'opacity 0.15s, transform 0.15s';
+      card.style.opacity = '0';
+      card.style.transform = 'translateX(12px)';
+      setTimeout(() => { card.remove(); }, 160);
+    }
+
+    document.getElementById('count').textContent =
+      `${_lazyJobs.length} job${_lazyJobs.length !== 1 ? 's' : ''}`;
+  } else {
+    // Refresh just this card in-place
+    const card = document.getElementById(`card-${jobId}`);
+    if (card && job) {
+      const tmp = document.createElement('div');
+      tmp.innerHTML = _renderCard(job).trim();
+      card.replaceWith(tmp.firstChild);
+    }
+  }
+
+  loadStats();
+  const labels = { reviewed: 'Marked as reviewed', applied: 'Applied ✓', rejected: 'Rejected' };
+  showToast(labels[status] || 'Updated');
 }
+
+// ── Criteria ──────────────────────────────────────────────────────────────────
 
 const CRITERIA_LABELS = {
   search_query: 'Search Queries',
@@ -402,7 +445,8 @@ document.addEventListener('keydown', e => {
   }
 });
 
-// Sources that only work for Poland / Remote
+// ── Run modal ─────────────────────────────────────────────────────────────────
+
 const _JUSTJOIN_ONLY_LOCATIONS = new Set(['poland', 'polska', 'pl', 'remote', 'zdalne', 'zdalnie', 'zdalny']);
 
 function _isJustJoinOnly() {
@@ -426,9 +470,9 @@ function toggleRunSpec(forceOpen) {
   const arrow = document.getElementById('run-spec-arrow');
   const log   = document.getElementById('run-log');
   const open  = forceOpen !== undefined ? forceOpen : body.style.display === 'none';
-  body.style.display   = open ? '' : 'none';
+  body.style.display    = open ? '' : 'none';
   arrow.style.transform = open ? '' : 'rotate(-90deg)';
-  log.style.display    = open ? 'none' : '';
+  log.style.display     = open ? 'none' : '';
 }
 
 function toggleRunAll(name) {
@@ -480,9 +524,10 @@ function closeRunModal() {
   }
 }
 
+// ── Agent status & activity ───────────────────────────────────────────────────
+
 let _agentRunning = false;
 let _activityPollTimer = null;
-
 let _stopping = false;
 
 function stopAgent() {
@@ -644,6 +689,8 @@ function startAgent() {
   agentSocket.onclose = () => { agentSocket = null; };
 }
 
+// ── Tab switching ─────────────────────────────────────────────────────────────
+
 document.querySelectorAll('.tab').forEach(tab => {
   tab.addEventListener('click', () => {
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -662,7 +709,7 @@ document.querySelectorAll('.tab').forEach(tab => {
   });
 });
 
-// --- CV ---
+// ── CV ────────────────────────────────────────────────────────────────────────
 
 async function loadCV() {
   const r = await fetch('/api/cv');
@@ -802,6 +849,8 @@ async function applySuggestions() {
   }
 }
 
+// ── Search / filter listeners ─────────────────────────────────────────────────
+
 let searchTimeout;
 document.getElementById('search').addEventListener('input', () => {
   clearTimeout(searchTimeout);
@@ -809,7 +858,7 @@ document.getElementById('search').addEventListener('input', () => {
 });
 document.getElementById('min-score').addEventListener('change', loadJobs);
 document.getElementById('source-filter').addEventListener('change', loadJobs);
-document.getElementById('sort').addEventListener('change', () => { currentPage = 1; render(); });
+document.getElementById('sort').addEventListener('change', render);
 
 // ── Preference Profile ────────────────────────────────────────────────────────
 
@@ -871,6 +920,8 @@ async function distillPreferences() {
     btn.textContent = '↺ Refresh Profile';
   }
 }
+
+// ── Init ──────────────────────────────────────────────────────────────────────
 
 loadStats();
 _loadSources().then(loadJobs);
