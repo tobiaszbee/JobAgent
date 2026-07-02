@@ -99,7 +99,11 @@ def backfill_ws(ws):
 
     script = os.path.join(ROOT, "scripts", "backfill_descriptions.py")
     ws.send("=== BACKFILL DESCRIPTIONS ===\n")
-    _run_script(ws, script)
+    rc = _run_script(ws, script)
+
+    if rc == 0:
+        ws.send("\n=== EVALUATOR ===\n")
+        _run_script(ws, os.path.join(ROOT, "evaluator", "runner.py"))
 
     _agent_process = None
     try:

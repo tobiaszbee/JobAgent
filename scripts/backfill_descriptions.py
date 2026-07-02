@@ -43,7 +43,7 @@ for batch_idx, batch in enumerate(batches):
     with LinkedInSource() as source:
         source.login()
 
-        if distract_ev > 0 and batch_idx % distract_ev == 0:
+        if distract_ev > 0 and batch_idx > 0 and batch_idx % distract_ev == 0:
             source.distract()
 
         for job in batch:

@@ -186,7 +186,7 @@ def get_stats() -> dict:
         FROM jobs
     """).fetchone()
     last = conn.execute(
-        "SELECT finished_at FROM sessions WHERE status = 'ok' ORDER BY finished_at DESC LIMIT 1"
+        "SELECT finished_at FROM sessions WHERE status = 'done' ORDER BY finished_at DESC LIMIT 1"
     ).fetchone()
     conn.close()
     result = dict(row)

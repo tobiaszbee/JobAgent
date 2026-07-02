@@ -42,7 +42,7 @@ def _fetch_descriptions_in_batches(new_job_ids: list[tuple[str, str]], log=print
         with LinkedInSource() as source:
             source.login()
 
-            if distract_every > 0 and batch_idx % distract_every == 0:
+            if distract_every > 0 and batch_idx > 0 and batch_idx % distract_every == 0:
                 source.distract()
 
             ok = 0
@@ -111,12 +111,23 @@ def run(
         with LinkedInSource(days_back=days_back) as source:
             source.login()
 
+            first_search = True
             for title in search_queries:
                 if max_jobs and jobs_new >= max_jobs:
                     break
                 for location in criteria["locations"]:
                     if max_jobs and jobs_new >= max_jobs:
                         break
+
+                    # Pause before each search except the first to avoid rate-limiting
+                    if not first_search:
+                        pause = random.uniform(
+                            STEALTH["search_pause_min"],
+                            STEALTH["search_pause_max"],
+                        )
+                        log(f"  [stealth] Pausing {pause:.0f}s before next search...")
+                        time.sleep(pause)
+                    first_search = False
 
                     log(f"\nSearching: {title!r} in {location!r}")
                     remaining = (max_jobs - jobs_new) if max_jobs else None
@@ -146,15 +157,6 @@ def run(
                         jobs_new += 1
                         new_job_ids.append((job_id, raw.url))
                         log(f"  [{jobs_new}{'/' + str(max_jobs) if max_jobs else ''}] {raw.title} @ {raw.company}")
-
-                    # Pause between search queries to avoid rate-limiting
-                    if (title, location) != (search_queries[-1], criteria["locations"][-1]):
-                        pause = random.uniform(
-                            STEALTH["search_pause_min"],
-                            STEALTH["search_pause_max"],
-                        )
-                        log(f"  [stealth] Pausing {pause:.0f}s before next search...")
-                        time.sleep(pause)
 
         # Browser closed here — short cooldown before opening again for descriptions
         if new_job_ids:

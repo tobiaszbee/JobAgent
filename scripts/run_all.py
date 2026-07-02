@@ -37,12 +37,13 @@ def _make_log(log_path: str | None):
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run full JobAgent pipeline: collect then evaluate")
-    parser.add_argument("--days",          type=int,  default=1,    help="Days back to search (default: 1)")
-    parser.add_argument("--max-jobs",      type=int,  default=None, help="Max new jobs to collect (default: unlimited)")
-    parser.add_argument("--titles",        nargs="*", default=None, help="Override search titles")
-    parser.add_argument("--locations",     nargs="*", default=None, help="Override search locations")
-    parser.add_argument("--log-file",      default=None,            help="Append output to this file (e.g. data/logs/run.log)")
-    parser.add_argument("--random-start",  type=int,  default=0,    help="Sleep random(0, N) seconds before starting (scheduler jitter)")
+    parser.add_argument("--days",           type=int,  default=1,    help="Days back to search (default: 1)")
+    parser.add_argument("--max-jobs",       type=int,  default=None, help="Max new jobs to collect (default: unlimited)")
+    parser.add_argument("--titles",         nargs="*", default=None, help="Override job titles (scoring only)")
+    parser.add_argument("--search-queries", nargs="*", default=None, help="Override LinkedIn search queries")
+    parser.add_argument("--locations",      nargs="*", default=None, help="Override search locations")
+    parser.add_argument("--log-file",       default=None,            help="Append output to this file (e.g. data/logs/run.log)")
+    parser.add_argument("--random-start",   type=int,  default=0,    help="Sleep random(0, N) seconds before starting (scheduler jitter)")
     args = parser.parse_args()
 
     log, fh = _make_log(args.log_file)
@@ -64,6 +65,7 @@ def main() -> int:
                 days_back=args.days,
                 max_jobs=args.max_jobs,
                 titles=args.titles,
+                search_queries_override=args.search_queries,
                 locations=args.locations,
                 log=log,
             )

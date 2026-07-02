@@ -111,10 +111,11 @@ class LinkedInSource(JobSource):
 
         return self._page.evaluate("""
             () => {
-                // Try LinkedIn's structured description element first
+                // Try LinkedIn's structured description element first (prefer longer content)
                 const descEl = document.querySelector('.jobs-description__content, .jobs-box__html-content, .description__text');
-                if (descEl && descEl.innerText.trim().length > 100) {
-                    return descEl.innerText.trim().slice(0, 5000);
+                const descText = descEl ? descEl.innerText.trim() : '';
+                if (descText.length > 100) {
+                    return descText.slice(0, 5000);
                 }
                 // Fall back to section header — multilingual
                 const headers = [
@@ -127,6 +128,8 @@ class LinkedInSource(JobSource):
                     const idx = body.indexOf(h);
                     if (idx !== -1) return body.slice(idx, idx + 5000).trim();
                 }
+                // Last resort: use whatever the structured element found, even if short
+                if (descText.length > 0) return descText.slice(0, 5000);
                 return '';
             }
         """) or None

@@ -40,7 +40,7 @@ async function loadStats() {
   document.getElementById('s-rejected').textContent      = s.rejected;
   document.getElementById('s-auto-rejected').textContent = s.auto_rejected;
   document.getElementById('s-avg').textContent           = s.avg_score || '—';
-  const lastRun = s.last_run ? new Date(s.last_run + 'Z').toLocaleString('pl-PL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : 'never';
+  const lastRun = s.last_run ? new Date(s.last_run.replace(' ', 'T') + 'Z').toLocaleString('pl-PL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : 'never';
   document.getElementById('last-updated').textContent    = 'Last run: ' + lastRun;
   checkMissingDescriptions();
 }
