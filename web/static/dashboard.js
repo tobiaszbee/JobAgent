@@ -364,16 +364,37 @@ document.addEventListener('keydown', e => {
   }
 });
 
+// Sources that only work for Poland / Remote
+const _JUSTJOIN_ONLY_LOCATIONS = new Set(['poland', 'polska', 'pl', 'remote', 'zdalne', 'zdalnie', 'zdalny']);
+
+function _isJustJoinOnly() {
+  const checked = [...document.querySelectorAll('input[name="source"]:checked')].map(el => el.value);
+  return checked.length === 1 && checked[0] === 'justjoin';
+}
+
+function updateLocationsForSources() {
+  const restrict = _isJustJoinOnly();
+  document.querySelectorAll('input[name="location"]').forEach(box => {
+    const supported = _JUSTJOIN_ONLY_LOCATIONS.has(box.value.toLowerCase().trim());
+    const disable   = restrict && !supported;
+    box.disabled = disable;
+    box.checked  = disable ? false : box.checked;
+    box.closest('label').classList.toggle('run-check-disabled', disable);
+  });
+}
+
 function toggleRunSpec(forceOpen) {
   const body  = document.getElementById('run-spec-body');
   const arrow = document.getElementById('run-spec-arrow');
+  const log   = document.getElementById('run-log');
   const open  = forceOpen !== undefined ? forceOpen : body.style.display === 'none';
-  body.style.display  = open ? '' : 'none';
+  body.style.display   = open ? '' : 'none';
   arrow.style.transform = open ? '' : 'rotate(-90deg)';
+  log.style.display    = open ? 'none' : '';
 }
 
 function toggleRunAll(name) {
-  const boxes = document.querySelectorAll(`input[name="${name}"]`);
+  const boxes = document.querySelectorAll(`input[name="${name}"]:not(:disabled)`);
   const allChecked = [...boxes].every(b => b.checked);
   boxes.forEach(b => b.checked = !allChecked);
 }
@@ -407,6 +428,8 @@ async function openRunModal() {
     <label class="run-check">
       <input type="checkbox" name="source" value="${esc(s.id)}" checked> ${esc(s.name)}
     </label>`).join('');
+
+  document.getElementById('run-sources').addEventListener('change', updateLocationsForSources);
 
   checkAgentStatus();
 }
