@@ -80,7 +80,7 @@ class TestJobsEndpoints:
         resp = flask_client.get("/api/stats")
         assert resp.status_code == 200
         data = resp.json
-        for key in ("total", "new", "reviewed", "applied", "rejected", "auto_rejected"):
+        for key in ("total", "new", "reviewed", "applied", "rejected", "auto_rejected", "last_run"):
             assert key in data
 
     def test_stats_reflects_inserted_jobs(self, flask_client):
@@ -88,6 +88,19 @@ class TestJobsEndpoints:
         resp = flask_client.get("/api/stats")
         assert resp.json["total"] == 1
         assert resp.json["new"] == 1
+
+    def test_missing_descriptions_returns_count(self, flask_client):
+        job_repository.insert("Dev", "Co", "PL", "https://a.com/nd", "linkedin")
+        resp = flask_client.get("/api/jobs/missing-descriptions")
+        assert resp.status_code == 200
+        assert resp.json["count"] == 1
+
+    def test_missing_descriptions_zero_when_all_have_desc(self, flask_client):
+        job_id = _add_job()
+        job_repository.update_description(job_id, "Full job description here.")
+        resp = flask_client.get("/api/jobs/missing-descriptions")
+        assert resp.status_code == 200
+        assert resp.json["count"] == 0
 
 
 class TestCriteriaEndpoints:

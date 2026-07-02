@@ -48,7 +48,7 @@ class TestGetActive:
 class TestGetActiveDict:
     def test_all_keys_present(self):
         d = criteria_repository.get_active_dict()
-        assert set(d.keys()) == {"titles", "locations", "required", "preferred", "rejected"}
+        assert set(d.keys()) == {"search_queries", "titles", "locations", "required", "preferred", "rejected"}
 
     def test_each_type_mapped_to_correct_key(self):
         criteria_repository.insert("title", "PHP Dev")

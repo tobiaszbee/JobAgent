@@ -128,11 +128,36 @@ class TestSearch:
         assert len(result) == 1 and result[0]["title"] == "PHP Developer"
 
 
+class TestGetMissingDescriptions:
+    def test_returns_job_without_description(self):
+        job_repository.insert("Dev", "Co", "PL", "https://a.com/nd", "linkedin")
+        result = job_repository.get_missing_descriptions()
+        assert len(result) == 1
+        assert "id" in result[0] and "url" in result[0]
+
+    def test_excludes_job_with_description(self):
+        _insert()  # has description in defaults
+        assert job_repository.get_missing_descriptions() == []
+
+    def test_excludes_already_scored_job(self):
+        job_id = job_repository.insert("Dev", "Co", "PL", "https://a.com/s", "linkedin")
+        job_repository.update_score(job_id, 7.0, "OK")
+        assert job_repository.get_missing_descriptions() == []
+
+
 class TestGetStats:
     def test_empty_db_returns_zeros(self):
         stats = job_repository.get_stats()
         assert stats["total"] == 0
         assert stats["new"] == 0
+
+    def test_includes_last_run_key(self):
+        stats = job_repository.get_stats()
+        assert "last_run" in stats
+
+    def test_last_run_is_none_when_no_sessions(self):
+        stats = job_repository.get_stats()
+        assert stats["last_run"] is None
 
     def test_counts_per_status(self):
         id1 = _insert(url="https://a.com/1")
