@@ -19,7 +19,8 @@ def update_status(job_id):
     new_status = data.get("status")
     if new_status not in ("new", "reviewed", "applied", "rejected"):
         return jsonify({"error": "Invalid status"}), 400
-    job_repository.update_status(job_id, new_status)
+    rejection_reason = data.get("rejection_reason") if new_status == "rejected" else None
+    job_repository.update_status(job_id, new_status, rejection_reason)
     return jsonify({"ok": True, "status": new_status})
 
 

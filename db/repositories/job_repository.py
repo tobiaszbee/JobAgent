@@ -86,12 +86,18 @@ def update_score(job_id: str, score: float, reason: str) -> None:
     conn.close()
 
 
-def update_status(job_id: str, status: str) -> None:
+def update_status(job_id: str, status: str, rejection_reason: str | None = None) -> None:
     conn = get_connection()
-    conn.execute(
-        "UPDATE jobs SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-        (status, job_id)
-    )
+    if status == "rejected" and rejection_reason is not None:
+        conn.execute(
+            "UPDATE jobs SET status = ?, rejection_reason = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (status, rejection_reason or None, job_id)
+        )
+    else:
+        conn.execute(
+            "UPDATE jobs SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (status, job_id)
+        )
     conn.commit()
     conn.close()
 

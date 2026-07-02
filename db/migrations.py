@@ -55,4 +55,16 @@ def init_db() -> None:
         );
     """)
     conn.commit()
+
+    # Additive migrations — safe to run on existing DBs
+    for migration in [
+        "ALTER TABLE jobs ADD COLUMN rejection_reason TEXT",
+        "ALTER TABLE sessions ADD COLUMN jobs_scored INTEGER DEFAULT 0",
+    ]:
+        try:
+            conn.execute(migration)
+            conn.commit()
+        except Exception:
+            pass  # column already exists
+
     conn.close()

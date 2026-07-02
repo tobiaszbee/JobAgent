@@ -221,6 +221,7 @@ function render() {
         <div class="score-badge ${sc}">${score}</div>
       </div>
       ${j.score_reason ? `<div class="job-reason">${esc(j.score_reason)}</div>` : ''}
+      ${j.rejection_reason ? `<div class="job-rejection-reason">&#128683; ${esc(j.rejection_reason)}</div>` : ''}
       ${j.description ? `
       <div class="job-desc-toggle" onclick="toggleDesc('${esc(j.id)}')">&#9660; Show description</div>
       <div class="job-desc" id="desc-${esc(j.id)}" style="display:none">${esc(j.description)}</div>` : ''}
@@ -233,7 +234,7 @@ function render() {
           <button class="btn btn-applied ${j.status === 'applied' ? 'active' : ''}"
             onclick="setStatus('${esc(j.id)}', 'applied')">Applied &#10003;</button>
           <button class="btn btn-rejected ${j.status === 'rejected' ? 'active' : ''}"
-            onclick="setStatus('${esc(j.id)}', 'rejected')">Reject &#10007;</button>
+            onclick="showRejectReason('${esc(j.id)}', this)">Reject &#10007;</button>
         </div>
       </div>
     </div>`;
@@ -248,15 +249,52 @@ function toggleDesc(jobId) {
   toggle.textContent = visible ? '▼ Show description' : '▲ Hide description';
 }
 
-async function setStatus(jobId, status) {
+function showRejectReason(jobId, btn) {
+  document.querySelectorAll('.reject-popover').forEach(el => el.remove());
+
+  const job = ALL_JOBS.find(j => j.id === jobId);
+  const existing = (job && job.rejection_reason) ? esc(job.rejection_reason) : '';
+
+  const popover = document.createElement('div');
+  popover.className = 'reject-popover';
+  popover.innerHTML = `
+    <input class="reject-reason-input" type="text" placeholder="Reason, e.g. rate too low, too junior…" value="${existing}">
+    <div class="reject-popover-btns">
+      <button class="btn-reject-confirm" onclick="confirmReject('${jobId}')">Reject</button>
+      <button class="btn-reject-cancel" onclick="document.querySelectorAll('.reject-popover').forEach(el=>el.remove())">Cancel</button>
+    </div>`;
+
+  btn.closest('.job-footer').after(popover);
+  const input = popover.querySelector('.reject-reason-input');
+  input.focus();
+  input.setSelectionRange(input.value.length, input.value.length);
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') confirmReject(jobId);
+    if (e.key === 'Escape') popover.remove();
+  });
+}
+
+async function confirmReject(jobId) {
+  const popover = document.querySelector('.reject-popover');
+  const reason = popover ? popover.querySelector('.reject-reason-input').value.trim() : '';
+  if (popover) popover.remove();
+  await setStatus(jobId, 'rejected', reason);
+}
+
+async function setStatus(jobId, status, rejectionReason = null) {
+  const body = { status };
+  if (status === 'rejected' && rejectionReason !== null) body.rejection_reason = rejectionReason;
   const r = await fetch(`/api/jobs/${jobId}/status`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ status })
+    body: JSON.stringify(body)
   });
   if (r.ok) {
     const job = ALL_JOBS.find(j => j.id === jobId);
-    if (job) job.status = status;
+    if (job) {
+      job.status = status;
+      if (status === 'rejected' && rejectionReason !== null) job.rejection_reason = rejectionReason;
+    }
     render();
     loadStats();
     const labels = { reviewed: 'Marked as reviewed', applied: 'Marked as applied', rejected: 'Rejected' };

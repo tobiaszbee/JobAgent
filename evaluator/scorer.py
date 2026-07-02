@@ -26,8 +26,9 @@ def _build_examples_section(positive: list[dict], negative: list[dict]) -> str:
         lines.append("EXAMPLES OF JOBS I REJECTED (learn what to avoid):")
         for ex in negative:
             desc = ex["description"][:150].replace("\n", " ") if ex.get("description") else ""
-            reason = (ex.get("score_reason") or "")[:100]
-            lines.append(f'- "{ex["title"]}" @ {ex["company"]}: {desc}... [Reason: {reason}]')
+            reason = (ex.get("rejection_reason") or ex.get("score_reason") or "")[:150]
+            reason_str = f" [My reason: {reason}]" if reason else ""
+            lines.append(f'- "{ex["title"]}" @ {ex["company"]}: {desc}...{reason_str}')
         lines.append("")
     return "\n".join(lines) + "\n" if lines else ""
 
