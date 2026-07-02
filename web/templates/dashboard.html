@@ -16,6 +16,7 @@
       <span class="agent-dot"></span>
       <span>Running</span>
     </div>
+    <button class="btn-prefs" id="btn-prefs" onclick="openPrefsModal()">&#129504; Preferences</button>
     <button class="btn-run" id="btn-run" onclick="openRunModal()">&#9654; Run Agent</button>
   </div>
 </header>
@@ -207,6 +208,26 @@
     <div class="modal-footer">
       <button class="btn-stop" id="btn-activity-stop" onclick="stopAgent()" style="display:none">&#9632; Stop</button>
       <button class="btn-cancel" onclick="closeActivityModal()">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Preferences Modal -->
+<div class="modal-overlay" id="prefs-modal" style="display:none">
+  <div class="modal modal-prefs">
+    <div class="modal-header">
+      <h2>Preference Profile</h2>
+      <button class="modal-close" onclick="closePrefsModal()">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <div id="prefs-meta" class="prefs-meta"></div>
+      <div id="prefs-content" class="prefs-content">
+        <span class="prefs-empty">No profile yet. Click "Refresh" to distill from your feedback history.</span>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-prefs-refresh" id="btn-prefs-refresh" onclick="distillPreferences()">&#8635; Refresh Profile</button>
+      <button class="btn-cancel" onclick="closePrefsModal()">Close</button>
     </div>
   </div>
 </div>

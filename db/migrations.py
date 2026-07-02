@@ -53,6 +53,14 @@ def init_db() -> None:
             model      TEXT,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
+
+        CREATE TABLE IF NOT EXISTS preference_profiles (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            content        TEXT NOT NULL,
+            applied_count  INTEGER DEFAULT 0,
+            rejected_count INTEGER DEFAULT 0,
+            updated_at     DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
     """)
     conn.commit()
 

@@ -159,6 +159,20 @@ def get_examples(
     return [dict(r) for r in positive], [dict(r) for r in negative]
 
 
+def get_all_feedback() -> tuple[list[dict], list[dict]]:
+    """Return ALL applied and rejected jobs (no limit) for preference distillation.
+    Excludes auto_rejected — only user-confirmed signals."""
+    conn = get_connection()
+    applied = conn.execute(
+        "SELECT title, company, location, description, score_reason FROM jobs WHERE status = 'applied' ORDER BY updated_at DESC"
+    ).fetchall()
+    rejected = conn.execute(
+        "SELECT title, company, location, description, rejection_reason, score_reason FROM jobs WHERE status = 'rejected' ORDER BY updated_at DESC"
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in applied], [dict(r) for r in rejected]
+
+
 def search(
     status: str | None = None,
     min_score: float | None = None,

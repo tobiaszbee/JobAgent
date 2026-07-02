@@ -5,6 +5,8 @@ header { background: #0a66c2; color: white; padding: 16px 32px; display: flex; a
 header h1 { font-size: 20px; font-weight: 600; }
 .header-right { display: flex; align-items: center; gap: 16px; }
 .header-right span { font-size: 13px; opacity: 0.8; }
+.btn-prefs { background: rgba(255,255,255,0.15); color: white; border: 1px solid rgba(255,255,255,0.3); padding: 8px 14px; border-radius: 6px; font-size: 13px; cursor: pointer; transition: background 0.15s; }
+.btn-prefs:hover { background: rgba(255,255,255,0.25); }
 .btn-run { background: white; color: #0a66c2; border: none; padding: 8px 18px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; transition: opacity 0.15s; }
 .btn-run:hover { opacity: 0.9; }
 .btn-run:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -240,6 +242,14 @@ header h1 { font-size: 20px; font-weight: 600; }
 
 .toast { position: fixed; bottom: 24px; right: 24px; background: #1a1a2e; color: white; padding: 10px 18px; border-radius: 6px; font-size: 13px; opacity: 0; transition: opacity 0.3s; pointer-events: none; z-index: 999; }
 .toast.show { opacity: 1; }
+
+.modal-prefs { width: 720px; max-height: 80vh; display: flex; flex-direction: column; }
+.prefs-meta { font-size: 12px; color: #888; margin-bottom: 10px; }
+.prefs-content { flex: 1; background: #1a1a2e; color: #c8e6c9; border-radius: 6px; padding: 14px 16px; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; line-height: 1.7; overflow-y: auto; white-space: pre-wrap; word-break: break-word; min-height: 200px; max-height: 52vh; }
+.prefs-empty { color: #888; font-style: italic; }
+.btn-prefs-refresh { background: #0a66c2; color: white; border: none; padding: 8px 20px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; }
+.btn-prefs-refresh:hover { background: #0856a3; }
+.btn-prefs-refresh:disabled { opacity: 0.5; cursor: not-allowed; }
 
 @media (max-width: 600px) {
   .stats, .toolbar, .jobs, .status-tabs, .criteria-panel { padding-left: 16px; padding-right: 16px; }

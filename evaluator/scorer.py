@@ -33,13 +33,25 @@ def _build_examples_section(positive: list[dict], negative: list[dict]) -> str:
     return "\n".join(lines) + "\n" if lines else ""
 
 
+def _build_preferences_section(learned_preferences: str) -> str:
+    if not learned_preferences.strip():
+        return ""
+    return (
+        "LEARNED PREFERENCE PROFILE"
+        " (distilled from all feedback — use as high-priority scoring context):\n"
+        f"{learned_preferences.strip()}\n\n"
+    )
+
+
 def build_system_prompt(
     criteria: dict,
     positive_examples: list[dict],
     negative_examples: list[dict],
     candidate_profile: str = "",
+    learned_preferences: str = "",
 ) -> str:
     """Build the system prompt. Call once per batch and reuse across jobs."""
+    prefs_section = _build_preferences_section(learned_preferences)
     examples_section = _build_examples_section(positive_examples, negative_examples)
 
     required = criteria.get("required", [])
@@ -58,7 +70,7 @@ def build_system_prompt(
 
 {candidate_profile}
 
-{examples_section}REQUIRED (must have all):
+{prefs_section}{examples_section}REQUIRED (must have all):
 - PHP mentioned in the job description — NOTE: Laravel, Symfony, WordPress are PHP frameworks, so they count as PHP
 - Remote work possible{required_extra}
 

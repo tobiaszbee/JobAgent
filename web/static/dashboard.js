@@ -811,6 +811,67 @@ document.getElementById('min-score').addEventListener('change', loadJobs);
 document.getElementById('source-filter').addEventListener('change', loadJobs);
 document.getElementById('sort').addEventListener('change', () => { currentPage = 1; render(); });
 
+// ── Preference Profile ────────────────────────────────────────────────────────
+
+function openPrefsModal() {
+  document.getElementById('prefs-modal').style.display = 'flex';
+  _loadPrefsProfile();
+}
+
+function closePrefsModal() {
+  document.getElementById('prefs-modal').style.display = 'none';
+}
+
+async function _loadPrefsProfile() {
+  const meta = document.getElementById('prefs-meta');
+  const content = document.getElementById('prefs-content');
+  try {
+    const r = await fetch('/api/preferences');
+    const d = await r.json();
+    if (!d.profile) {
+      meta.textContent = '';
+      content.innerHTML = '<span class="prefs-empty">No profile yet. Click "Refresh" to distill from your feedback history.</span>';
+      return;
+    }
+    const p = d.profile;
+    const updated = new Date(p.updated_at.replace(' ', 'T') + 'Z').toLocaleString('pl-PL', {
+      day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
+    });
+    meta.textContent = `Applied: ${p.applied_count} | Rejected: ${p.rejected_count} | Updated: ${updated}`;
+    content.textContent = p.content;
+  } catch (e) {
+    content.textContent = 'Error loading profile.';
+  }
+}
+
+async function distillPreferences() {
+  const btn = document.getElementById('btn-prefs-refresh');
+  const content = document.getElementById('prefs-content');
+  const meta = document.getElementById('prefs-meta');
+  btn.disabled = true;
+  btn.textContent = '⏳ Distilling…';
+  content.innerHTML = '<span class="prefs-empty">Analyzing feedback history with Claude…</span>';
+  meta.textContent = '';
+  try {
+    const r = await fetch('/api/preferences/distill', { method: 'POST' });
+    const d = await r.json();
+    if (!r.ok || !d.ok) {
+      content.textContent = d.reason || 'Failed to distill.';
+      showToast('Distillation failed');
+      return;
+    }
+    content.textContent = d.content;
+    meta.textContent = `Applied: ${d.applied_count} | Rejected: ${d.rejected_count} | Updated: now`;
+    showToast('Preference profile updated');
+  } catch (e) {
+    content.textContent = 'Error during distillation.';
+    showToast('Error: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '↺ Refresh Profile';
+  }
+}
+
 loadStats();
 _loadSources().then(loadJobs);
 pollAgentStatus();
