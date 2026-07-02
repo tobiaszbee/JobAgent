@@ -226,6 +226,8 @@ header h1 { font-size: 20px; font-weight: 600; }
 .btn-start:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-cancel { background: white; color: #555; border: 1px solid #d0d0d0; padding: 8px 20px; border-radius: 6px; font-size: 13px; cursor: pointer; }
 .btn-cancel:hover { background: #f5f5f5; }
+.btn-stop { background: #c0392b; color: white; border: none; padding: 8px 20px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; }
+.btn-stop:hover { background: #a93226; }
 
 .toast { position: fixed; bottom: 24px; right: 24px; background: #1a1a2e; color: white; padding: 10px 18px; border-radius: 6px; font-size: 13px; opacity: 0; transition: opacity 0.3s; pointer-events: none; z-index: 999; }
 .toast.show { opacity: 1; }

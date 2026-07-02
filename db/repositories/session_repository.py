@@ -24,6 +24,16 @@ def finish(session_id: int, jobs_found: int, jobs_scored: int, status: str = "do
     conn.close()
 
 
+def cancel_active() -> None:
+    conn = get_connection()
+    conn.execute(
+        """UPDATE sessions SET status='cancelled', finished_at=CURRENT_TIMESTAMP
+           WHERE status='running'"""
+    )
+    conn.commit()
+    conn.close()
+
+
 def has_active_run() -> bool:
     """True if a session started within the last 6 hours is still running."""
     conn = get_connection()

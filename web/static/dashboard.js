@@ -445,21 +445,31 @@ function closeRunModal() {
 let _agentRunning = false;
 let _activityPollTimer = null;
 
+let _stopping = false;
+
+function stopAgent() {
+  _stopping = true;
+  fetch('/api/agent/stop', { method: 'POST' }).catch(() => {});
+}
+
 async function checkAgentStatus() {
   const r = await fetch('/api/agent/status');
   const s = await r.json();
-  const btn    = document.getElementById('btn-start');
-  const runBtn = document.getElementById('btn-run');
+  const btn     = document.getElementById('btn-start');
+  const runBtn  = document.getElementById('btn-run');
+  const stopBtn = document.getElementById('btn-activity-stop');
   if (s.running) {
-    btn.disabled = true;
-    btn.textContent = 'Running...';
+    btn.textContent = '▶ Start';
+    btn.onclick = startAgent;
     runBtn.classList.add('running');
     runBtn.textContent = 'Running...';
+    if (stopBtn) stopBtn.style.display = '';
   } else {
-    btn.disabled = false;
-    btn.textContent = 'Start';
+    btn.textContent = '▶ Start';
+    btn.onclick = startAgent;
     runBtn.classList.remove('running');
-    runBtn.textContent = 'Run Agent';
+    runBtn.textContent = '▶ Run Agent';
+    if (stopBtn) stopBtn.style.display = 'none';
   }
 }
 
@@ -507,14 +517,17 @@ function _loadActivityLogs() {
       log.textContent = data.lines.length ? data.lines.join('\n') : 'No logs yet.';
       if (atBottom) log.scrollTop = log.scrollHeight;
 
-      const badge = document.getElementById('activity-status-badge');
+      const badge   = document.getElementById('activity-status-badge');
+      const stopBtn = document.getElementById('btn-activity-stop');
       if (_agentRunning) {
         badge.textContent = 'Running';
         badge.className = 'activity-status-badge running';
+        if (stopBtn) stopBtn.style.display = '';
         _activityPollTimer = setTimeout(_loadActivityLogs, 2000);
       } else {
         badge.textContent = 'Done';
         badge.className = 'activity-status-badge done';
+        if (stopBtn) stopBtn.style.display = 'none';
       }
     })
     .catch(() => {
@@ -546,8 +559,8 @@ function startAgent() {
 
   log.textContent = '';
   toggleRunSpec(false);
-  btn.disabled = true;
-  btn.textContent = 'Running...';
+  btn.textContent = '⏹ Stop';
+  btn.onclick = stopAgent;
   runBtn.classList.add('running');
   runBtn.textContent = 'Running...';
 
@@ -564,12 +577,18 @@ function startAgent() {
     }));
   };
 
+  function _resetStartBtn() {
+    btn.textContent = '▶ Start';
+    btn.onclick = startAgent;
+    runBtn.classList.remove('running');
+    runBtn.textContent = '▶ Run Agent';
+    document.getElementById('btn-activity-stop').style.display = 'none';
+  }
+
   agentSocket.onmessage = e => {
     if (e.data.includes('__DONE__')) {
-      btn.disabled = false;
-      btn.textContent = 'Start';
-      runBtn.classList.remove('running');
-      runBtn.textContent = 'Run Agent';
+      _resetStartBtn();
+      _updateAgentIndicator(false);
       loadStats();
       loadJobs();
       return;
@@ -579,9 +598,9 @@ function startAgent() {
   };
 
   agentSocket.onerror = () => {
-    log.textContent += '\nWebSocket error.\n';
-    btn.disabled = false;
-    btn.textContent = 'Start';
+    if (!_stopping) log.textContent += '\nWebSocket error.\n';
+    _resetStartBtn();
+    _stopping = false;
   };
 
   agentSocket.onclose = () => { agentSocket = null; };

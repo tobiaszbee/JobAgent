@@ -30,6 +30,17 @@ def agent_status():
     return {"running": _is_run_active()}
 
 
+@bp.post("/api/agent/stop")
+def agent_stop():
+    global _agent_process
+    if _agent_process is not None and _agent_process.poll() is None:
+        _agent_process.terminate()
+        from db.repositories import session_repository
+        session_repository.cancel_active()
+        return {"ok": True}
+    return {"ok": False, "reason": "not running"}
+
+
 @bp.get("/api/agent/logs")
 def agent_logs():
     try:
