@@ -9,10 +9,17 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from config import AGENT, LINKEDIN
+from config import AGENT, LINKEDIN, STEALTH
 from collector.base import JobSource, RawJob
 
 _SEARCH_URL = LINKEDIN["search_url"]
+
+# Pages visited between job batches to simulate organic browsing
+_DISTRACTION_URLS = [
+    "https://www.linkedin.com/feed/",
+    "https://www.linkedin.com/mynetwork/",
+    "https://www.linkedin.com/jobs/",
+]
 
 
 class LinkedInSource(JobSource):
@@ -78,6 +85,7 @@ class LinkedInSource(JobSource):
         return self._collect_cards(max_jobs=max_results)
 
     def fetch_description(self, url: str) -> str | None:
+        self._jitter_mouse()
         try:
             self._page.goto(url, wait_until="domcontentloaded", timeout=30_000)
         except PlaywrightTimeout:
@@ -87,8 +95,19 @@ class LinkedInSource(JobSource):
         except PlaywrightTimeout:
             time.sleep(3)
 
+        self._jitter_mouse()
         self._scroll_to_bottom()
-        self._wait(min_sec=8, max_sec=20)  # simulate reading time to avoid detection
+        # Occasionally scroll back up a bit — like re-reading something
+        if random.random() < 0.3:
+            up = random.randint(200, 600)
+            self._page.evaluate(f"window.scrollBy(0, -{up})")
+            time.sleep(random.uniform(1, 3))
+            self._scroll_to_bottom()
+
+        self._human_delay(
+            STEALTH["desc_delay_min"],
+            STEALTH["desc_delay_max"],
+        )
 
         return self._page.evaluate("""
             () => {
@@ -97,7 +116,7 @@ class LinkedInSource(JobSource):
                 if (descEl && descEl.innerText.trim().length > 100) {
                     return descEl.innerText.trim().slice(0, 5000);
                 }
-                // Fall back to finding the section header (multilingual)
+                // Fall back to section header — multilingual
                 const headers = [
                     'About the job', 'Über die Stelle', 'À propos du poste',
                     'Over de functie', 'Sobre el trabajo', 'O tej pracy',
@@ -112,7 +131,42 @@ class LinkedInSource(JobSource):
             }
         """) or None
 
+    def distract(self) -> None:
+        """Visit a random non-job LinkedIn page to simulate organic browsing."""
+        url = random.choice(_DISTRACTION_URLS)
+        print(f"  [stealth] Visiting {url}")
+        try:
+            self._goto(url)
+        except Exception:
+            return
+        self._jitter_mouse()
+        self._scroll_to_bottom()
+        self._human_delay(15, 45)
+
     # --- private helpers ---
+
+    def _human_delay(self, min_sec: float, max_sec: float) -> float:
+        """Beta-distributed delay: mostly short, occasionally long. 5% chance of extra 1-5 min pause."""
+        r = random.betavariate(2, 5)   # peaks near 0.25 of range
+        wait = min_sec + r * (max_sec - min_sec)
+        if random.random() < 0.05:     # 5% — "went to make coffee"
+            wait += random.uniform(60, 300)
+        time.sleep(wait)
+        return wait
+
+    def _jitter_mouse(self) -> None:
+        """Move mouse to a few random positions to simulate natural cursor movement."""
+        try:
+            vw = self._page.viewport_size or {"width": 1280, "height": 800}
+            w, h = vw["width"], vw["height"]
+            steps = random.randint(2, 5)
+            for _ in range(steps):
+                x = random.randint(100, w - 100)
+                y = random.randint(100, h - 100)
+                self._page.mouse.move(x, y)
+                time.sleep(random.uniform(0.1, 0.4))
+        except Exception:
+            pass
 
     def _goto(self, url: str) -> None:
         try:
@@ -131,7 +185,7 @@ class LinkedInSource(JobSource):
                 break
             scroll_pos = min(scroll_pos + random.randint(300, 700), scroll_height)
             self._page.evaluate(f"window.scrollTo(0, {scroll_pos})")
-            time.sleep(random.uniform(0.2, 0.7))
+            time.sleep(random.uniform(0.2, 0.8))
 
     def _collect_cards(self, max_jobs: int | None = None) -> list[RawJob]:
         results: list[RawJob] = []
@@ -190,6 +244,6 @@ class LinkedInSource(JobSource):
                 break
 
             next_btn.click()
-            self._wait(min_sec=5, max_sec=12)
+            self._wait(min_sec=5, max_sec=15)
 
         return results[:max_jobs] if max_jobs else results

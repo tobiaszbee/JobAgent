@@ -9,10 +9,11 @@
 # Logs are written to data\logs\scheduler.log inside the project directory.
 
 param(
-    [string]$Time     = "08:00",   # Daily run time (HH:MM)
-    [int]   $Days     = 1,         # --days argument passed to run_all.py
-    [int]   $MaxJobs  = 0,         # --max-jobs (0 = unlimited)
-    [string]$TaskName = "JobAgent"
+    [string]$Time        = "07:30",   # Scheduled start — script adds random delay up to +90 min
+    [int]   $Days        = 1,         # --days argument passed to run_all.py
+    [int]   $MaxJobs     = 0,         # --max-jobs (0 = unlimited)
+    [int]   $RandomStart = 5400,      # Max random startup delay in seconds (default 90 min)
+    [string]$TaskName    = "JobAgent"
 )
 
 $ErrorActionPreference = "Stop"
@@ -27,7 +28,7 @@ if (-not (Test-Path $Python)) {
     exit 1
 }
 
-$Arguments = "`"$Script`" --days $Days --log-file `"$LogFile`""
+$Arguments = "`"$Script`" --days $Days --log-file `"$LogFile`" --random-start $RandomStart"
 if ($MaxJobs -gt 0) {
     $Arguments += " --max-jobs $MaxJobs"
 }
@@ -57,7 +58,9 @@ Register-ScheduledTask `
 
 Write-Host ""
 Write-Host "Task '$TaskName' registered successfully."
-Write-Host "  Schedule : daily at $Time"
+Write-Host "  Schedule : daily at $Time + random 0-$($RandomStart/60)min delay"
+$EndTime = ([datetime]::ParseExact($Time,'HH:mm',$null)).AddSeconds($RandomStart).ToString('HH:mm')
+Write-Host "  Effective window: $Time - $EndTime"
 Write-Host "  Days back: $Days"
 Write-Host "  Log file : $LogFile"
 Write-Host ""

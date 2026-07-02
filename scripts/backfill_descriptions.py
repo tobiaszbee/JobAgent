@@ -1,11 +1,14 @@
-"""Retry fetching descriptions for jobs that are missing them."""
+"""Retry fetching descriptions for jobs that are missing them (batched, stealth-safe)."""
 import sys
 import os
+import random
+import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
+from config import STEALTH
 from db.migrations import init_db
 from db.repositories import job_repository
 from collector.sources.linkedin import LinkedInSource
@@ -21,23 +24,47 @@ if not total:
     print("PROGRESS:0/0")
     sys.exit(0)
 
-print(f"Found {total} job(s) without a description. Fetching...")
+print(f"Found {total} job(s) without descriptions. Fetching in batches...")
 print(f"PROGRESS:0/{total}")
 
-ok = 0
-failed = 0
+batch_size    = STEALTH["batch_size"]
+distract_ev   = STEALTH["distract_every_n_batches"]
+batches       = [missing[i:i + batch_size] for i in range(0, total, batch_size)]
+done = ok = failed = 0
 
-with LinkedInSource() as source:
-    source.login()
-    for i, job in enumerate(missing, 1):
-        desc = source.fetch_description(job["url"])
-        if desc:
-            job_repository.update_description(job["id"], desc)
-            print(f"  [{i}/{total}] OK ({len(desc)} chars)")
-            ok += 1
-        else:
-            print(f"  [{i}/{total}] No description: {job['url']}")
-            failed += 1
-        print(f"PROGRESS:{i}/{total}")
+for batch_idx, batch in enumerate(batches):
+    if batch_idx > 0:
+        pause = random.uniform(STEALTH["batch_pause_min"], STEALTH["batch_pause_max"])
+        print(f"\n[stealth] Pausing {pause / 60:.1f} min before batch {batch_idx + 1}/{len(batches)}...")
+        time.sleep(pause)
 
-print(f"\nDone. Updated: {ok}  Still missing: {failed}")
+    print(f"\n--- Batch {batch_idx + 1}/{len(batches)} ({len(batch)} jobs) ---")
+
+    with LinkedInSource() as source:
+        source.login()
+
+        if distract_ev > 0 and batch_idx % distract_ev == 0:
+            source.distract()
+
+        for job in batch:
+            desc = source.fetch_description(job["url"])
+            if desc:
+                job_repository.update_description(job["id"], desc)
+                print(f"  OK ({len(desc)} chars): {job['url'].split('/')[-2]}")
+                ok += 1
+            else:
+                print(f"  Retry: {job['url'].split('/')[-2]}")
+                time.sleep(random.uniform(30, 60))
+                desc = source.fetch_description(job["url"])
+                if desc:
+                    job_repository.update_description(job["id"], desc)
+                    print(f"  Retry OK")
+                    ok += 1
+                else:
+                    print(f"  Failed: {job['url']}")
+                    failed += 1
+
+            done += 1
+            print(f"PROGRESS:{done}/{total}")
+
+print(f"\nDone. Fetched: {ok}  Still missing: {failed}")

@@ -1,14 +1,76 @@
 import sys
 import os
+import random
+import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
+from config import STEALTH
 from db.migrations import init_db
 from db.repositories import job_repository, session_repository, criteria_repository
 from collector.filters import apply_filters
 from collector.sources.linkedin import LinkedInSource
+
+
+def _fetch_descriptions_in_batches(new_job_ids: list[tuple[str, str]], log=print) -> None:
+    """
+    Fetch descriptions for new jobs in small batches with fresh browser sessions
+    and long pauses between batches to avoid LinkedIn rate-limiting.
+    """
+    batch_size = STEALTH["batch_size"]
+    distract_every = STEALTH["distract_every_n_batches"]
+    batches = [new_job_ids[i:i + batch_size] for i in range(0, len(new_job_ids), batch_size)]
+
+    log(f"\nFetching descriptions in {len(batches)} batch(es) of ≤{batch_size}...")
+
+    ok_total = 0
+    fail_total = 0
+
+    for batch_idx, batch in enumerate(batches):
+        if batch_idx > 0:
+            pause = random.uniform(
+                STEALTH["batch_pause_min"],
+                STEALTH["batch_pause_max"],
+            )
+            log(f"\n[stealth] Pausing {pause / 60:.1f} min before batch {batch_idx + 1}/{len(batches)}...")
+            time.sleep(pause)
+
+        log(f"\n--- Batch {batch_idx + 1}/{len(batches)} ({len(batch)} jobs) ---")
+
+        with LinkedInSource() as source:
+            source.login()
+
+            if distract_every > 0 and batch_idx % distract_every == 0:
+                source.distract()
+
+            ok = 0
+            fail = 0
+            for job_id, url in batch:
+                desc = source.fetch_description(url)
+                if desc:
+                    job_repository.update_description(job_id, desc)
+                    log(f"  OK: {url.split('/')[-2]}")
+                    ok += 1
+                else:
+                    # One retry after a short extra wait
+                    log(f"  Retry: {url.split('/')[-2]}")
+                    time.sleep(random.uniform(30, 60))
+                    desc = source.fetch_description(url)
+                    if desc:
+                        job_repository.update_description(job_id, desc)
+                        log(f"  Retry OK")
+                        ok += 1
+                    else:
+                        log(f"  Failed: {url}")
+                        fail += 1
+
+        log(f"  Batch {batch_idx + 1} done: {ok} OK, {fail} failed")
+        ok_total += ok
+        fail_total += fail
+
+    log(f"\nDescriptions: {ok_total} fetched, {fail_total} still missing")
 
 
 def run(
@@ -43,10 +105,11 @@ def run(
     log("=" * 50)
 
     try:
+        # ── Phase 1: collect job cards (no description fetching) ──────────────
+        new_job_ids: list[tuple[str, str]] = []
+
         with LinkedInSource(days_back=days_back) as source:
             source.login()
-
-            new_job_ids: list[tuple[str, str]] = []  # (job_id, url)
 
             for title in search_queries:
                 if max_jobs and jobs_new >= max_jobs:
@@ -84,26 +147,21 @@ def run(
                         new_job_ids.append((job_id, raw.url))
                         log(f"  [{jobs_new}{'/' + str(max_jobs) if max_jobs else ''}] {raw.title} @ {raw.company}")
 
-            if new_job_ids:
-                log(f"\nFetching descriptions for {len(new_job_ids)} new job(s)...")
-                failed_desc: list[tuple[str, str]] = []
-                for job_id, url in new_job_ids:
-                    description = source.fetch_description(url)
-                    if description:
-                        job_repository.update_description(job_id, description)
-                    else:
-                        failed_desc.append((job_id, url))
-                        log(f"  No description: {url}")
+                    # Pause between search queries to avoid rate-limiting
+                    if (title, location) != (search_queries[-1], criteria["locations"][-1]):
+                        pause = random.uniform(
+                            STEALTH["search_pause_min"],
+                            STEALTH["search_pause_max"],
+                        )
+                        log(f"  [stealth] Pausing {pause:.0f}s before next search...")
+                        time.sleep(pause)
 
-                if failed_desc:
-                    log(f"\nRetrying {len(failed_desc)} job(s) with missing description...")
-                    for job_id, url in failed_desc:
-                        description = source.fetch_description(url)
-                        if description:
-                            job_repository.update_description(job_id, description)
-                            log(f"  Retry OK: {url}")
-                        else:
-                            log(f"  Retry failed: {url}")
+        # Browser closed here — short cooldown before opening again for descriptions
+        if new_job_ids:
+            cooldown = random.uniform(30, 90)
+            log(f"\n[stealth] Cooldown {cooldown:.0f}s before fetching descriptions...")
+            time.sleep(cooldown)
+            _fetch_descriptions_in_batches(new_job_ids, log=log)
 
         session_repository.finish(session_id, jobs_found=jobs_found, jobs_scored=0)
 
