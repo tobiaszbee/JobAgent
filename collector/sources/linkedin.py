@@ -79,6 +79,7 @@ class LinkedInSource(JobSource):
             f"&location={quote(location)}"
             f"&f_WT=2"
             f"&f_TPR=r{seconds}"
+            f"&sortBy=DD"
         )
         self._goto(url)
         self._wait()
@@ -193,6 +194,7 @@ class LinkedInSource(JobSource):
     def _collect_cards(self, max_jobs: int | None = None, known_urls: set[str] | None = None) -> list[RawJob]:
         results: list[RawJob] = []
         page_num = 0
+        new_total = 0  # estimated-new cards (not in known_urls) for max_jobs cap
 
         while True:
             try:
@@ -238,13 +240,15 @@ class LinkedInSource(JobSource):
 
             page_num += 1
             new_on_page = sum(1 for c in cards if c["url"] not in known_urls) if known_urls is not None else len(cards)
+            new_total += new_on_page
             print(f"  Page {page_num}: {len(cards)} cards ({new_on_page} new, total: {len(results)})")
 
             if known_urls is not None and new_on_page == 0:
                 print("  All cards on this page are known — stopping early.")
                 break
 
-            if max_jobs and len(results) >= max_jobs:
+            cap_count = new_total if known_urls is not None else len(results)
+            if max_jobs and cap_count >= max_jobs:
                 break
 
             next_btn = self._page.query_selector("button[aria-label='View next page']")

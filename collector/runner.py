@@ -158,6 +158,7 @@ def run(
 
                         jobs_new += 1
                         new_job_ids.append((job_id, raw.url))
+                        known_urls.add(raw.url)
                         log(f"  [{jobs_new}{'/' + str(max_jobs) if max_jobs else ''}] {raw.title} @ {raw.company}")
 
         # Browser closed here — short cooldown before opening again for descriptions
