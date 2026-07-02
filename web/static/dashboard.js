@@ -143,8 +143,8 @@ function goToPage(n) {
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-function renderPagination(total, page, perPage) {
-  const pages = Math.ceil(total / perPage);
+function renderPagination(total, page) {
+  const pages = Math.ceil(total / JOBS_PER_PAGE);
   const el = document.getElementById('pagination');
   if (pages <= 1) { el.innerHTML = ''; return; }
 
@@ -158,12 +158,12 @@ function renderPagination(total, page, perPage) {
   }
 
   const btn = (label, p, disabled = false, active = false) =>
-    `<button class="pg-btn${active ? ' pg-active' : ''}" ${disabled ? 'disabled' : `onclick="goToPage(${p})"`}>${label}</button>`;
+    `<button class="pg-btn${active ? ' pg-active' : ''}" ${disabled || active ? 'disabled' : `onclick="goToPage(${p})"`}>${label}</button>`;
 
   el.innerHTML =
     btn('‹ Prev', page - 1, page === 1) +
     range.map(r => r === '…' ? `<span class="pg-ellipsis">…</span>` : btn(r, r, false, r === page)).join('') +
-    btn('Next ›', page + 1, page === pages);
+    btn('Next ›', page + 1, page >= pages);
 }
 
 function render() {
@@ -176,18 +176,20 @@ function render() {
   if (sort === 'company') jobs.sort((a, b) => (a.company || '').localeCompare(b.company || ''));
 
   const total = jobs.length;
+  const maxPage = Math.max(1, Math.ceil(total / JOBS_PER_PAGE));
+  if (currentPage > maxPage) currentPage = maxPage;
+
   document.getElementById('count').textContent = `${total} job${total !== 1 ? 's' : ''}`;
+  renderPagination(total, currentPage);
 
   const container = document.getElementById('jobs-container');
   if (!jobs.length) {
     container.innerHTML = '<div class="no-results">No jobs found.</div>';
-    document.getElementById('pagination').innerHTML = '';
     return;
   }
 
   const start = (currentPage - 1) * JOBS_PER_PAGE;
   const pageJobs = jobs.slice(start, start + JOBS_PER_PAGE);
-  renderPagination(total, currentPage, JOBS_PER_PAGE);
 
   container.innerHTML = pageJobs.map(j => {
     const score = j.score != null ? j.score.toFixed(1) : '—';
@@ -620,7 +622,7 @@ document.getElementById('search').addEventListener('input', () => {
   searchTimeout = setTimeout(loadJobs, 300);
 });
 document.getElementById('min-score').addEventListener('change', loadJobs);
-document.getElementById('sort').addEventListener('change', render);
+document.getElementById('sort').addEventListener('change', () => { currentPage = 1; render(); });
 
 loadStats();
 loadJobs();
