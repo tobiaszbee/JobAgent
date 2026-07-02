@@ -152,6 +152,10 @@ class JustJoinSource(JobSource):
         max_results: int | None = None,
         known_urls: set[str] | None = None,
     ) -> list[RawJob]:
+        loc = location.lower().strip()
+        if loc not in ("poland", "polska", "pl", "remote", "zdalne", "zdalnie", "zdalny"):
+            return []
+
         days = days_back if days_back is not None else self._days_back
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 

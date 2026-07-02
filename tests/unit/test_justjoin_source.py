@@ -284,6 +284,17 @@ class TestJustJoinSourceSearch:
         results = src.search("PHP Developer", "Poland")
         assert results == []
 
+    def test_non_polish_location_returns_empty_without_http(self):
+        src = _build_source([_make_posting()])
+        results = src.search("PHP Developer", "Germany")
+        assert results == []
+        src._get_listing_urls.assert_not_called()
+
+    def test_remote_location_not_skipped(self):
+        src = _build_source([_make_posting(city="", is_remote=True)])
+        results = src.search("PHP Developer", "Remote")
+        assert len(results) == 1
+
     def test_posting_fetch_failure_skips_offer(self):
         src = _build_source([_make_posting(slug="good"), _make_posting(slug="bad")])
         src._get_job_posting = MagicMock(
