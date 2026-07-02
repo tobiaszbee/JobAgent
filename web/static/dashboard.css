@@ -87,6 +87,13 @@ header h1 { font-size: 20px; font-weight: 600; }
 .job-date { font-size: 11px; color: #aaa; }
 .no-results { text-align: center; padding: 60px; color: #999; }
 
+.pagination { display: flex; justify-content: center; align-items: center; gap: 4px; padding: 16px 32px 24px; }
+.pg-btn { min-width: 36px; height: 36px; padding: 0 10px; border: 1px solid #d0d0d0; border-radius: 6px; background: white; color: #444; font-size: 13px; cursor: pointer; transition: all 0.15s; }
+.pg-btn:hover:not(:disabled) { border-color: #0a66c2; color: #0a66c2; background: #e8f0fb; }
+.pg-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.pg-btn.pg-active { background: #0a66c2; border-color: #0a66c2; color: white; font-weight: 600; cursor: default; }
+.pg-ellipsis { padding: 0 6px; color: #aaa; font-size: 13px; }
+
 /* Criteria panel */
 .criteria-panel { padding: 20px 32px; }
 .criteria-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 20px; }

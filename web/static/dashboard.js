@@ -2,6 +2,8 @@ let ALL_JOBS = [];
 let currentStatus = 'all';
 let agentSocket = null;
 let showAutoRejected = false;
+let currentPage = 1;
+const JOBS_PER_PAGE = 25;
 
 function esc(s) {
   return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -122,6 +124,7 @@ async function loadJobs() {
 
   const r = await fetch('/api/jobs?' + params);
   ALL_JOBS = await r.json();
+  currentPage = 1;
   render();
 }
 
@@ -130,7 +133,37 @@ function toggleAutoRejected() {
   const btn = document.getElementById('btn-toggle-rejected');
   btn.textContent = showAutoRejected ? 'Hide auto-rejected' : 'Show auto-rejected';
   btn.classList.toggle('active', showAutoRejected);
+  currentPage = 1;
   render();
+}
+
+function goToPage(n) {
+  currentPage = n;
+  render();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function renderPagination(total, page, perPage) {
+  const pages = Math.ceil(total / perPage);
+  const el = document.getElementById('pagination');
+  if (pages <= 1) { el.innerHTML = ''; return; }
+
+  const range = [];
+  for (let i = 1; i <= pages; i++) {
+    if (i === 1 || i === pages || (i >= page - 2 && i <= page + 2)) {
+      range.push(i);
+    } else if (range[range.length - 1] !== '…') {
+      range.push('…');
+    }
+  }
+
+  const btn = (label, p, disabled = false, active = false) =>
+    `<button class="pg-btn${active ? ' pg-active' : ''}" ${disabled ? 'disabled' : `onclick="goToPage(${p})"`}>${label}</button>`;
+
+  el.innerHTML =
+    btn('‹ Prev', page - 1, page === 1) +
+    range.map(r => r === '…' ? `<span class="pg-ellipsis">…</span>` : btn(r, r, false, r === page)).join('') +
+    btn('Next ›', page + 1, page === pages);
 }
 
 function render() {
@@ -142,15 +175,21 @@ function render() {
   if (sort === 'date')    jobs.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
   if (sort === 'company') jobs.sort((a, b) => (a.company || '').localeCompare(b.company || ''));
 
-  document.getElementById('count').textContent = `${jobs.length} job${jobs.length !== 1 ? 's' : ''}`;
+  const total = jobs.length;
+  document.getElementById('count').textContent = `${total} job${total !== 1 ? 's' : ''}`;
 
   const container = document.getElementById('jobs-container');
   if (!jobs.length) {
     container.innerHTML = '<div class="no-results">No jobs found.</div>';
+    document.getElementById('pagination').innerHTML = '';
     return;
   }
 
-  container.innerHTML = jobs.map(j => {
+  const start = (currentPage - 1) * JOBS_PER_PAGE;
+  const pageJobs = jobs.slice(start, start + JOBS_PER_PAGE);
+  renderPagination(total, currentPage, JOBS_PER_PAGE);
+
+  container.innerHTML = pageJobs.map(j => {
     const score = j.score != null ? j.score.toFixed(1) : '—';
     const sc    = scoreClass(j.score);
     return `
