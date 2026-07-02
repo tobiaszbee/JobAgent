@@ -1,7 +1,9 @@
 from collector.sources.linkedin import LinkedInSource
+from collector.sources.justjoin import JustJoinSource
 
 _REGISTRY: dict[str, dict] = {
     "linkedin": {"name": "LinkedIn", "cls": LinkedInSource},
+    "justjoin": {"name": "JustJoin.it", "cls": JustJoinSource},
 }
 
 
