@@ -135,7 +135,7 @@
             <label>Search last <input type="number" id="run-days" value="1" min="1" max="30"> days</label>
             <label>Max new jobs <input type="number" id="run-max-jobs" placeholder="unlimited" min="1"></label>
           </div>
-          <div class="run-criteria">
+          <div class="run-criteria-row">
             <div class="run-criteria-group">
               <div class="run-criteria-header">
                 <strong>Search Queries</strong>
@@ -145,18 +145,18 @@
             </div>
             <div class="run-criteria-group">
               <div class="run-criteria-header">
-                <strong>Locations</strong>
-                <button class="btn-select-all" onclick="toggleRunAll('location')">Toggle all</button>
-              </div>
-              <div id="run-locations" class="run-checks"></div>
-            </div>
-            <div class="run-criteria-group">
-              <div class="run-criteria-header">
                 <strong>Sources</strong>
                 <button class="btn-select-all" onclick="toggleRunAll('source')">Toggle all</button>
               </div>
               <div id="run-sources" class="run-checks"></div>
             </div>
+          </div>
+          <div class="run-criteria-group">
+            <div class="run-criteria-header">
+              <strong>Locations</strong>
+              <button class="btn-select-all" onclick="toggleRunAll('location')">Toggle all</button>
+            </div>
+            <div id="run-locations" class="run-checks run-checks-grid"></div>
           </div>
         </div>
       </div>

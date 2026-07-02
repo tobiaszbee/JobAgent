@@ -202,10 +202,12 @@ header h1 { font-size: 20px; font-weight: 600; }
 .run-params input:focus { border-color: #0a66c2; }
 
 .run-criteria { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.run-criteria-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .run-criteria-group { background: #f8f9fa; border-radius: 6px; padding: 12px; }
 .run-criteria-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
 .run-criteria-header strong { font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; color: #666; }
 .run-checks { display: flex; flex-direction: column; gap: 3px; max-height: 90px; overflow-y: auto; }
+.run-checks-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; max-height: 90px; overflow-y: auto; }
 .run-check { display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; padding: 2px 0; }
 .run-check input { cursor: pointer; }
 
