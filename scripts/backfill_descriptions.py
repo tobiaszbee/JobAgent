@@ -61,7 +61,8 @@ for batch_idx, batch in enumerate(batches):
                     print(f"  Retry OK")
                     ok += 1
                 else:
-                    print(f"  Failed: {job['url']}")
+                    print(f"  Failed (unavailable): {job['url']}")
+                    job_repository.update_score_and_status(job["id"], 0.0, "Job listing no longer available on LinkedIn", "auto_rejected")
                     failed += 1
 
             done += 1

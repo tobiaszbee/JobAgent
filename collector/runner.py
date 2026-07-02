@@ -63,7 +63,8 @@ def _fetch_descriptions_in_batches(new_job_ids: list[tuple[str, str]], log=print
                         log(f"  Retry OK")
                         ok += 1
                     else:
-                        log(f"  Failed: {url}")
+                        log(f"  Failed (unavailable): {url}")
+                        job_repository.update_score_and_status(job_id, 0.0, "Job listing no longer available on LinkedIn", "auto_rejected")
                         fail += 1
 
         log(f"  Batch {batch_idx + 1} done: {ok} OK, {fail} failed")
