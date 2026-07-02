@@ -143,8 +143,8 @@ def get_by_status(status: str) -> list[dict]:
 
 
 def get_examples(
-    limit_positive: int = 8,
-    limit_negative: int = 5,
+    limit_positive: int = 150,
+    limit_negative: int = 150,
 ) -> tuple[list[dict], list[dict]]:
     conn = get_connection()
     positive = conn.execute(
