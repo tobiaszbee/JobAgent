@@ -14,6 +14,9 @@ class RawJob:
 
 
 class JobSource(ABC):
+    # Set to True in browser-based sources that need stealth pauses between searches.
+    stealth_pause: bool = False
+
     @property
     @abstractmethod
     def name(self) -> str: ...

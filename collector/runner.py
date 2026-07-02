@@ -132,7 +132,7 @@ def run(
                         if max_jobs and jobs_new >= max_jobs:
                             break
 
-                        if not first_search:
+                        if not first_search and source.stealth_pause:
                             pause = random.uniform(
                                 STEALTH["search_pause_min"],
                                 STEALTH["search_pause_max"],

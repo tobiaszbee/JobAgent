@@ -23,6 +23,8 @@ _DISTRACTION_URLS = [
 
 
 class LinkedInSource(JobSource):
+    stealth_pause = True
+
     def __init__(self, days_back: int = 7):
         self._days_back = days_back
         self._playwright = None
