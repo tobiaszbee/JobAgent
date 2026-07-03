@@ -1,11 +1,13 @@
 from collector.sources.linkedin import LinkedInSource
 from collector.sources.justjoin import JustJoinSource
 from collector.sources.remotive import RemotiveSource
+from collector.sources.remoteok import RemoteOKSource
 
 _REGISTRY: dict[str, dict] = {
     "linkedin":  {"name": "LinkedIn",     "cls": LinkedInSource},
     "justjoin":  {"name": "JustJoin.it",  "cls": JustJoinSource},
     "remotive":  {"name": "Remotive.io",  "cls": RemotiveSource},
+    "remoteok":  {"name": "Remote OK",    "cls": RemoteOKSource},
 }
 
 
