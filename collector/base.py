@@ -14,12 +14,15 @@ class RawJob:
 
 
 class JobSource(ABC):
+    # Set to True in browser-based sources that need stealth pauses between searches.
+    stealth_pause: bool = False
+
     @property
     @abstractmethod
     def name(self) -> str: ...
 
     @abstractmethod
-    def search(self, title: str, location: str, days_back: int, max_results: int | None = None) -> list[RawJob]: ...
+    def search(self, title: str, location: str, days_back: int | None = None, max_results: int | None = None, known_urls: set[str] | None = None) -> list[RawJob]: ...
 
     def fetch_description(self, url: str) -> str | None:
         """Override in sources that can fetch full job descriptions."""

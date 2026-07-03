@@ -12,6 +12,11 @@
   <h1>Job Agent Dashboard</h1>
   <div class="header-right">
     <span id="last-updated"></span>
+    <div class="agent-indicator" id="agent-indicator" style="display:none" onclick="openActivityModal()">
+      <span class="agent-dot"></span>
+      <span>Running</span>
+    </div>
+    <button class="btn-prefs" id="btn-prefs" onclick="openPrefsModal()">&#129504; Preferences</button>
     <button class="btn-run" id="btn-run" onclick="openRunModal()">&#9654; Run Agent</button>
   </div>
 </header>
@@ -47,6 +52,9 @@
     <option value="6">Score &ge; 6</option>
     <option value="7">Score &ge; 7</option>
     <option value="8">Score &ge; 8</option>
+  </select>
+  <select id="source-filter">
+    <option value="">All sources</option>
   </select>
   <select id="sort">
     <option value="score">Sort by score</option>
@@ -111,38 +119,45 @@
 
 <!-- Run Modal -->
 <div class="modal-overlay" id="run-modal" style="display:none">
-  <div class="modal">
+  <div class="modal modal-run">
     <div class="modal-header">
       <h2>Run Agent</h2>
       <button class="modal-close" onclick="closeRunModal()">&#x2715;</button>
     </div>
     <div class="modal-body">
-      <div class="run-params">
-        <label>
-          Search last
-          <input type="number" id="run-days" value="1" min="1" max="30">
-          days
-        </label>
-        <label>
-          Max new jobs
-          <input type="number" id="run-max-jobs" placeholder="unlimited" min="1">
-        </label>
-      </div>
 
-      <div class="run-criteria">
-        <div class="run-criteria-group">
-          <div class="run-criteria-header">
-            <strong>Search Queries</strong>
-            <button class="btn-select-all" onclick="toggleRunAll('search-query')">Toggle all</button>
+      <div class="run-spec" id="run-spec">
+        <button class="run-spec-toggle" onclick="toggleRunSpec()">
+          <span id="run-spec-arrow">▼</span> Specification
+        </button>
+        <div class="run-spec-body" id="run-spec-body">
+          <div class="run-params">
+            <label>Search last <input type="number" id="run-days" value="1" min="1" max="30"> days</label>
+            <label>Max new jobs <input type="number" id="run-max-jobs" placeholder="unlimited" min="1"></label>
           </div>
-          <div id="run-search-queries" class="run-checks"></div>
-        </div>
-        <div class="run-criteria-group">
-          <div class="run-criteria-header">
-            <strong>Locations</strong>
-            <button class="btn-select-all" onclick="toggleRunAll('location')">Toggle all</button>
+          <div class="run-criteria-row">
+            <div class="run-criteria-group">
+              <div class="run-criteria-header">
+                <strong>Search Queries</strong>
+                <button class="btn-select-all" onclick="toggleRunAll('search-query')">Toggle all</button>
+              </div>
+              <div id="run-search-queries" class="run-checks"></div>
+            </div>
+            <div class="run-criteria-group">
+              <div class="run-criteria-header">
+                <strong>Sources</strong>
+                <button class="btn-select-all" onclick="toggleRunAll('source')">Toggle all</button>
+              </div>
+              <div id="run-sources" class="run-checks"></div>
+            </div>
           </div>
-          <div id="run-locations" class="run-checks"></div>
+          <div class="run-criteria-group">
+            <div class="run-criteria-header">
+              <strong>Locations</strong>
+              <button class="btn-select-all" onclick="toggleRunAll('location')">Toggle all</button>
+            </div>
+            <div id="run-locations" class="run-checks run-checks-grid"></div>
+          </div>
         </div>
       </div>
 
@@ -175,6 +190,43 @@
     <div class="modal-footer">
       <button class="btn-start" id="btn-backfill-start" onclick="startBackfill()">&#9654; Start</button>
       <button class="btn-cancel" onclick="closeBackfillModal()">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Activity Modal -->
+<div class="modal-overlay" id="activity-modal" style="display:none">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>Agent Activity <span class="activity-status-badge" id="activity-status-badge"></span></h2>
+      <button class="modal-close" onclick="closeActivityModal()">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <div class="run-log" id="activity-log">No logs yet.</div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-stop" id="btn-activity-stop" onclick="stopAgent()" style="display:none">&#9632; Stop</button>
+      <button class="btn-cancel" onclick="closeActivityModal()">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Preferences Modal -->
+<div class="modal-overlay" id="prefs-modal" style="display:none">
+  <div class="modal modal-prefs">
+    <div class="modal-header">
+      <h2>Preference Profile</h2>
+      <button class="modal-close" onclick="closePrefsModal()">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <div id="prefs-meta" class="prefs-meta"></div>
+      <div id="prefs-content" class="prefs-content">
+        <span class="prefs-empty">No profile yet. Click "Refresh" to distill from your feedback history.</span>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-prefs-refresh" id="btn-prefs-refresh" onclick="distillPreferences()">&#8635; Refresh Profile</button>
+      <button class="btn-cancel" onclick="closePrefsModal()">Close</button>
     </div>
   </div>
 </div>

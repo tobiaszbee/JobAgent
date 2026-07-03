@@ -53,6 +53,45 @@ def init_db() -> None:
             model      TEXT,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
+
+        CREATE TABLE IF NOT EXISTS preference_profiles (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            content        TEXT NOT NULL,
+            applied_count  INTEGER DEFAULT 0,
+            rejected_count INTEGER DEFAULT 0,
+            updated_at     DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
     """)
     conn.commit()
+
+    # Additive migrations — safe to run on existing DBs
+    for migration in [
+        "ALTER TABLE jobs ADD COLUMN rejection_reason TEXT",
+        "ALTER TABLE sessions ADD COLUMN jobs_scored INTEGER DEFAULT 0",
+    ]:
+        try:
+            conn.execute(migration)
+            conn.commit()
+        except Exception:
+            pass  # column already exists
+
+    # Seed default criteria (INSERT OR IGNORE — safe to re-run on existing DBs)
+    _DEFAULT_CRITERIA = [
+        ("required", "PHP mentioned in the job description — NOTE: Laravel, Symfony, WordPress are PHP frameworks, so they count as PHP"),
+        ("required", "Remote work possible"),
+        ("rejected", "Candidate must physically relocate or be resident in a specific country"),
+        ("rejected", "Role is on-site with NO remote option"),
+        ("rejected", "Role is junior or intern level"),
+        ("rejected", "Job listing is not in English"),
+        ("rejected", '"Remote, UK based" or "UK based, remote" — means candidate must be in UK'),
+        ("rejected", '"Remote within UK" or "UK remote only" — means candidate must be in UK'),
+        ("rejected", '"Must be eligible to work in the UK" — means physical presence in UK required'),
+    ]
+    for type_, value in _DEFAULT_CRITERIA:
+        conn.execute(
+            "INSERT OR IGNORE INTO criteria (type, value) VALUES (?, ?)",
+            (type_, value),
+        )
+    conn.commit()
+
     conn.close()

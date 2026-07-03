@@ -1,8 +1,11 @@
 import json
+import logging
 import time
 import anthropic
 
 from config import ANTHROPIC_API_KEY, CLAUDE_MODEL
+
+logger = logging.getLogger(__name__)
 
 _client: anthropic.Anthropic | None = None
 
@@ -26,10 +29,21 @@ def _build_examples_section(positive: list[dict], negative: list[dict]) -> str:
         lines.append("EXAMPLES OF JOBS I REJECTED (learn what to avoid):")
         for ex in negative:
             desc = ex["description"][:150].replace("\n", " ") if ex.get("description") else ""
-            reason = (ex.get("score_reason") or "")[:100]
-            lines.append(f'- "{ex["title"]}" @ {ex["company"]}: {desc}... [Reason: {reason}]')
+            reason = (ex.get("rejection_reason") or ex.get("score_reason") or "")[:150]
+            reason_str = f" [My reason: {reason}]" if reason else ""
+            lines.append(f'- "{ex["title"]}" @ {ex["company"]}: {desc}...{reason_str}')
         lines.append("")
     return "\n".join(lines) + "\n" if lines else ""
+
+
+def _build_preferences_section(learned_preferences: str) -> str:
+    if not learned_preferences.strip():
+        return ""
+    return (
+        "LEARNED PREFERENCE PROFILE"
+        " (distilled from all feedback — use as high-priority scoring context):\n"
+        f"{learned_preferences.strip()}\n\n"
+    )
 
 
 def build_system_prompt(
@@ -37,41 +51,33 @@ def build_system_prompt(
     positive_examples: list[dict],
     negative_examples: list[dict],
     candidate_profile: str = "",
+    learned_preferences: str = "",
 ) -> str:
     """Build the system prompt. Call once per batch and reuse across jobs."""
+    prefs_section = _build_preferences_section(learned_preferences)
     examples_section = _build_examples_section(positive_examples, negative_examples)
 
     required = criteria.get("required", [])
-    required_extra = ("\n" + "\n".join(f"- {r}" for r in required)) if required else ""
+    required_lines = "\n".join(f"- {r}" for r in required) if required else "- (none configured)"
 
     rejected = criteria.get("rejected", [])
-    rejected_extra = (
-        "\n\nADDITIONAL USER-DEFINED REJECTION RULES (reject if any apply):\n"
-        + "\n".join(f"- {r}" for r in rejected)
-    ) if rejected else ""
+    rejected_lines = "\n".join(f"{i + 1}. {r}" for i, r in enumerate(rejected)) if rejected else "- (none configured)"
 
     preferred = criteria.get("preferred", [])
-    preferred_section = "\n".join(f"- {p}" for p in preferred) if preferred else "- (none configured)"
+    preferred_lines = "\n".join(f"- {p}" for p in preferred) if preferred else "- (none configured)"
 
     return f"""You are evaluating job listings for a candidate.
 
 {candidate_profile}
 
-{examples_section}REQUIRED (must have all):
-- PHP mentioned in the job description — NOTE: Laravel, Symfony, WordPress are PHP frameworks, so they count as PHP
-- Remote work possible{required_extra}
+{prefs_section}{examples_section}REQUIRED (must have all — job must pass every item to be considered):
+{required_lines}
 
 PREFERRED (increases score):
-{preferred_section}
+{preferred_lines}
 
 AUTOMATIC REJECTION — only reject if the description contains one of these EXACT situations:
-1. Candidate must physically relocate or be resident in a specific country
-2. Role is on-site with NO remote option
-3. Role is junior or intern level
-4. Job listing is not in English
-5. "Remote, UK based" or "UK based, remote" — means candidate must be in UK
-6. "Remote within UK" or "UK remote only" — means candidate must be in UK
-7. "Must be eligible to work in the UK" — means physical presence in UK required{rejected_extra}
+{rejected_lines}
 
 DO NOT reject for:
 - Company location ("Berlin-based company", "Paris-based startup", "London HQ")
@@ -111,11 +117,7 @@ _ERROR_RESULT = {
 }
 
 
-def score_job(
-    job: dict,
-    system_prompt: str,
-    log=print,
-) -> dict:
+def score_job(job: dict, system_prompt: str) -> dict:
     """
     Score a single job using a pre-built system prompt.
     Returns a dict with: score, score_reason, matched_required, matched_preferred, dealbreakers_found.
@@ -140,7 +142,7 @@ def score_job(
         except Exception as e:
             if "overloaded" in str(e).lower() and attempt < 2:
                 wait = (attempt + 1) * 30
-                log(f"  API overloaded, retrying in {wait}s...")
+                logger.warning(f"API overloaded, retrying in {wait}s...")
                 time.sleep(wait)
             else:
                 return {**_ERROR_RESULT, "score_reason": f"API error: {e}"}
@@ -161,5 +163,5 @@ def score_job(
             "dealbreakers_found": result.get("dealbreakers_found", []),
         }
     except json.JSONDecodeError:
-        log(f"  Failed to parse Claude response: {raw[:200]}")
+        logger.warning(f"Failed to parse Claude response: {raw[:200]}")
         return {**_ERROR_RESULT, "score_reason": "Failed to parse Claude response"}

@@ -48,6 +48,14 @@ def insert(
     return job_id
 
 
+def get_all_urls() -> set[str]:
+    """Return all known job URLs as a set for fast duplicate checking."""
+    conn = get_connection()
+    rows = conn.execute("SELECT url FROM jobs").fetchall()
+    conn.close()
+    return {row["url"] for row in rows}
+
+
 def get_missing_descriptions() -> list[dict]:
     """Jobs without a description that are not yet scored — candidates for description retry."""
     conn = get_connection()
@@ -78,12 +86,18 @@ def update_score(job_id: str, score: float, reason: str) -> None:
     conn.close()
 
 
-def update_status(job_id: str, status: str) -> None:
+def update_status(job_id: str, status: str, rejection_reason: str | None = None) -> None:
     conn = get_connection()
-    conn.execute(
-        "UPDATE jobs SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-        (status, job_id)
-    )
+    if status == "rejected" and rejection_reason is not None:
+        conn.execute(
+            "UPDATE jobs SET status = ?, rejection_reason = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (status, rejection_reason or None, job_id)
+        )
+    else:
+        conn.execute(
+            "UPDATE jobs SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (status, job_id)
+        )
     conn.commit()
     conn.close()
 
@@ -129,8 +143,8 @@ def get_by_status(status: str) -> list[dict]:
 
 
 def get_examples(
-    limit_positive: int = 8,
-    limit_negative: int = 5,
+    limit_positive: int = 150,
+    limit_negative: int = 150,
 ) -> tuple[list[dict], list[dict]]:
     conn = get_connection()
     positive = conn.execute(
@@ -145,10 +159,25 @@ def get_examples(
     return [dict(r) for r in positive], [dict(r) for r in negative]
 
 
+def get_all_feedback() -> tuple[list[dict], list[dict]]:
+    """Return ALL applied and rejected jobs (no limit) for preference distillation.
+    Excludes auto_rejected — only user-confirmed signals."""
+    conn = get_connection()
+    applied = conn.execute(
+        "SELECT title, company, location, description, score_reason FROM jobs WHERE status = 'applied' ORDER BY updated_at DESC"
+    ).fetchall()
+    rejected = conn.execute(
+        "SELECT title, company, location, description, rejection_reason, score_reason FROM jobs WHERE status = 'rejected' ORDER BY updated_at DESC"
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in applied], [dict(r) for r in rejected]
+
+
 def search(
     status: str | None = None,
     min_score: float | None = None,
     query: str | None = None,
+    source: str | None = None,
 ) -> list[dict]:
     conn = get_connection()
     sql = "SELECT * FROM jobs WHERE 1=1"
@@ -165,6 +194,10 @@ def search(
     if query:
         sql += " AND (title LIKE ? OR company LIKE ? OR location LIKE ?)"
         params += [f"%{query}%"] * 3
+
+    if source:
+        sql += " AND source = ?"
+        params.append(source)
 
     sql += " ORDER BY score DESC NULLS LAST, created_at DESC"
     rows = conn.execute(sql, params).fetchall()
