@@ -1,6 +1,9 @@
 import sys
 import random
 import time
+import logging
+
+logger = logging.getLogger(__name__)
 
 from config import STEALTH
 from db.migrations import init_db
@@ -10,7 +13,7 @@ from collector.sources import available as available_sources, make as make_sourc
 from collector.sources.linkedin import LinkedInSource
 
 
-def _fetch_descriptions_in_batches(new_job_ids: list[tuple[str, str]], log=print) -> None:
+def _fetch_descriptions_in_batches(new_job_ids: list[tuple[str, str]]) -> None:
     """
     Fetch descriptions for new jobs in small batches with fresh browser sessions
     and long pauses between batches to avoid LinkedIn rate-limiting.
@@ -19,7 +22,7 @@ def _fetch_descriptions_in_batches(new_job_ids: list[tuple[str, str]], log=print
     distract_every = STEALTH["distract_every_n_batches"]
     batches = [new_job_ids[i:i + batch_size] for i in range(0, len(new_job_ids), batch_size)]
 
-    log(f"\nFetching descriptions in {len(batches)} batch(es) of ≤{batch_size}...")
+    logger.info(f"\nFetching descriptions in {len(batches)} batch(es) of ≤{batch_size}...")
 
     ok_total = 0
     fail_total = 0
@@ -30,10 +33,10 @@ def _fetch_descriptions_in_batches(new_job_ids: list[tuple[str, str]], log=print
                 STEALTH["batch_pause_min"],
                 STEALTH["batch_pause_max"],
             )
-            log(f"\n[stealth] Pausing {pause / 60:.1f} min before batch {batch_idx + 1}/{len(batches)}...")
+            logger.info(f"\n[stealth] Pausing {pause / 60:.1f} min before batch {batch_idx + 1}/{len(batches)}...")
             time.sleep(pause)
 
-        log(f"\n--- Batch {batch_idx + 1}/{len(batches)} ({len(batch)} jobs) ---")
+        logger.info(f"\n--- Batch {batch_idx + 1}/{len(batches)} ({len(batch)} jobs) ---")
 
         with LinkedInSource() as source:
             source.login()
@@ -47,27 +50,27 @@ def _fetch_descriptions_in_batches(new_job_ids: list[tuple[str, str]], log=print
                 desc = source.fetch_description(url)
                 if desc:
                     job_repository.update_description(job_id, desc)
-                    log(f"  OK: {url.split('/')[-2]}")
+                    logger.info(f"  OK: {url.split('/')[-2]}")
                     ok += 1
                 else:
                     # One retry after a short extra wait
-                    log(f"  Retry: {url.split('/')[-2]}")
+                    logger.info(f"  Retry: {url.split('/')[-2]}")
                     time.sleep(random.uniform(30, 60))
                     desc = source.fetch_description(url)
                     if desc:
                         job_repository.update_description(job_id, desc)
-                        log(f"  Retry OK")
+                        logger.info("  Retry OK")
                         ok += 1
                     else:
-                        log(f"  Failed (unavailable): {url}")
+                        logger.info(f"  Failed (unavailable): {url}")
                         job_repository.update_score_and_status(job_id, 0.0, "Job listing no longer available on LinkedIn", "auto_rejected")
                         fail += 1
 
-        log(f"  Batch {batch_idx + 1} done: {ok} OK, {fail} failed")
+        logger.info(f"  Batch {batch_idx + 1} done: {ok} OK, {fail} failed")
         ok_total += ok
         fail_total += fail
 
-    log(f"\nDescriptions: {ok_total} fetched, {fail_total} still missing")
+    logger.info(f"\nDescriptions: {ok_total} fetched, {fail_total} still missing")
 
 
 def run(
@@ -77,7 +80,6 @@ def run(
     locations: list[str] | None = None,
     search_queries_override: list[str] | None = None,
     source_ids: list[str] | None = None,
-    log=print,
 ) -> dict:
     init_db()
 
@@ -99,21 +101,21 @@ def run(
     jobs_found = 0
     jobs_new = 0
 
-    log(f"Collector starting — last {days_back} day(s), limit: {max_jobs or 'unlimited'}")
-    log(f"Sources:        {', '.join(selected_sources)}")
-    log(f"Search queries: {', '.join(search_queries)}")
-    log(f"Locations:      {', '.join(criteria['locations'])}")
-    log("=" * 50)
+    logger.info(f"Collector starting — last {days_back} day(s), limit: {max_jobs or 'unlimited'}")
+    logger.info(f"Sources:        {', '.join(selected_sources)}")
+    logger.info(f"Search queries: {', '.join(search_queries)}")
+    logger.info(f"Locations:      {', '.join(criteria['locations'])}")
+    logger.info("=" * 50)
 
     try:
         # ── Phase 1: collect job cards ────────────────────────────────────────
         # Jobs whose source returns no description go here for Phase 2 fetching.
         new_job_ids: list[tuple[str, str]] = []
         known_urls = job_repository.get_all_urls()
-        log(f"Loaded {len(known_urls)} known URLs for early-stop deduplication.")
+        logger.info(f"Loaded {len(known_urls)} known URLs for early-stop deduplication.")
 
         for source_id in selected_sources:
-            log(f"\n[{source_id}] Starting source...")
+            logger.info(f"\n[{source_id}] Starting source...")
             source = make_source(source_id, days_back=days_back)
 
             with source:
@@ -132,11 +134,11 @@ def run(
                                 STEALTH["search_pause_min"],
                                 STEALTH["search_pause_max"],
                             )
-                            log(f"  [stealth] Pausing {pause:.0f}s before next search...")
+                            logger.info(f"  [stealth] Pausing {pause:.0f}s before next search...")
                             time.sleep(pause)
                         first_search = False
 
-                        log(f"\nSearching: {title!r} in {location!r}")
+                        logger.info(f"\nSearching: {title!r} in {location!r}")
                         remaining = (max_jobs - jobs_new) if max_jobs else None
                         raw_jobs = source.search(title, location, max_results=remaining, known_urls=known_urls)
                         jobs_found += len(raw_jobs)
@@ -144,7 +146,7 @@ def run(
                         filtered = apply_filters(raw_jobs, criteria["rejected"])
                         skipped = len(raw_jobs) - len(filtered)
                         if skipped:
-                            log(f"  Filtered out {skipped} job(s) by keyword")
+                            logger.info(f"  Filtered out {skipped} job(s) by keyword")
 
                         for raw in filtered:
                             if max_jobs and jobs_new >= max_jobs:
@@ -159,32 +161,32 @@ def run(
                                 description=raw.description,
                             )
                             if job_id is None:
-                                log(f"  Skip (duplicate): {raw.title} @ {raw.company}")
+                                logger.info(f"  Skip (duplicate): {raw.title} @ {raw.company}")
                                 continue
 
                             jobs_new += 1
                             known_urls.add(raw.url)
                             if not raw.description:
                                 new_job_ids.append((job_id, raw.url))
-                            log(f"  [{jobs_new}{'/' + str(max_jobs) if max_jobs else ''}] {raw.title} @ {raw.company}")
+                            logger.info(f"  [{jobs_new}{'/' + str(max_jobs) if max_jobs else ''}] {raw.title} @ {raw.company}")
 
         # ── Phase 2: fetch descriptions for jobs that need it (browser sources) ─
         if new_job_ids:
             cooldown = random.uniform(30, 90)
-            log(f"\n[stealth] Cooldown {cooldown:.0f}s before fetching descriptions...")
+            logger.info(f"\n[stealth] Cooldown {cooldown:.0f}s before fetching descriptions...")
             time.sleep(cooldown)
-            _fetch_descriptions_in_batches(new_job_ids, log=log)
+            _fetch_descriptions_in_batches(new_job_ids)
 
         session_repository.finish(session_id, jobs_found=jobs_found, jobs_scored=0)
 
-        log("\n" + "=" * 50)
-        log(f"Done. Found: {jobs_found}  New: {jobs_new}")
+        logger.info("\n" + "=" * 50)
+        logger.info(f"Done. Found: {jobs_found}  New: {jobs_new}")
 
         return {"jobs_found": jobs_found, "jobs_new": jobs_new}
 
     except Exception as e:
         session_repository.finish(session_id, jobs_found=jobs_found, jobs_scored=0, status="error")
-        log(f"\nERROR: {e}")
+        logger.error(str(e))
         raise
 
 
@@ -192,6 +194,7 @@ if __name__ == "__main__":
     import argparse
 
     sys.stdout.reconfigure(line_buffering=True)
+    logging.basicConfig(level=logging.INFO, stream=sys.stdout, format="%(message)s")
 
     parser = argparse.ArgumentParser(description="Collect job listings")
     parser.add_argument("--days",           type=int,  default=7,    help="Days back to search (default: 7)")

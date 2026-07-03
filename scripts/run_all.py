@@ -8,6 +8,7 @@ Usage:
 """
 # -*- coding: utf-8 -*-
 import argparse
+import logging
 import os
 import sys
 from datetime import datetime
@@ -17,24 +18,36 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 from collector.runner import run as collect
 from evaluator.runner import run as evaluate
 
+logger = logging.getLogger(__name__)
 
-def _make_log(log_path: str | None):
+
+def _configure_logging(log_path: str | None) -> list[logging.Handler]:
+    """Set up root logger with stdout + log-file handlers. Returns handlers for cleanup."""
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    fmt = logging.Formatter("[%(asctime)s] %(message)s", datefmt="%H:%M:%S")
+
+    handlers: list[logging.Handler] = []
+
+    stream_h = logging.StreamHandler(sys.stdout)
+    stream_h.setFormatter(fmt)
+    root.addHandler(stream_h)
+    handlers.append(stream_h)
+
     current_log = os.path.join(ROOT, "data", "logs", "current_run.log")
-    os.makedirs(os.path.join(ROOT, "data", "logs"), exist_ok=True)
-    current_fh = open(current_log, "w", encoding="utf-8")
-    user_fh = open(log_path, "a", encoding="utf-8") if log_path else None
+    os.makedirs(os.path.dirname(current_log), exist_ok=True)
+    file_h = logging.FileHandler(current_log, mode="w", encoding="utf-8")
+    file_h.setFormatter(fmt)
+    root.addHandler(file_h)
+    handlers.append(file_h)
 
-    def log(msg: str = ""):
-        ts = datetime.now().strftime("%H:%M:%S")
-        line = f"[{ts}] {msg}" if msg.strip() else msg
-        print(line)
-        current_fh.write(line + "\n")
-        current_fh.flush()
-        if user_fh:
-            user_fh.write(line + "\n")
-            user_fh.flush()
+    if log_path:
+        user_h = logging.FileHandler(log_path, mode="a", encoding="utf-8")
+        user_h.setFormatter(fmt)
+        root.addHandler(user_h)
+        handlers.append(user_h)
 
-    return log, (current_fh, user_fh)
+    return handlers
 
 
 def main() -> int:
@@ -48,20 +61,21 @@ def main() -> int:
     parser.add_argument("--random-start",   type=int,  default=0,    help="Sleep random(0, N) seconds before starting (scheduler jitter)")
     args = parser.parse_args()
 
-    log, fh = _make_log(args.log_file)
+    handlers = _configure_logging(args.log_file)
 
     try:
         if args.random_start > 0:
             import random
+            import time
             delay = random.randint(0, args.random_start)
-            log(f"[stealth] Random startup delay: {delay // 60}m {delay % 60}s")
-            import time; time.sleep(delay)
+            logger.info(f"[stealth] Random startup delay: {delay // 60}m {delay % 60}s")
+            time.sleep(delay)
 
-        log(f"{'=' * 60}")
-        log(f"JobAgent run started — {datetime.now().strftime('%Y-%m-%d %H:%M')}")
-        log(f"{'=' * 60}")
+        logger.info("=" * 60)
+        logger.info(f"JobAgent run started — {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+        logger.info("=" * 60)
 
-        log("\n=== COLLECTOR ===")
+        logger.info("\n=== COLLECTOR ===")
         try:
             c_result = collect(
                 days_back=args.days,
@@ -69,32 +83,30 @@ def main() -> int:
                 titles=args.titles,
                 search_queries_override=args.search_queries,
                 locations=args.locations,
-                log=log,
             )
         except Exception as e:
-            log(f"\nCollector failed: {e}")
-            log("Skipping evaluator.")
+            logger.error(f"Collector failed: {e}")
+            logger.info("Skipping evaluator.")
             return 1
 
-        log(f"\nCollector result: found={c_result['jobs_found']}  new={c_result['jobs_new']}")
+        logger.info(f"\nCollector result: found={c_result['jobs_found']}  new={c_result['jobs_new']}")
 
-        log("\n=== EVALUATOR ===")
+        logger.info("\n=== EVALUATOR ===")
         try:
-            e_result = evaluate(log=log)
+            e_result = evaluate()
         except Exception as e:
-            log(f"\nEvaluator failed: {e}")
+            logger.error(f"Evaluator failed: {e}")
             return 1
 
-        log(f"\nEvaluator result: scored={e_result['jobs_scored']}  auto_rejected={e_result['auto_rejected']}")
-        log(f"\n{'=' * 60}")
-        log("Run complete.")
+        logger.info(f"\nEvaluator result: scored={e_result['jobs_scored']}  auto_rejected={e_result['auto_rejected']}")
+        logger.info("\n" + "=" * 60)
+        logger.info("Run complete.")
         return 0
 
     finally:
-        current_fh, user_fh = fh
-        current_fh.close()
-        if user_fh:
-            user_fh.close()
+        for h in handlers:
+            h.close()
+            logging.getLogger().removeHandler(h)
 
 
 if __name__ == "__main__":

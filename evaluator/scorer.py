@@ -1,8 +1,11 @@
 import json
+import logging
 import time
 import anthropic
 
 from config import ANTHROPIC_API_KEY, CLAUDE_MODEL
+
+logger = logging.getLogger(__name__)
 
 _client: anthropic.Anthropic | None = None
 
@@ -114,11 +117,7 @@ _ERROR_RESULT = {
 }
 
 
-def score_job(
-    job: dict,
-    system_prompt: str,
-    log=print,
-) -> dict:
+def score_job(job: dict, system_prompt: str) -> dict:
     """
     Score a single job using a pre-built system prompt.
     Returns a dict with: score, score_reason, matched_required, matched_preferred, dealbreakers_found.
@@ -143,7 +142,7 @@ def score_job(
         except Exception as e:
             if "overloaded" in str(e).lower() and attempt < 2:
                 wait = (attempt + 1) * 30
-                log(f"  API overloaded, retrying in {wait}s...")
+                logger.warning(f"API overloaded, retrying in {wait}s...")
                 time.sleep(wait)
             else:
                 return {**_ERROR_RESULT, "score_reason": f"API error: {e}"}
@@ -164,5 +163,5 @@ def score_job(
             "dealbreakers_found": result.get("dealbreakers_found", []),
         }
     except json.JSONDecodeError:
-        log(f"  Failed to parse Claude response: {raw[:200]}")
+        logger.warning(f"Failed to parse Claude response: {raw[:200]}")
         return {**_ERROR_RESULT, "score_reason": "Failed to parse Claude response"}

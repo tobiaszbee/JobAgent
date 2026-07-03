@@ -1,4 +1,7 @@
 import sys
+import logging
+
+logger = logging.getLogger(__name__)
 
 import anthropic
 
@@ -83,14 +86,14 @@ def _build_prompt(
     return "\n\n".join(sections)
 
 
-def run(log=print) -> dict:
+def run() -> dict:
     init_db()
 
     applied, rejected = job_repository.get_all_feedback()
-    log(f"Distilling preferences from {len(applied)} applied + {len(rejected)} rejected jobs...")
+    logger.info(f"Distilling preferences from {len(applied)} applied + {len(rejected)} rejected jobs...")
 
     if not applied and not rejected:
-        log("No feedback data yet — apply or reject some jobs first.")
+        logger.info("No feedback data yet — apply or reject some jobs first.")
         return {"ok": False, "reason": "no_data"}
 
     existing = preference_repository.get_latest()
@@ -107,13 +110,13 @@ def run(log=print) -> dict:
             messages=[{"role": "user", "content": prompt}],
         )
     except Exception as e:
-        log(f"API error: {e}")
+        logger.error(f"API error: {e}")
         return {"ok": False, "reason": str(e)}
 
     content = response.content[0].text.strip()
     preference_repository.save(content, len(applied), len(rejected))
-    log(f"Preference profile updated ({len(content)} chars).")
-    log(f"Profile:\n{content}")
+    logger.info(f"Preference profile updated ({len(content)} chars).")
+    logger.info(f"Profile:\n{content}")
 
     return {
         "ok": True,
@@ -125,4 +128,5 @@ def run(log=print) -> dict:
 
 if __name__ == "__main__":
     sys.stdout.reconfigure(line_buffering=True)
+    logging.basicConfig(level=logging.INFO, stream=sys.stdout, format="%(message)s")
     run()
