@@ -104,12 +104,15 @@ class TestJobsEndpoints:
 
 
 class TestCriteriaEndpoints:
-    def test_list_criteria_empty_db(self, flask_client):
+    def test_list_criteria_returns_seeded_defaults(self, flask_client):
         resp = flask_client.get("/api/criteria")
         assert resp.status_code == 200
-        assert resp.json == []
+        values = [c["value"] for c in resp.json]
+        assert any("PHP" in v for v in values)
+        assert "Remote work possible" in values
 
     def test_add_then_list_criterion(self, flask_client):
+        before = len(flask_client.get("/api/criteria").json)
         resp = flask_client.post(
             "/api/criteria",
             data=json.dumps({"type": "title", "value": "PHP Developer"}),
@@ -119,9 +122,9 @@ class TestCriteriaEndpoints:
         assert resp.json["ok"] is True
 
         items = flask_client.get("/api/criteria").json
-        assert len(items) == 1
-        assert items[0]["value"] == "PHP Developer"
-        assert items[0]["is_active"] == 1
+        assert len(items) == before + 1
+        added = next(i for i in items if i["value"] == "PHP Developer")
+        assert added["is_active"] == 1
 
     def test_add_criterion_invalid_type_returns_400(self, flask_client):
         resp = flask_client.post(
@@ -170,10 +173,11 @@ class TestCriteriaEndpoints:
             data=json.dumps({"type": "title", "value": "PHP Dev"}),
             content_type="application/json",
         )
-        item_id = flask_client.get("/api/criteria").json[0]["id"]
+        item_id = next(i["id"] for i in flask_client.get("/api/criteria").json if i["value"] == "PHP Dev")
         resp = flask_client.delete(f"/api/criteria/{item_id}")
         assert resp.status_code == 200
-        assert flask_client.get("/api/criteria").json == []
+        remaining = [i["value"] for i in flask_client.get("/api/criteria").json]
+        assert "PHP Dev" not in remaining
 
 
 class TestAgentStatus:

@@ -5,7 +5,7 @@ from db.repositories import criteria_repository
 class TestInsert:
     def test_insert_valid_type_succeeds(self):
         criteria_repository.insert("title", "PHP Developer")
-        assert len(criteria_repository.get_all()) == 1
+        assert "PHP Developer" in criteria_repository.get_active("title")
 
     def test_insert_invalid_type_raises_value_error(self):
         with pytest.raises(ValueError, match="Invalid criteria type"):
@@ -14,21 +14,24 @@ class TestInsert:
     def test_duplicate_type_value_is_ignored(self):
         criteria_repository.insert("title", "PHP Developer")
         criteria_repository.insert("title", "PHP Developer")
-        assert len(criteria_repository.get_all()) == 1
+        titles = criteria_repository.get_active("title")
+        assert titles.count("PHP Developer") == 1
 
     def test_same_value_different_type_both_stored(self):
         criteria_repository.insert("title", "Symfony")
         criteria_repository.insert("preferred", "Symfony")
-        assert len(criteria_repository.get_all()) == 2
+        assert "Symfony" in criteria_repository.get_active("title")
+        assert "Symfony" in criteria_repository.get_active("preferred")
 
     def test_value_leading_trailing_whitespace_stripped(self):
         criteria_repository.insert("title", "  PHP Developer  ")
-        assert criteria_repository.get_all()[0]["value"] == "PHP Developer"
+        assert "PHP Developer" in criteria_repository.get_active("title")
 
     def test_all_valid_types_accepted(self):
+        before = len(criteria_repository.get_all())
         for type_ in ("title", "location", "required", "preferred", "rejected"):
             criteria_repository.insert(type_, f"value-{type_}")
-        assert len(criteria_repository.get_all()) == 5
+        assert len(criteria_repository.get_all()) == before + 5
 
 
 class TestGetActive:
@@ -67,13 +70,13 @@ class TestGetActiveDict:
 class TestToggle:
     def test_deactivate_hides_from_get_active(self):
         criteria_repository.insert("title", "PHP Dev")
-        item_id = criteria_repository.get_all()[0]["id"]
-        criteria_repository.toggle(item_id, False)
-        assert criteria_repository.get_active("title") == []
+        item = next(c for c in criteria_repository.get_all() if c["type"] == "title" and c["value"] == "PHP Dev")
+        criteria_repository.toggle(item["id"], False)
+        assert "PHP Dev" not in criteria_repository.get_active("title")
 
     def test_reactivate_restores_to_get_active(self):
         criteria_repository.insert("title", "PHP Dev")
-        item_id = criteria_repository.get_all()[0]["id"]
+        item_id = next(c["id"] for c in criteria_repository.get_all() if c["type"] == "title" and c["value"] == "PHP Dev")
         criteria_repository.toggle(item_id, False)
         criteria_repository.toggle(item_id, True)
         assert "PHP Dev" in criteria_repository.get_active("title")
@@ -82,6 +85,6 @@ class TestToggle:
 class TestDelete:
     def test_deletes_criterion_by_id(self):
         criteria_repository.insert("title", "PHP Dev")
-        item_id = criteria_repository.get_all()[0]["id"]
-        criteria_repository.delete(item_id)
-        assert criteria_repository.get_all() == []
+        item = next(c for c in criteria_repository.get_all() if c["type"] == "title" and c["value"] == "PHP Dev")
+        criteria_repository.delete(item["id"])
+        assert "PHP Dev" not in criteria_repository.get_active("title")

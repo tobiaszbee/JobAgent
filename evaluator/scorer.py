@@ -55,36 +55,26 @@ def build_system_prompt(
     examples_section = _build_examples_section(positive_examples, negative_examples)
 
     required = criteria.get("required", [])
-    required_extra = ("\n" + "\n".join(f"- {r}" for r in required)) if required else ""
+    required_lines = "\n".join(f"- {r}" for r in required) if required else "- (none configured)"
 
     rejected = criteria.get("rejected", [])
-    rejected_extra = (
-        "\n\nADDITIONAL USER-DEFINED REJECTION RULES (reject if any apply):\n"
-        + "\n".join(f"- {r}" for r in rejected)
-    ) if rejected else ""
+    rejected_lines = "\n".join(f"{i + 1}. {r}" for i, r in enumerate(rejected)) if rejected else "- (none configured)"
 
     preferred = criteria.get("preferred", [])
-    preferred_section = "\n".join(f"- {p}" for p in preferred) if preferred else "- (none configured)"
+    preferred_lines = "\n".join(f"- {p}" for p in preferred) if preferred else "- (none configured)"
 
     return f"""You are evaluating job listings for a candidate.
 
 {candidate_profile}
 
-{prefs_section}{examples_section}REQUIRED (must have all):
-- PHP mentioned in the job description — NOTE: Laravel, Symfony, WordPress are PHP frameworks, so they count as PHP
-- Remote work possible{required_extra}
+{prefs_section}{examples_section}REQUIRED (must have all — job must pass every item to be considered):
+{required_lines}
 
 PREFERRED (increases score):
-{preferred_section}
+{preferred_lines}
 
 AUTOMATIC REJECTION — only reject if the description contains one of these EXACT situations:
-1. Candidate must physically relocate or be resident in a specific country
-2. Role is on-site with NO remote option
-3. Role is junior or intern level
-4. Job listing is not in English
-5. "Remote, UK based" or "UK based, remote" — means candidate must be in UK
-6. "Remote within UK" or "UK remote only" — means candidate must be in UK
-7. "Must be eligible to work in the UK" — means physical presence in UK required{rejected_extra}
+{rejected_lines}
 
 DO NOT reject for:
 - Company location ("Berlin-based company", "Paris-based startup", "London HQ")

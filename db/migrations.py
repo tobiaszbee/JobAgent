@@ -75,4 +75,23 @@ def init_db() -> None:
         except Exception:
             pass  # column already exists
 
+    # Seed default criteria (INSERT OR IGNORE — safe to re-run on existing DBs)
+    _DEFAULT_CRITERIA = [
+        ("required", "PHP mentioned in the job description — NOTE: Laravel, Symfony, WordPress are PHP frameworks, so they count as PHP"),
+        ("required", "Remote work possible"),
+        ("rejected", "Candidate must physically relocate or be resident in a specific country"),
+        ("rejected", "Role is on-site with NO remote option"),
+        ("rejected", "Role is junior or intern level"),
+        ("rejected", "Job listing is not in English"),
+        ("rejected", '"Remote, UK based" or "UK based, remote" — means candidate must be in UK'),
+        ("rejected", '"Remote within UK" or "UK remote only" — means candidate must be in UK'),
+        ("rejected", '"Must be eligible to work in the UK" — means physical presence in UK required'),
+    ]
+    for type_, value in _DEFAULT_CRITERIA:
+        conn.execute(
+            "INSERT OR IGNORE INTO criteria (type, value) VALUES (?, ?)",
+            (type_, value),
+        )
+    conn.commit()
+
     conn.close()
