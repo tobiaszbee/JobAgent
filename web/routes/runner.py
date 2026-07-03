@@ -2,6 +2,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 from flask import Blueprint
 from flask_sock import Sock
 
@@ -12,6 +13,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 LOG_FILE = os.path.join(ROOT, "data", "logs", "current_run.log")
 
 _agent_process: subprocess.Popen | None = None
+_lock = threading.Lock()
 
 
 def init_sock(app):
@@ -85,9 +87,10 @@ def _open_log():
 def agent_ws(ws):
     global _agent_process
 
-    if _is_run_active():
-        ws.send("ERROR: Agent is already running.\n")
-        return
+    with _lock:
+        if _is_run_active():
+            ws.send("ERROR: Agent is already running.\n")
+            return
 
     raw = ws.receive()
     try:
@@ -95,9 +98,20 @@ def agent_ws(ws):
     except Exception:
         params = {}
 
-    days           = int(params.get("days", 1))
-    max_jobs       = params.get("max_jobs")
-    max_jobs       = int(max_jobs) if max_jobs else None
+    try:
+        days = int(params.get("days", 1))
+    except (ValueError, TypeError):
+        ws.send("ERROR: Invalid parameter 'days' — must be an integer.\n")
+        return
+
+    max_jobs_raw = params.get("max_jobs")
+    max_jobs = None
+    if max_jobs_raw:
+        try:
+            max_jobs = int(max_jobs_raw)
+        except (ValueError, TypeError):
+            ws.send("ERROR: Invalid parameter 'max_jobs' — must be an integer.\n")
+            return
     search_queries = params.get("search_queries") or []
     locations      = params.get("locations") or []
     sources        = params.get("sources") or []
