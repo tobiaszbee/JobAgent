@@ -1,26 +1,10 @@
 import hashlib
 from db.connection import get_connection
+from db.types import JobRow, JobStats
 
 
 def _generate_id(url: str) -> str:
     return hashlib.md5(url.encode()).hexdigest()[:16]
-
-
-def exists(url: str) -> bool:
-    conn = get_connection()
-    row = conn.execute("SELECT id FROM jobs WHERE url = ?", (url,)).fetchone()
-    conn.close()
-    return row is not None
-
-
-def exists_by_title_company(title: str, company: str) -> bool:
-    conn = get_connection()
-    row = conn.execute(
-        "SELECT id FROM jobs WHERE LOWER(title) = LOWER(?) AND LOWER(company) = LOWER(?)",
-        (title.strip(), company.strip())
-    ).fetchone()
-    conn.close()
-    return row is not None
 
 
 def insert(
@@ -32,20 +16,32 @@ def insert(
     source_id: str | None = None,
     description: str | None = None,
 ) -> str | None:
-    if exists(url):
-        return None
-    if company and exists_by_title_company(title, company):
-        return None
-    job_id = _generate_id(url)
     conn = get_connection()
-    conn.execute(
-        """INSERT INTO jobs (id, title, company, location, url, description, source, source_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-        (job_id, title, company, location, url, description, source, source_id)
-    )
-    conn.commit()
-    conn.close()
-    return job_id
+    try:
+        existing = conn.execute(
+            "SELECT id FROM jobs WHERE url = ?", (url,)
+        ).fetchone()
+        if existing:
+            return None
+
+        if company:
+            existing = conn.execute(
+                "SELECT id FROM jobs WHERE LOWER(title) = LOWER(?) AND LOWER(company) = LOWER(?)",
+                (title.strip(), company.strip()),
+            ).fetchone()
+            if existing:
+                return None
+
+        job_id = _generate_id(url)
+        conn.execute(
+            """INSERT INTO jobs (id, title, company, location, url, description, source, source_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (job_id, title, company, location, url, description, source, source_id),
+        )
+        conn.commit()
+        return job_id
+    finally:
+        conn.close()
 
 
 def get_all_urls() -> set[str]:
@@ -122,7 +118,7 @@ def get_new() -> list[dict]:
     return [dict(row) for row in rows]
 
 
-def get_unscored() -> list[dict]:
+def get_unscored() -> list[JobRow]:
     """Jobs that are new and have not been scored yet. Used by the evaluator."""
     conn = get_connection()
     rows = conn.execute(
@@ -145,7 +141,7 @@ def get_by_status(status: str) -> list[dict]:
 def get_examples(
     limit_positive: int = 150,
     limit_negative: int = 150,
-) -> tuple[list[dict], list[dict]]:
+) -> tuple[list[JobRow], list[JobRow]]:
     conn = get_connection()
     positive = conn.execute(
         "SELECT * FROM jobs WHERE status = 'applied' ORDER BY updated_at DESC LIMIT ?",
@@ -178,7 +174,7 @@ def search(
     min_score: float | None = None,
     query: str | None = None,
     source: str | None = None,
-) -> list[dict]:
+) -> list[JobRow]:
     conn = get_connection()
     sql = "SELECT * FROM jobs WHERE 1=1"
     params: list = []
@@ -205,7 +201,7 @@ def search(
     return [dict(row) for row in rows]
 
 
-def get_stats() -> dict:
+def get_stats() -> JobStats:
     conn = get_connection()
     row = conn.execute("""
         SELECT

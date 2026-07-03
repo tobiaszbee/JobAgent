@@ -4,6 +4,7 @@ import time
 import anthropic
 
 from config import ANTHROPIC_API_KEY, CLAUDE_MODEL
+from db.types import ScoreResult
 
 logger = logging.getLogger(__name__)
 
@@ -117,7 +118,7 @@ _ERROR_RESULT = {
 }
 
 
-def score_job(job: dict, system_prompt: str) -> dict:
+def score_job(job: dict, system_prompt: str) -> ScoreResult:
     """
     Score a single job using a pre-built system prompt.
     Returns a dict with: score, score_reason, matched_required, matched_preferred, dealbreakers_found.

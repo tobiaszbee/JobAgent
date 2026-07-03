@@ -1,23 +1,29 @@
 from db.connection import get_connection
 
 
+def _column_exists(conn, table: str, column: str) -> bool:
+    rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    return any(row["name"] == column for row in rows)
+
+
 def init_db() -> None:
     conn = get_connection()
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS jobs (
-            id           TEXT PRIMARY KEY,
-            title        TEXT NOT NULL,
-            company      TEXT,
-            location     TEXT,
-            url          TEXT UNIQUE,
-            description  TEXT,
-            source       TEXT DEFAULT 'linkedin',
-            source_id    TEXT,
-            status       TEXT DEFAULT 'new',
-            score        REAL,
-            score_reason TEXT,
-            created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
-            updated_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+            id               TEXT PRIMARY KEY,
+            title            TEXT NOT NULL,
+            company          TEXT,
+            location         TEXT,
+            url              TEXT UNIQUE,
+            description      TEXT,
+            source           TEXT DEFAULT 'linkedin',
+            source_id        TEXT,
+            status           TEXT DEFAULT 'new',
+            score            REAL,
+            score_reason     TEXT,
+            rejection_reason TEXT,
+            created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at       DATETIME DEFAULT CURRENT_TIMESTAMP
         );
 
         CREATE TABLE IF NOT EXISTS criteria (
@@ -64,16 +70,13 @@ def init_db() -> None:
     """)
     conn.commit()
 
-    # Additive migrations — safe to run on existing DBs
-    for migration in [
-        "ALTER TABLE jobs ADD COLUMN rejection_reason TEXT",
-        "ALTER TABLE sessions ADD COLUMN jobs_scored INTEGER DEFAULT 0",
+    for table, column, sql in [
+        ("jobs", "rejection_reason", "ALTER TABLE jobs ADD COLUMN rejection_reason TEXT"),
+        ("sessions", "jobs_scored", "ALTER TABLE sessions ADD COLUMN jobs_scored INTEGER DEFAULT 0"),
     ]:
-        try:
-            conn.execute(migration)
+        if not _column_exists(conn, table, column):
+            conn.execute(sql)
             conn.commit()
-        except Exception:
-            pass  # column already exists
 
     # Seed default criteria (INSERT OR IGNORE — safe to re-run on existing DBs)
     _DEFAULT_CRITERIA = [
