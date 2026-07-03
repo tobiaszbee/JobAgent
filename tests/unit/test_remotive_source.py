@@ -2,7 +2,8 @@
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
-from collector.sources.remotive import RemotiveSource, _location_matches, _strip_html
+from collector.sources.remotive import RemotiveSource, _location_matches
+from collector.utils import strip_html as _strip_html
 
 
 # ── _location_matches ──────────────────────────────────────────────────────────

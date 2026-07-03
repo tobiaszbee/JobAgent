@@ -13,9 +13,9 @@ import re
 import time
 import httpx
 from datetime import datetime, timedelta, timezone
-from html.parser import HTMLParser
 
 from collector.base import JobSource, RawJob
+from collector.utils import strip_html
 
 _BASE = "https://justjoin.it"
 
@@ -47,30 +47,6 @@ _TECH_MAP: dict[str, str] = {
     "security": "security",
     "ux": "ux",
 }
-
-
-class _TextExtractor(HTMLParser):
-    def __init__(self):
-        super().__init__()
-        self._parts: list[str] = []
-
-    def handle_data(self, data: str) -> None:
-        self._parts.append(data)
-
-    def handle_endtag(self, tag: str) -> None:
-        if tag in {"p", "li", "br", "h1", "h2", "h3", "h4", "h5", "div", "tr"}:
-            self._parts.append("\n")
-
-    def get_text(self) -> str:
-        raw = "".join(self._parts)
-        lines = (ln.strip() for ln in raw.splitlines())
-        return "\n".join(ln for ln in lines if ln)
-
-
-def _strip_html(html: str) -> str:
-    ex = _TextExtractor()
-    ex.feed(html)
-    return ex.get_text()
 
 
 def _tech_slug(query: str) -> str:
@@ -210,7 +186,7 @@ class JustJoinSource(JobSource):
                 url=url,
                 source="justjoin",
                 source_id=url.split("/job-offer/")[-1],
-                description=_strip_html(desc_html) if desc_html else None,
+                description=strip_html(desc_html) if desc_html else None,
             ))
 
         return results

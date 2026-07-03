@@ -7,9 +7,9 @@ from collector.sources.justjoin import (
     JustJoinSource,
     _extract_ld_json,
     _match_location,
-    _strip_html,
     _tech_slug,
 )
+from collector.utils import strip_html as _strip_html
 
 
 # ── _tech_slug ─────────────────────────────────────────────────────────────────
@@ -100,7 +100,7 @@ class TestStripHtml:
         assert _strip_html("<div><strong>Bold</strong> text</div>") == "Bold text"
 
     def test_empty_string(self):
-        assert _strip_html("") == ""
+        assert _strip_html("") is None
 
     def test_plain_text_unchanged(self):
         assert _strip_html("no tags here") == "no tags here"

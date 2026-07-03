@@ -1,10 +1,10 @@
 """Remotive.io source — free public JSON API, no auth required."""
-import re
 from datetime import datetime, timedelta, timezone
 
 import httpx
 
 from collector.base import JobSource, RawJob
+from collector.utils import strip_html
 
 _API_URL = "https://remotive.com/api/remote-jobs"
 
@@ -61,16 +61,6 @@ def _location_matches(candidate_required_location: str, search_location: str) ->
         return True
     aliases = [k for k, v in _COUNTRY_ALIASES.items() if v == loc]
     return any(a in req for a in aliases)
-
-
-def _strip_html(html: str) -> str | None:
-    if not html:
-        return None
-    text = re.sub(r"<br\s*/?>", "\n", html, flags=re.IGNORECASE)
-    text = re.sub(r"</(p|div|li|h[1-6]|tr)>", "\n", text, flags=re.IGNORECASE)
-    text = re.sub(r"<[^>]+>", "", text)
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    return text.strip() or None
 
 
 class RemotiveSource(JobSource):
@@ -150,7 +140,7 @@ class RemotiveSource(JobSource):
                 url=url,
                 source="remotive",
                 source_id=str(job.get("id", "")),
-                description=_strip_html(job.get("description", "")),
+                description=strip_html(job.get("description", "")),
             ))
 
         return results
