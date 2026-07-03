@@ -3,13 +3,15 @@ from collector.sources.justjoin import JustJoinSource
 from collector.sources.remotive import RemotiveSource
 from collector.sources.remoteok import RemoteOKSource
 from collector.sources.workingnomads import WorkingNomadsSource
+from collector.sources.weworkremotely import WWRSource
 
 _REGISTRY: dict[str, dict] = {
-    "linkedin":      {"name": "LinkedIn",        "cls": LinkedInSource},
-    "justjoin":      {"name": "JustJoin.it",     "cls": JustJoinSource},
-    "remotive":      {"name": "Remotive.io",     "cls": RemotiveSource},
-    "remoteok":      {"name": "Remote OK",       "cls": RemoteOKSource},
-    "workingnomads": {"name": "Working Nomads",  "cls": WorkingNomadsSource},
+    "linkedin":        {"name": "LinkedIn",          "cls": LinkedInSource},
+    "justjoin":        {"name": "JustJoin.it",       "cls": JustJoinSource},
+    "remotive":        {"name": "Remotive.io",       "cls": RemotiveSource},
+    "remoteok":        {"name": "Remote OK",         "cls": RemoteOKSource},
+    "workingnomads":   {"name": "Working Nomads",    "cls": WorkingNomadsSource},
+    "weworkremotely":  {"name": "We Work Remotely",  "cls": WWRSource},
 }
 
 
