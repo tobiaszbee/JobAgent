@@ -1,13 +1,10 @@
 import time
 import random
 import os
-import sys
 from urllib.parse import quote
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-if ROOT not in sys.path:
-    sys.path.insert(0, ROOT)
 
 from config import AGENT, LINKEDIN, STEALTH
 from collector.base import JobSource, RawJob

@@ -1,12 +1,7 @@
 """Retry fetching descriptions for jobs that are missing them (batched, stealth-safe)."""
 import sys
-import os
 import random
 import time
-
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if ROOT not in sys.path:
-    sys.path.insert(0, ROOT)
 
 from config import STEALTH
 from db.migrations import init_db
