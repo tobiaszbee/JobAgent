@@ -1,0 +1,25 @@
+# Environment
+.env
+.env.test
+
+# Dependencies
+.venv/
+
+# Data (DB, Chrome profile, reports, CV, logs)
+data/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# IDE
+.idea/
+.vscode/
+
+# Claude Code local settings (permissions, personal config)
+.claude/settings.local.json
+.claude/worktrees/
+
+# Python package build artifacts
+*.egg-info/

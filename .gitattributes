@@ -1,0 +1,7 @@
+# Force LF in the repository and on disk — no CRLF anywhere.
+* text=auto eol=lf
+
+# Explicitly binary — never touch line endings.
+*.db    binary
+*.png   binary
+*.ico   binary

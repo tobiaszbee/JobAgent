@@ -1,0 +1,78 @@
+import sys
+import logging
+
+logger = logging.getLogger(__name__)
+
+from db.migrations import init_db
+from db.repositories import job_repository, criteria_repository, preference_repository
+from evaluator.scorer import score_job, build_system_prompt
+from evaluator.profile import load_active_profile
+
+
+def run(force_rescore: bool = False) -> dict:
+    init_db()
+
+    if force_rescore:
+        unscored_jobs = job_repository.get_new_with_descriptions()
+        if unscored_jobs:
+            logger.info(f"Force-rescore mode: {len(unscored_jobs)} job(s) will be re-scored.")
+    else:
+        unscored_jobs = job_repository.get_unscored()
+
+    if not unscored_jobs:
+        logger.info("No jobs to evaluate.")
+        return {"jobs_scored": 0}
+
+    try:
+        candidate_profile = load_active_profile()
+    except ValueError as e:
+        logger.error(str(e))
+        return {"jobs_scored": 0}
+
+    criteria = criteria_repository.get_active_dict()
+
+    latest_preference = preference_repository.get_latest()
+    learned_preferences = latest_preference["signals"] if latest_preference else []
+
+    example_limit = 8 if learned_preferences else 25
+    positive_examples, negative_examples = job_repository.get_examples(
+        limit_positive=example_limit, limit_negative=example_limit
+    )
+
+    shared_system_prompt = build_system_prompt(
+        criteria, positive_examples, negative_examples, candidate_profile, learned_preferences
+    )
+
+    logger.info(f"Evaluating {len(unscored_jobs)} job(s)...")
+    if learned_preferences:
+        logger.info(f"Preference profile active ({latest_preference['applied_count']} applied, {latest_preference['rejected_count']} rejected)")
+        logger.info(f"Grounding examples: {len(positive_examples)} applied, {len(negative_examples)} rejected")
+    else:
+        logger.info(f"No preference profile — few-shot: {len(positive_examples)} applied, {len(negative_examples)} rejected")
+    logger.info("=" * 50)
+
+    jobs_scored = 0
+
+    for job in unscored_jobs:
+        logger.info(f"\n[{jobs_scored + 1}/{len(unscored_jobs)}] {job['title']} @ {job['company']}")
+
+        result = score_job(job=job, system_prompt=shared_system_prompt)
+        if result["score"] is None:
+            logger.warning(f"  Scoring failed — will retry next run: {result['score_reason']}")
+            continue
+        job_repository.update_score(job["id"], result["score"], result["score_reason"])
+        logger.info(f"  Score: {result['score']}/10 — {result['score_reason']}")
+
+        jobs_scored += 1
+
+    logger.info("\n" + "=" * 50)
+    logger.info(f"Done. Scored: {jobs_scored}")
+
+
+    return {"jobs_scored": jobs_scored}
+
+
+if __name__ == "__main__":
+    sys.stdout.reconfigure(line_buffering=True)
+    logging.basicConfig(level=logging.INFO, stream=sys.stdout, format="%(message)s")
+    run()

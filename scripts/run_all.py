@@ -1,0 +1,137 @@
+"""
+Full pipeline: collect new jobs from LinkedIn, then score them with Claude.
+
+Usage:
+    python scripts/run_all.py
+    python scripts/run_all.py --days 3 --max-jobs 30
+    python scripts/run_all.py --log-file data/logs/run.log
+"""
+# -*- coding: utf-8 -*-
+import argparse
+import logging
+import os
+import sys
+from datetime import datetime
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+from collector.runner import run as collect
+from evaluator.runner import run as evaluate
+from extractor.runner import run_extraction
+from embeddings.indexer import index_jobs, build_ideal_vector, score_by_similarity
+from ranker.reranker import rerank_jobs
+from ranker.listwise import listwise_rank
+from config import RANKING
+
+logger = logging.getLogger(__name__)
+
+
+def _configure_logging(log_path: str | None) -> list[logging.Handler]:
+    """Set up root logger with stdout + log-file handlers. Returns handlers for cleanup."""
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    fmt = logging.Formatter("[%(asctime)s] %(message)s", datefmt="%H:%M:%S")
+
+    handlers: list[logging.Handler] = []
+
+    stream_h = logging.StreamHandler(sys.stdout)
+    stream_h.setFormatter(fmt)
+    root.addHandler(stream_h)
+    handlers.append(stream_h)
+
+    current_log = os.path.join(ROOT, "data", "logs", "current_run.log")
+    os.makedirs(os.path.dirname(current_log), exist_ok=True)
+    file_h = logging.FileHandler(current_log, mode="w", encoding="utf-8")
+    file_h.setFormatter(fmt)
+    root.addHandler(file_h)
+    handlers.append(file_h)
+
+    if log_path:
+        user_h = logging.FileHandler(log_path, mode="a", encoding="utf-8")
+        user_h.setFormatter(fmt)
+        root.addHandler(user_h)
+        handlers.append(user_h)
+
+    return handlers
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Run full JobAgent pipeline: collect then evaluate")
+    parser.add_argument("--days",           type=int,  default=1,    help="Days back to search (default: 1)")
+    parser.add_argument("--max-jobs",       type=int,  default=None, help="Max new jobs to collect (default: unlimited)")
+    parser.add_argument("--titles",         nargs="*", default=None, help="Override job titles (scoring only)")
+    parser.add_argument("--search-queries", nargs="*", default=None, help="Override LinkedIn search queries")
+    parser.add_argument("--locations",      nargs="*", default=None, help="Override search locations")
+    parser.add_argument("--log-file",       default=None,            help="Append output to this file (e.g. data/logs/run.log)")
+    parser.add_argument("--random-start",   type=int,  default=0,    help="Sleep random(0, N) seconds before starting (scheduler jitter)")
+    args = parser.parse_args()
+
+    handlers = _configure_logging(args.log_file)
+
+    try:
+        if args.random_start > 0:
+            import random
+            import time
+            delay = random.randint(0, args.random_start)
+            logger.info(f"[stealth] Random startup delay: {delay // 60}m {delay % 60}s")
+            time.sleep(delay)
+
+        logger.info("=" * 60)
+        logger.info(f"JobAgent run started — {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+        logger.info("=" * 60)
+
+        logger.info("\n=== COLLECTOR ===")
+        try:
+            c_result = collect(
+                days_back=args.days,
+                max_jobs=args.max_jobs,
+                titles=args.titles,
+                search_queries_override=args.search_queries,
+                locations=args.locations,
+            )
+        except Exception as e:
+            logger.error(f"Collector failed: {e}")
+            logger.info("Skipping evaluator.")
+            return 1
+
+        logger.info(f"\nCollector result: found={c_result['jobs_found']}  new={c_result['jobs_new']}")
+
+        logger.info("\n=== EVALUATOR ===")
+        try:
+            e_result = evaluate()
+        except Exception as e:
+            logger.error(f"Evaluator failed: {e}")
+            return 1
+
+        logger.info(f"\nEvaluator result: scored={e_result.get('jobs_scored', 0)}")
+
+        logger.info("\n=== EXTRACTOR ===")
+        try:
+            from db.repositories import job_repository as _jr
+            new_jobs = _jr.get_new_with_descriptions()
+            extracted = run_extraction(new_jobs)
+            logger.info(f"Extractor result: structured_data updated for {extracted} job(s)")
+        except Exception as e:
+            logger.warning(f"Extractor failed (non-fatal): {e}")
+
+        logger.info("\n=== EMBEDDINGS + RANKING ===")
+        try:
+            import subprocess, os as _os
+            rank_script = _os.path.join(ROOT, "scripts", "rank_jobs.py")
+            subprocess.run([sys.executable, rank_script], check=False)
+        except Exception as e:
+            logger.warning(f"Ranking failed (non-fatal): {e}")
+
+        logger.info("\n" + "=" * 60)
+        logger.info("Run complete.")
+        return 0
+
+    finally:
+        for h in handlers:
+            h.close()
+            logging.getLogger().removeHandler(h)
+
+
+if __name__ == "__main__":
+    sys.stdout.reconfigure(line_buffering=True)
+    sys.exit(main())

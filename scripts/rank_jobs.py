@@ -1,0 +1,111 @@
+"""
+Rank unranked new jobs using the full AI pipeline:
+1. Semantic similarity (Voyage embeddings) — broad recall
+2. Voyage cross-encoder rerank (top-50) — precision
+3. Claude Opus listwise ranking with extended thinking (top-20) — final ordering
+"""
+import sys
+import logging
+
+sys.stdout.reconfigure(line_buffering=True)
+logging.basicConfig(level=logging.INFO, stream=sys.stdout, format="%(message)s")
+logger = logging.getLogger(__name__)
+
+from db.migrations import init_db
+from db.repositories import job_repository, preference_repository
+from embeddings.indexer import build_ideal_vector, score_by_similarity, index_jobs
+from ranker.reranker import rerank_jobs
+from ranker.listwise import listwise_rank
+from evaluator.profile import load_active_profile
+from config import RANKING
+
+init_db()
+
+try:
+    candidate_profile = load_active_profile()
+except ValueError as e:
+    logger.warning(f"No CV profile: {e} — ranking without candidate context")
+    candidate_profile = ""
+
+latest_pref = preference_repository.get_latest()
+preferences = latest_pref["signals"] if latest_pref else []
+
+jobs = job_repository.get_jobs_for_ranking()
+if not jobs:
+    print("No unranked jobs to process.")
+    sys.exit(0)
+
+print(f"Processing {len(jobs)} unranked job(s)...")
+
+# Step 1: Index any missing embeddings
+unindexed = []
+from db.connection import get_connection
+conn = get_connection()
+existing_ids = {r["job_id"] for r in conn.execute("SELECT job_id FROM job_embeddings").fetchall()}
+conn.close()
+unindexed = [j for j in jobs if j["id"] not in existing_ids]
+if unindexed:
+    print(f"\nIndexing {len(unindexed)} new embedding(s)...")
+    indexed = index_jobs(unindexed)
+    print(f"  Indexed {indexed} job(s)")
+
+# Step 2: Semantic similarity
+ideal = build_ideal_vector()
+if ideal:
+    print("\nScoring by semantic similarity to applied jobs...")
+    job_ids = [j["id"] for j in jobs]
+    sim_scores = score_by_similarity(job_ids, ideal)
+    for job in jobs:
+        job["_embedding_score"] = sim_scores.get(job["id"], 0.0)
+    jobs_by_sim = sorted(jobs, key=lambda j: j["_embedding_score"], reverse=True)
+    top_scores = [round(j["_embedding_score"], 3) for j in jobs_by_sim[:5]]
+    print(f"  Top-5 similarity scores: {top_scores}")
+else:
+    print("\nNo applied jobs with embeddings yet — skipping semantic retrieval.")
+    jobs_by_sim = jobs
+    for job in jobs:
+        job["_embedding_score"] = None
+
+# Step 3: Voyage rerank (top-N)
+rerank_pool = jobs_by_sim[:RANKING["top_n_rerank"]]
+if len(rerank_pool) > 1:
+    print(f"\nReranking top-{len(rerank_pool)} with Voyage cross-encoder...")
+    rerank_pool = rerank_jobs(rerank_pool, candidate_profile, top_k=RANKING["top_n_listwise"])
+    print(f"  Got {len(rerank_pool)} after reranking")
+else:
+    for j in rerank_pool:
+        j["rerank_score"] = j.get("_embedding_score")
+
+# Step 4: Listwise Opus ranking (top-N)
+listwise_pool = rerank_pool[:RANKING["top_n_listwise"]]
+if listwise_pool:
+    print(f"\nListwise ranking {len(listwise_pool)} job(s) with Claude Opus + extended thinking...")
+    ranked = listwise_rank(listwise_pool, candidate_profile, preferences)
+else:
+    ranked = []
+
+# Step 5: Save ranking results
+for job in ranked:
+    job_repository.update_ranking_scores(
+        job["id"],
+        embedding_score=job.get("_embedding_score"),
+        rerank_score=job.get("rerank_score"),
+        listwise_rank=job.get("listwise_rank"),
+    )
+
+# Save embedding scores for jobs outside the listwise pool
+ranked_ids = {j["id"] for j in ranked}
+for job in jobs_by_sim:
+    if job["id"] not in ranked_ids:
+        job_repository.update_ranking_scores(
+            job["id"],
+            embedding_score=job.get("_embedding_score"),
+            rerank_score=job.get("rerank_score"),
+            listwise_rank=None,
+        )
+
+print(f"\nDone. Listwise ranked: {len(ranked)} | Embedding-scored only: {len(jobs) - len(ranked)}")
+if ranked:
+    print("\nTop 5:")
+    for job in ranked[:5]:
+        print(f"  #{job['listwise_rank']} {job['title']} @ {job['company']} — {job.get('rank_reason', '')[:80]}")

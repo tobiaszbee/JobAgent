@@ -1,0 +1,194 @@
+"""Unit tests for the Remotive.io scraper — no HTTP calls made."""
+from datetime import datetime, timedelta, timezone
+from unittest.mock import MagicMock
+
+from collector.sources.remotive import RemotiveSource
+from collector.location import location_matches as _location_matches
+from collector.utils import strip_html as _strip_html
+
+
+# ── _location_matches ──────────────────────────────────────────────────────────
+
+
+class TestLocationMatches:
+    def test_remote_matches_all(self):
+        assert _location_matches("Poland Only", "Remote")
+
+    def test_worldwide_matches_any_country(self):
+        assert _location_matches("Worldwide", "Germany")
+
+    def test_anywhere_matches_any_country(self):
+        assert _location_matches("Anywhere", "France")
+
+    def test_global_matches_any_country(self):
+        assert _location_matches("Global", "Canada")
+
+    def test_europe_matches_eu_country(self):
+        assert _location_matches("Europe", "Poland")
+
+    def test_europe_matches_norway(self):
+        assert _location_matches("Europe", "Norway")
+
+    def test_europe_does_not_match_us(self):
+        assert not _location_matches("Europe", "United States")
+
+    def test_emea_matches_eu_country(self):
+        assert _location_matches("EMEA", "Germany")
+
+    def test_north_america_matches_us(self):
+        assert _location_matches("North America", "United States")
+
+    def test_north_america_matches_canada(self):
+        assert _location_matches("USA/Canada", "Canada")
+
+    def test_north_america_does_not_match_poland(self):
+        assert not _location_matches("North America", "Poland")
+
+    def test_direct_country_match(self):
+        assert _location_matches("Poland, Ukraine", "Poland")
+
+    def test_alias_uk(self):
+        assert _location_matches("United Kingdom, Ireland", "UK")
+
+    def test_alias_usa(self):
+        assert _location_matches("USA, Canada", "United States")
+
+    def test_no_match_different_region(self):
+        assert not _location_matches("USA Only", "Germany")
+
+    def test_case_insensitive(self):
+        assert _location_matches("POLAND", "poland")
+
+
+# ── _strip_html ────────────────────────────────────────────────────────────────
+
+
+class TestStripHtml:
+    def test_strips_tags(self):
+        assert _strip_html("<p>Hello</p>") == "Hello"
+
+    def test_none_on_empty(self):
+        assert _strip_html("") is None
+
+    def test_none_on_whitespace_only(self):
+        assert _strip_html("<p>  </p>") is None
+
+    def test_br_to_newline(self):
+        text = _strip_html("Line1<br>Line2")
+        assert "Line1" in text and "Line2" in text
+
+
+# ── RemotiveSource.search() ────────────────────────────────────────────────────
+
+
+def _make_job(
+    job_id: int = 1,
+    title: str = "Senior PHP Developer",
+    company: str = "Acme",
+    candidate_location: str = "Worldwide",
+    days_ago: int = 0,
+    description: str = "<p>Great role</p>",
+) -> dict:
+    pub = (datetime.now(timezone.utc) - timedelta(days=days_ago)).strftime("%Y-%m-%dT%H:%M:%S")
+    return {
+        "id": job_id,
+        "url": f"https://remotive.com/remote-jobs/software-dev/job-{job_id}",
+        "title": title,
+        "company_name": company,
+        "candidate_required_location": candidate_location,
+        "publication_date": pub,
+        "description": description,
+    }
+
+
+def _build_source(jobs: list[dict], days_back: int = 7) -> RemotiveSource:
+    src = RemotiveSource(days_back=days_back)
+    src._fetch_jobs = MagicMock(return_value=jobs)
+    return src
+
+
+class TestRemotiveSourceSearch:
+    def test_returns_matching_job(self):
+        src = _build_source([_make_job()])
+        results = src.search("PHP Developer", "Remote")
+        assert len(results) == 1
+        assert results[0].title == "Senior PHP Developer"
+        assert results[0].source == "remotive"
+
+    def test_source_id_is_job_id(self):
+        src = _build_source([_make_job(job_id=42)])
+        results = src.search("PHP Developer", "Remote")
+        assert results[0].source_id == "42"
+
+    def test_url_preserved(self):
+        src = _build_source([_make_job(job_id=7)])
+        results = src.search("PHP Developer", "Remote")
+        assert results[0].url == "https://remotive.com/remote-jobs/software-dev/job-7"
+
+    def test_filters_by_date(self):
+        fresh = _make_job(job_id=1, days_ago=1)
+        old   = _make_job(job_id=2, days_ago=10)
+        src = _build_source([fresh, old], days_back=7)
+        results = src.search("PHP Developer", "Remote")
+        assert len(results) == 1
+        assert results[0].source_id == "1"
+
+    def test_filters_by_location_europe(self):
+        eu  = _make_job(job_id=1, candidate_location="Europe")
+        us  = _make_job(job_id=2, candidate_location="USA Only")
+        src = _build_source([eu, us])
+        results = src.search("PHP Developer", "Poland")
+        assert len(results) == 1
+        assert results[0].source_id == "1"
+
+    def test_worldwide_matches_any_location(self):
+        job = _make_job(candidate_location="Worldwide")
+        src = _build_source([job])
+        results = src.search("PHP Developer", "Austria")
+        assert len(results) == 1
+
+    def test_skips_known_urls(self):
+        job = _make_job(job_id=5)
+        src = _build_source([job])
+        known = {"https://remotive.com/remote-jobs/software-dev/job-5"}
+        results = src.search("PHP Developer", "Remote", known_urls=known)
+        assert results == []
+
+    def test_respects_max_results(self):
+        jobs = [_make_job(job_id=i) for i in range(10)]
+        src = _build_source(jobs)
+        results = src.search("PHP Developer", "Remote", max_results=3)
+        assert len(results) == 3
+
+    def test_description_stripped(self):
+        src = _build_source([_make_job(description="<p>Good <b>role</b></p>")])
+        results = src.search("PHP Developer", "Remote")
+        assert results[0].description == "Good role"
+
+    def test_empty_api_response(self):
+        src = _build_source([])
+        results = src.search("PHP Developer", "Remote")
+        assert results == []
+
+    def test_skips_job_without_url(self):
+        job = _make_job()
+        job["url"] = ""
+        src = _build_source([job])
+        results = src.search("PHP Developer", "Remote")
+        assert results == []
+
+    def test_location_fallback_to_remote(self):
+        job = _make_job(candidate_location="")
+        src = _build_source([job])
+        results = src.search("PHP Developer", "Remote")
+        assert results[0].location == "Remote"
+
+    def test_company_extracted(self):
+        src = _build_source([_make_job(company="GlobalTech")])
+        results = src.search("PHP Developer", "Remote")
+        assert results[0].company == "GlobalTech"
+
+    def test_fetch_jobs_called_with_title(self):
+        src = _build_source([])
+        src.search("React Developer", "Remote")
+        src._fetch_jobs.assert_called_once_with("React Developer")
