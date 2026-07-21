@@ -81,12 +81,20 @@ def build_system_prompt(
     preferred = criteria.get("preferred", [])
     required_lines = "\n".join(f"- {r}" for r in required) if required else "- (none configured)"
     preferred_lines = "\n".join(f"- {p}" for p in preferred) if preferred else "- (none configured)"
+    # Multiple entries are alternatives (candidate needs at least one), matching the
+    # keyword pre-filter's OR semantics (collector/filters.py) — not "needs every one".
+    required_header = (
+        "MUST HAVE — candidate needs AT LEAST ONE of these "
+        "(heavy penalty ONLY if the job matches none — score ≤2):"
+        if len(required) > 1
+        else "MUST HAVE (heavy penalty if absent — score ≤2):"
+    )
 
     return f"""You are evaluating job listings for a candidate.
 
 {candidate_profile}
 
-{prefs_section}{examples_section}MUST HAVE (heavy penalty if absent — score ≤2):
+{prefs_section}{examples_section}{required_header}
 {required_lines}
 
 PREFERRED (increases score):

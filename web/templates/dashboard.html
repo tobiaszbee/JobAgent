@@ -55,13 +55,12 @@
 
 <div class="toolbar" id="jobs-toolbar">
   <input type="text" id="search" placeholder="Search title, company, description, AI summary...">
-  <select id="min-score">
-    <option value="">All scores</option>
-    <option value="5">Score &ge; 5</option>
-    <option value="6">Score &ge; 6</option>
-    <option value="7">Score &ge; 7</option>
-    <option value="8">Score &ge; 8</option>
-  </select>
+  <div class="score-filter" id="score-filter-wrap">
+    <button type="button" class="score-filter-btn" id="score-filter-btn" onclick="toggleScoreFilterPanel(event)">
+      Score <span class="score-filter-badge" id="score-filter-badge" style="display:none"></span> &#9662;
+    </button>
+    <div class="score-filter-panel" id="score-filter-panel" style="display:none"></div>
+  </div>
   <select id="source-filter">
     <option value="">All sources</option>
   </select>
@@ -191,7 +190,7 @@
           <div class="run-criteria-row">
             <div class="run-criteria-group">
               <div class="run-criteria-header">
-                <strong>Search Queries</strong>
+                <strong id="run-search-queries-title">Search Queries</strong>
                 <button class="btn-select-all" onclick="toggleRunAll('search-query')">Toggle all</button>
               </div>
               <div id="run-search-queries" class="run-checks"></div>

@@ -3,6 +3,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+from config import SCORING
 from db.migrations import init_db
 from db.repositories import job_repository, criteria_repository, preference_repository
 from evaluator.scorer import score_job, build_system_prompt
@@ -51,7 +52,9 @@ def run(force_rescore: bool = False) -> dict:
         logger.info(f"No preference profile — few-shot: {len(positive_examples)} applied, {len(negative_examples)} rejected")
     logger.info("=" * 50)
 
+    auto_reject_threshold = SCORING["auto_reject_at_or_below"]
     jobs_scored = 0
+    jobs_auto_rejected = 0
 
     for job in unscored_jobs:
         logger.info(f"\n[{jobs_scored + 1}/{len(unscored_jobs)}] {job['title']} @ {job['company']}")
@@ -60,16 +63,24 @@ def run(force_rescore: bool = False) -> dict:
         if result["score"] is None:
             logger.warning(f"  Scoring failed — will retry next run: {result['score_reason']}")
             continue
-        job_repository.update_score(job["id"], result["score"], result["score_reason"])
-        logger.info(f"  Score: {result['score']}/10 — {result['score_reason']}")
+
+        if result["score"] <= auto_reject_threshold:
+            job_repository.update_score_and_status(
+                job["id"], result["score"], result["score_reason"], "auto_rejected"
+            )
+            jobs_auto_rejected += 1
+            logger.info(f"  Score: {result['score']}/10 — auto-rejected — {result['score_reason']}")
+        else:
+            job_repository.update_score(job["id"], result["score"], result["score_reason"])
+            logger.info(f"  Score: {result['score']}/10 — {result['score_reason']}")
 
         jobs_scored += 1
 
     logger.info("\n" + "=" * 50)
-    logger.info(f"Done. Scored: {jobs_scored}")
+    logger.info(f"Done. Scored: {jobs_scored} (auto-rejected: {jobs_auto_rejected})")
 
 
-    return {"jobs_scored": jobs_scored}
+    return {"jobs_scored": jobs_scored, "jobs_auto_rejected": jobs_auto_rejected}
 
 
 if __name__ == "__main__":

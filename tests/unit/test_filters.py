@@ -1,5 +1,5 @@
 from db.repositories import criteria_repository, job_repository
-from collector.filters import apply_keyword_filter
+from collector.filters import apply_keyword_filter, title_banned_reason
 
 
 def _insert_job(title="PHP Developer", company="Acme", description="Symfony expertise required.", url=None):
@@ -116,3 +116,23 @@ class TestRunE2Filter:
         job_repository.update_score_and_status(job_id, 0.0, "LinkedIn unavailable", "auto_rejected")
         result = apply_keyword_filter()
         assert result["checked"] == 0
+
+
+class TestTitleBannedReason:
+    def test_no_rejected_keywords_passes(self):
+        assert title_banned_reason("Junior PHP Developer", []) is None
+
+    def test_matching_keyword_in_title_rejects(self):
+        reason = title_banned_reason("Junior PHP Developer", ["junior"])
+        assert reason is not None
+        assert "junior" in reason.lower()
+
+    def test_no_matching_keyword_passes(self):
+        assert title_banned_reason("Senior PHP Developer", ["junior"]) is None
+
+    def test_matching_is_case_insensitive(self):
+        assert title_banned_reason("JUNIOR PHP Developer", ["junior"]) is not None
+
+    def test_whole_word_match_no_false_positive_on_substring(self):
+        # "php" should not match inside an unrelated word like "phpstorm-integration"... but should match standalone
+        assert title_banned_reason("Graphics Designer", ["php"]) is None

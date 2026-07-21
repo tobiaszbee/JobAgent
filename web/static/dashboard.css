@@ -41,6 +41,26 @@ header h1 { font-size: 20px; font-weight: 600; }
 .toolbar select { padding: 7px 12px; border: 1px solid #d0d0d0; border-radius: 6px; font-size: 13px; outline: none; cursor: pointer; }
 .count { margin-left: auto; font-size: 13px; color: #666; }
 
+.score-filter { position: relative; }
+.score-filter-btn { padding: 7px 12px; border: 1px solid #d0d0d0; border-radius: 6px; font-size: 13px; background: white; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; color: #222; }
+.score-filter-btn:hover { border-color: #0a66c2; }
+.score-filter-badge { background: #0a66c2; color: white; font-size: 11px; font-weight: 600; padding: 1px 6px; border-radius: 10px; }
+.score-filter-panel { position: absolute; top: calc(100% + 6px); left: 0; z-index: 20; background: white; border: 1px solid #e0e0e0; border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,0.15); padding: 12px; width: 236px; max-height: 360px; overflow-y: auto; }
+.score-filter-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #999; margin-bottom: 8px; }
+.score-filter-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+.score-pill { display: inline-flex; align-items: center; gap: 5px; padding: 5px 10px; border-radius: 14px; font-size: 12px; font-weight: 700; color: white; cursor: pointer; user-select: none; outline: 2px solid transparent; outline-offset: 1px; transition: filter .12s, outline .12s, transform .08s; }
+.score-pill:hover { filter: brightness(1.08); transform: translateY(-1px); }
+.score-pill.active { outline-color: #222; filter: brightness(0.85); }
+.score-pill.active:hover { filter: brightness(0.78); }
+.score-pill .n { font-weight: 600; opacity: 0.8; font-size: 10px; }
+.score-pill.score-high { background: #0a8a3c; }
+.score-pill.score-mid  { background: #e67e00; }
+.score-pill.score-low  { background: #c0392b; }
+.score-pill.score-none { background: #8a8a8a; }
+.score-filter-empty { padding: 4px 0; font-size: 12px; color: #888; }
+.score-filter-clear { display: block; width: 100%; margin-top: 10px; padding-top: 8px; border: none; border-top: 1px solid #eee; background: none; color: #0a66c2; font-size: 12px; font-weight: 600; cursor: pointer; text-align: left; }
+.score-filter-clear:hover { text-decoration: underline; }
+
 .jobs { padding: 16px 32px; display: flex; flex-direction: column; gap: 10px; }
 
 .job-card { background: white; border-radius: 8px; padding: 16px 20px; border: 1px solid #e0e0e0; transition: box-shadow 0.15s; display: flex; align-items: flex-start; }

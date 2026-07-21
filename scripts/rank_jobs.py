@@ -1,8 +1,11 @@
 """
-Rank unranked new jobs using the full AI pipeline:
+Re-rank the entire active ('new') job pool using the full AI pipeline:
 1. Semantic similarity (Voyage embeddings) — broad recall
 2. Voyage cross-encoder rerank (top-50) — precision
 3. Claude Opus listwise ranking with extended thinking (top-20) — final ordering
+
+Runs over ALL 'new' jobs every time (not just newly-collected ones), so listwise_rank
+stays comparable across the whole list instead of being scoped to one day's batch.
 """
 import sys
 import logging
@@ -30,12 +33,15 @@ except ValueError as e:
 latest_pref = preference_repository.get_latest()
 preferences = latest_pref["signals"] if latest_pref else []
 
-jobs = job_repository.get_jobs_for_ranking()
+RANKING_POOL_LIMIT = 2000
+jobs = job_repository.get_jobs_for_ranking(limit=RANKING_POOL_LIMIT)
 if not jobs:
-    print("No unranked jobs to process.")
+    print("No active jobs to rank.")
     sys.exit(0)
+if len(jobs) == RANKING_POOL_LIMIT:
+    print(f"WARNING: active job pool hit the safety cap ({RANKING_POOL_LIMIT}) — oldest 'new' jobs beyond this were not considered this run.")
 
-print(f"Processing {len(jobs)} unranked job(s)...")
+print(f"Processing {len(jobs)} active job(s)...")
 
 # Step 1: Index any missing embeddings
 unindexed = []
@@ -67,7 +73,16 @@ else:
         job["_embedding_score"] = None
 
 # Step 3: Voyage rerank (top-N)
-rerank_pool = jobs_by_sim[:RANKING["top_n_rerank"]]
+# Exclude jobs already known (via the scorer) to be near-dealbreakers — no point
+# spending Voyage/Opus calls ranking them, and it keeps them from crowding out
+# real candidates in the top-N pools. Jobs not yet scored are kept (score is None).
+min_score = RANKING["min_score_for_ranking"]
+ranking_eligible = [j for j in jobs_by_sim if j.get("score") is None or j["score"] > min_score]
+excluded_low_score = len(jobs_by_sim) - len(ranking_eligible)
+if excluded_low_score:
+    print(f"\nExcluding {excluded_low_score} job(s) with score <= {min_score} from the rerank/listwise pool")
+
+rerank_pool = ranking_eligible[:RANKING["top_n_rerank"]]
 if len(rerank_pool) > 1:
     print(f"\nReranking top-{len(rerank_pool)} with Voyage cross-encoder...")
     rerank_pool = rerank_jobs(rerank_pool, candidate_profile, top_k=RANKING["top_n_listwise"])
@@ -91,6 +106,7 @@ for job in ranked:
         embedding_score=job.get("_embedding_score"),
         rerank_score=job.get("rerank_score"),
         listwise_rank=job.get("listwise_rank"),
+        rank_reason=job.get("rank_reason"),
     )
 
 # Save embedding scores for jobs outside the listwise pool

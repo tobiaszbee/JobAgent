@@ -109,17 +109,21 @@ Do this once. Re-upload only if your CV changes significantly.
 ### Step 2 — Configure criteria
 
 Go to the **Criteria** tab. You need at least:
-- One **Search Query** (e.g. `Senior Python Developer remote`)
+- One **Search Query** or **Job Title** (e.g. `Senior Python Developer`) — Search Query takes priority if both are set
 - One **Location** (e.g. `Poland`, `Remote`, `Europe`)
 
 | Type | Effect | Example |
 |------|--------|---------|
-| `search_query` | Sent to each job board search | `Backend Engineer remote` |
-| `location` | Combined with each query | `Remote`, `Poland` |
-| `rejected` | Keyword in title/description → auto-rejected | `must be in London` |
-| `source` | Which boards to search | `linkedin`, `remotive` |
+| `search_query` | Sent as the literal search phrase (wrapped in quotes for LinkedIn to force exact-phrase matching). Takes priority over `title` — if none are active, `title` criteria are used as the search phrase instead | `Senior Python Developer` |
+| `title` | Fallback search phrase when no `search_query` is active (shown as "using Job Titles" in the Run Agent modal) | `Senior PHP Developer` |
+| `location` | Combined with each search phrase | `Remote`, `Poland` |
+| `rejected` | Keyword anywhere in the title → skips the description fetch entirely; keyword in title+description → auto-rejected | `wordpress`, `ruby` |
+| `required` | None present anywhere in title+description → auto-rejected (hard filter). If present, also shown to Sonnet as scoring context | `php`, `python` |
+| `preferred` | Shown to Sonnet as soft scoring context only — never auto-rejects anything | `Docker`, `Symfony` |
 
-> **Note on `preferred` / `required` / `job title` criteria:** these are visible in the Criteria tab but currently act as soft scoring context, not hard filters. The AI pipeline handles filtering semantically.
+Sources (LinkedIn, Remotive, RemoteOK, Working Nomads, WeWorkRemotely) aren't Criteria-tab items — pick which ones to use per run in the **Run Agent** modal.
+
+**On phrasing `search_query`/`title` values:** LinkedIn matching behavior here is not obvious — quotes force an exact literal phrase, word order changes results completely, and a bare language name (`PHP`, `Python`) alone outperforms compound phrases (`PHP Developer`, `Senior PHP Engineer`). See [How LinkedIn keyword search actually behaves](#how-linkedin-keyword-search-actually-behaves) before adding new phrases — it's easy to add something that looks reasonable and either finds nothing or reintroduces noise.
 
 ### Step 3 — First Run Agent
 
@@ -279,19 +283,52 @@ usage_log (
 
 #### 1. Collection
 
-`collector/runner.py` orchestrates all sources. Each source implements `JobSource.fetch(query, location, days_back)` and returns `RawJob` objects. After collection:
+`collector/runner.py` orchestrates all sources. Each source implements `JobSource.search(title, location, days_back, max_results, known_urls)` and returns `RawJob` objects. After collection:
 
 - Jobs are deduplicated by URL (primary) and title+company hash (secondary)
 - Existing jobs are skipped; only new ones are inserted with `status='new'`
-- LinkedIn descriptions are fetched with Playwright using stealth delays (8–30 s between pages, 2–10 min between batches of 7)
+- New LinkedIn jobs are checked against `rejected` keywords **by title alone** before a description is fetched — a job that's already doomed never costs a page load (`collector/filters.py → title_banned_reason`)
+- LinkedIn descriptions are fetched with Playwright, with delays that scale to what's actually happening on the page instead of a flat random range
 
 LinkedIn stealth parameters (`config.py → STEALTH`):
 ```python
-desc_delay:   8–30 s per page
-search_pause: 60–300 s between queries
-batch_size:   7 descriptions per session
-batch_pause:  120–600 s between batches
+# Search phase — pause after each (title, location) search
+search_glance:     5–20 s   flat "glanced at results" component, always applied
+search_new:        10–30 s  per newly-found job on that page (0 s added if all duplicates)
+
+# Description phase — one browser session per batch
+desc_delay:        8–45 s, scaled to word count (~200 wpm) ± 15% variance
+batch_size:        10 descriptions per session
+batch_pause:       120–600 s between batches
+distract_every_n_batches: 2   # visits a random LinkedIn page (feed/network/jobs) between batches
 ```
+
+Both delay types keep a 5% chance of an extra 60–300 s pause ("stepped away"), independent of page content.
+
+#### How LinkedIn keyword search actually behaves
+
+This took a lot of live trial and error to pin down — worth reading before changing `title`/`search_query` criteria.
+
+**Every search phrase is wrapped in quotes** (`collector/sources/linkedin.py → search()`): `Senior PHP Developer` becomes `"Senior PHP Developer"` in the `keywords=` URL param. Quotes force LinkedIn to require that **exact phrase as a literal substring** somewhere in the job's searchable text — not "these words in any order" and not a fuzzy/semantic match.
+
+- **Without quotes**, LinkedIn matches loosely on individual words (its own relevance ranking, not a literal filter). This is what searching bare `php` originally did, and it returned Ruby, Java, Salesforce, and Data Engineer postings that had nothing to do with PHP — confirmed by direct testing, which is why quoting was added.
+- **Word order matters completely** with quotes, because it's a literal substring match: `"PHP Engineer"` and `"Engineer PHP"` return **completely different, non-overlapping** result sets (verified live — 6 vs 8 results, zero titles in common). Neither is "wrong"; they just catch different real-world title phrasings.
+- **A short phrase is a superset of any longer phrase that contains it.** `"PHP Developer"` matches everywhere `"Senior PHP Developer"` would, plus more (`"Lead PHP Developer"`, `"Full Stack PHP Developer"`, bare `"PHP Developer"` with no prefix). This is why the criteria list was consolidated — dropping a redundant longer variant never loses coverage, as long as it's a literal substring of the phrase kept.
+- **`"X Software Engineer"` is NOT a superset relationship with `"X Engineer"`** — "Software" sits in between, so these are two different, non-overlapping phrases, not a longer/shorter pair of the same one. Confirmed live: `"Python Software Engineer"` and `"Python Engineer"` returned entirely different job postings. Don't assume any two phrases that "feel similar" are substrings of each other — check literally.
+
+**The best-performing phrase found by testing is the bare quoted language name** — `"PHP"` / `"Python"` alone, no "Developer"/"Engineer" suffix. Verified across Germany, Poland, Denmark, and the US (remote-only + last-24h filters, matching production conditions):
+- Never returned zero results, unlike almost every multi-word phrase tried.
+- Still clean — sampling 35+ results across two countries found no unrelated (non-PHP, non-IT) postings.
+- Catches title patterns no multi-word phrase can, because the word can appear anywhere: `"Senior Backend Engineer, PHP"`, `"Software Engineer – Python"`, `"Backend-Entwickler (Python / PHP)"`.
+- Also catches non-English postings, since the token itself isn't translated: German `"PHP-Entwickler"`, `"PHP Softwareentwickler"` all matched a plain `"PHP"` search — a real language-coverage win, since the DACH market posts heavily in German.
+
+Because bare `"PHP"`/`"Python"` is a superset of `"PHP Developer"`, `"PHP Engineer"`, `"PHP Team Lead"`, etc. (all of them literally contain the word), those narrower variants were retired from the `title` criteria. **What's left needs its own entry per framework** (`Symfony Developer`, `Django Developer`, `Laravel Developer`, `FastAPI Developer`, `Flask Developer`) because a framework name doesn't contain the literal word "PHP" or "Python" — bare `"PHP"` won't find a posting titled just `"Symfony Developer"`.
+
+**LinkedIn also supports real Boolean operators** — uppercase `AND` / `OR` / `NOT`, order-independent (`php AND developer` ≡ `developer AND php`, verified live). Tempting, because it directly fixes "0 results" — `php AND developer` returned 500+ hits vs 0–24 for any quoted phrase. **Deliberately not used**: Boolean operators match against the full job description, not just the title, so `php AND developer` also surfaces Java/.NET/generic "Backend Developer" postings where "php" is merely one word buried in a long tech-stack list. Sampled live across 4 countries: roughly half of the top results per search had no PHP/Python connection visible in the title at all. This reintroduces exactly the noise quoting was meant to eliminate, and the existing `required` keyword safety net doesn't help here — `required=[php, python]` can never reject an AND-sourced result, because the search only matched it *because* that word is already present somewhere in the document.
+
+**The "no results" trap this all depends on getting right:** when a quoted phrase matches nothing, LinkedIn doesn't show an empty page — it shows "No matching jobs found" plus an unrelated **"Jobs you may be interested in"** widget (your own personalized recommendations, unrelated to the search). That widget reuses the exact same markup (`.scaffold-layout__list-item`) as real results, so a naive scraper — which is what this one used to be — silently scrapes someone's LinkedIn recommendations and inserts them as if they were real search hits for that query. `_collect_cards()` now checks for `.jobs-search-no-results-banner` and treats its presence as zero results. This is the reason `days_back=1` combined with narrow/compound phrases so often logged identical "found" jobs across unrelated queries and countries before the fix — always double-check this isn't happening again if search result counts look suspiciously identical across different queries.
+
+**The actual reason for frequent "0 new jobs" isn't the phrase, usually — it's `days_back=1` + remote-only (`f_WT=2`) stacked together.** Verified live: `"Python Developer"` in Germany with no date filter has 24 results; the same phrase restricted to the last 24 hours has 0. Multiply that scarcity across every (title, location) combination run daily, and most individual searches will legitimately find nothing new — this is expected, not a bug, given how narrow the freshness window is relative to real posting volume for any single niche+country combination.
 
 #### 2. Preference distillation
 
@@ -448,7 +485,7 @@ JobAgent/
 ├── config.py                       # API keys, models, stealth timings, ranking params
 ├── collector/
 │   ├── base.py                     # JobSource ABC + RawJob dataclass
-│   ├── filters.py                  # Keyword pre-filter (rejected criteria)
+│   ├── filters.py                  # Title pre-filter (before fetch) + full rejected/required filter (after)
 │   ├── runner.py                   # Orchestrates sources → descriptions → DB
 │   └── sources/
 │       ├── linkedin.py             # Playwright + system Chrome, stealth delays
@@ -530,7 +567,7 @@ pytest tests/integration/
 pytest -m e2e           # real API calls — requires ANTHROPIC_API_KEY
 ```
 
-Unit and integration tests use in-memory SQLite and mock all external API calls. ~310 tests, ~7 seconds.
+Unit and integration tests use in-memory SQLite and mock all external API calls. ~420 tests, ~15–20 seconds.
 
 ---
 

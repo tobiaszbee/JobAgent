@@ -93,3 +93,26 @@ class TestEvaluatorRunner:
         assert result["jobs_scored"] == 0
         job = job_repository.search()[0]
         assert job["score"] is None
+
+    def test_low_score_auto_rejects_job(self):
+        _insert_scoreable()
+        with _patched_run(_good_score(score=0.5, score_reason="No PHP, wrong field entirely")):
+            result = run()
+        assert result["jobs_scored"] == 1
+        assert result["jobs_auto_rejected"] == 1
+        job = job_repository.search()[0]
+        assert job["status"] == "auto_rejected"
+        assert job["score"] == 0.5
+
+    def test_score_at_threshold_is_auto_rejected(self):
+        _insert_scoreable()
+        with _patched_run(_good_score(score=1.0)):
+            run()
+        assert job_repository.search()[0]["status"] == "auto_rejected"
+
+    def test_score_just_above_threshold_stays_new(self):
+        _insert_scoreable()
+        with _patched_run(_good_score(score=1.5)):
+            result = run()
+        assert result["jobs_auto_rejected"] == 0
+        assert job_repository.search()[0]["status"] == "new"

@@ -220,7 +220,13 @@ def search(
         sql += " AND source = ?"
         params.append(source)
 
-    sql += " ORDER BY listwise_rank ASC NULLS LAST, rerank_score DESC NULLS LAST, embedding_score DESC NULLS LAST, score DESC NULLS LAST, created_at DESC"
+    # score is the only value comparable across the whole table (one prompt, one job,
+    # every time). listwise_rank/rerank_score/embedding_score are NOT included here as
+    # primary/tiebreak keys for listwise_rank specifically: it's a rank *within a single
+    # ranking run's small batch*, reset to 1..N every run, so a "#1" from one day's batch
+    # is not comparable to a "#1" from another day's batch. rerank_score/embedding_score
+    # are raw model outputs (not positions) and stay valid as tiebreakers.
+    sql += " ORDER BY score DESC NULLS LAST, rerank_score DESC NULLS LAST, embedding_score DESC NULLS LAST, created_at DESC"
     rows = conn.execute(sql, params).fetchall()
     conn.close()
     return [dict(row) for row in rows]
@@ -275,27 +281,30 @@ def update_ranking_scores(
     embedding_score: float | None,
     rerank_score: float | None,
     listwise_rank: int | None,
+    rank_reason: str | None = None,
 ) -> None:
     conn = get_connection()
     conn.execute(
         """UPDATE jobs
-           SET embedding_score = ?, rerank_score = ?, listwise_rank = ?,
+           SET embedding_score = ?, rerank_score = ?, listwise_rank = ?, rank_reason = ?,
                updated_at = CURRENT_TIMESTAMP
            WHERE id = ?""",
-        (embedding_score, rerank_score, listwise_rank, job_id),
+        (embedding_score, rerank_score, listwise_rank, rank_reason, job_id),
     )
     conn.commit()
     conn.close()
 
 
-def get_jobs_for_ranking(limit: int = 200) -> list[dict]:
-    """New jobs with descriptions that haven't been listwise-ranked yet."""
+def get_jobs_for_ranking(limit: int = 2000) -> list[dict]:
+    """All 'new' jobs with descriptions — the whole active pool is re-ranked together every
+    run (not just newly-arrived jobs) so listwise_rank stays comparable across the full list
+    instead of being scoped to whichever jobs happened to be collected that day. `limit` is
+    a safety cap, not a real filter — callers should treat len(result) == limit as truncation."""
     conn = get_connection()
     rows = conn.execute(
         """SELECT * FROM jobs
            WHERE status = 'new'
              AND description IS NOT NULL AND description != ''
-             AND listwise_rank IS NULL
            ORDER BY created_at DESC
            LIMIT ?""",
         (limit,),

@@ -312,11 +312,13 @@ class TestGetJobsForRanking:
         ids = [r["id"] for r in result]
         assert id1 in ids
 
-    def test_excludes_already_ranked_jobs(self):
+    def test_includes_already_ranked_jobs(self):
+        """The whole active pool is re-ranked every run, not just newly-arrived jobs."""
         id1 = _insert(url="https://a.com/1")
         job_repository.update_ranking_scores(id1, None, None, listwise_rank=1)
         result = job_repository.get_jobs_for_ranking()
-        assert result == []
+        ids = [r["id"] for r in result]
+        assert id1 in ids
 
     def test_excludes_jobs_without_descriptions(self):
         job_repository.insert("No desc", "Co", "PL", "https://a.com/nd", "linkedin")

@@ -77,6 +77,22 @@ def init_db() -> None:
             output_tokens INTEGER DEFAULT 0,
             cost_usd      REAL DEFAULT 0.0
         );
+
+        -- Per-search outcome log: one row per (search_query, location) search call.
+        -- Not yet used to drive any decision — a data foundation for a future
+        -- "suggest excluding this query, it never finds anything" feature.
+        CREATE TABLE IF NOT EXISTS search_stats (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id   INTEGER REFERENCES sessions(id),
+            source       TEXT NOT NULL,
+            search_query TEXT NOT NULL,
+            location     TEXT NOT NULL,
+            cards_found  INTEGER DEFAULT 0,
+            new_found    INTEGER DEFAULT 0,
+            searched_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_search_stats_query ON search_stats(source, search_query);
     """)
     conn.commit()
 

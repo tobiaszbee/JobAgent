@@ -424,11 +424,9 @@ async function _loadSources() {
 
 async function loadJobs() {
   const search   = document.getElementById('search').value;
-  const minScore = document.getElementById('min-score').value;
   const source   = document.getElementById('source-filter').value;
   const params   = new URLSearchParams({ status: currentStatus });
   if (search)   params.set('search', search);
-  if (minScore) params.set('min_score', minScore);
   if (source)   params.set('source', source);
 
   try {
@@ -438,6 +436,7 @@ async function loadJobs() {
     showToast('Failed to load jobs — is the server running?');
     return;
   }
+  _buildScoreFilterPanel();
   render();
 }
 
@@ -524,10 +523,15 @@ function render() {
   _lazyJobs = [...ALL_JOBS];
   if (currentStatus !== 'auto_rejected' && currentStatus !== 'all') _lazyJobs = _lazyJobs.filter(j => j.status !== 'auto_rejected');
   if (sort === 'rank') {
+    // listwise_rank is a position *within one ranking run's batch* (reset to 1..N every
+    // run), so it's not comparable across jobs ranked on different days — sorting by it
+    // directly can put a same-day "least bad of a weak batch" job above a genuinely
+    // strong match from another day. score is the only value comparable across the whole
+    // list (same prompt, every job); rerank_score/embedding_score are real continuous
+    // model outputs (not positions) and make reasonable tiebreakers.
     _lazyJobs.sort((a, b) => {
-      if (a.listwise_rank != null && b.listwise_rank != null) return a.listwise_rank - b.listwise_rank;
-      if (a.listwise_rank != null) return -1;
-      if (b.listwise_rank != null) return 1;
+      const scoreDiff = (b.score ?? -1) - (a.score ?? -1);
+      if (scoreDiff !== 0) return scoreDiff;
       return (b.rerank_score ?? b.embedding_score ?? -1) - (a.rerank_score ?? a.embedding_score ?? -1);
     });
   }
@@ -818,10 +822,19 @@ async function openRunModal() {
   const r = await fetch('/api/criteria');
   const all = await r.json();
 
-  const searchQueries = all.filter(c => c.type === 'search_query' && c.is_active);
-  const locations     = all.filter(c => c.type === 'location'     && c.is_active);
+  const searchQueryCriteria = all.filter(c => c.type === 'search_query' && c.is_active);
+  const titleCriteria       = all.filter(c => c.type === 'title'        && c.is_active);
+  const locations           = all.filter(c => c.type === 'location'     && c.is_active);
 
-  document.getElementById('run-search-queries').innerHTML = searchQueries.map(c => `
+  // Mirrors the collector's own fallback (collector/runner.py): titles are used
+  // as search queries when no search_query criteria are active.
+  const usingTitleFallback = !searchQueryCriteria.length && titleCriteria.length > 0;
+  const queriesForRun = usingTitleFallback ? titleCriteria : searchQueryCriteria;
+
+  document.getElementById('run-search-queries-title').textContent =
+    usingTitleFallback ? 'Search Queries (using Job Titles)' : 'Search Queries';
+
+  document.getElementById('run-search-queries').innerHTML = queriesForRun.map(c => `
     <label class="run-check">
       <input type="checkbox" name="search-query" value="${esc(c.value)}" checked> ${esc(c.value)}
     </label>`).join('');
@@ -1183,11 +1196,24 @@ async function applySuggestions() {
 
 // ── Badge filters ─────────────────────────────────────────────────────────────
 
+function _scoreKey(score) {
+  return score != null ? `score=${score.toFixed(1)}` : 'score=none';
+}
+
 function _matchesBadgeFilters(j) {
+  const active = [..._badgeFilters];
+  const scoreFilters = active.filter(f => f.startsWith('score='));
+  const otherFilters = active.filter(f => !f.startsWith('score='));
+
+  // Score filters are OR'd against each other (pick any of several exact values);
+  // everything else stays AND'd together like before.
+  if (scoreFilters.length && !scoreFilters.includes(_scoreKey(j.score))) return false;
+
+  if (!otherFilters.length) return true;
   const s = _parseStructured(j);
   if (!s) return false;
   const stackLower = (s.stack || []).map(t => t.toLowerCase());
-  for (const f of _badgeFilters) {
+  for (const f of otherFilters) {
     if (f === 'remote'  && !s.remote) return false;
     if (f === 'hybrid'  && !s.hybrid) return false;
     if (f.startsWith('seniority=') && s.seniority !== f.slice(10)) return false;
@@ -1198,23 +1224,87 @@ function _matchesBadgeFilters(j) {
   return true;
 }
 
+function _buildScoreFilterPanel() {
+  const panel = document.getElementById('score-filter-panel');
+  if (!panel) return;
+  const counts = new Map();
+  for (const j of ALL_JOBS) {
+    const key = _scoreKey(j.score);
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  const keys = [...counts.keys()].sort((a, b) => {
+    if (a === 'score=none') return 1;
+    if (b === 'score=none') return -1;
+    return parseFloat(b.slice(6)) - parseFloat(a.slice(6));
+  });
+  if (!keys.length) {
+    panel.innerHTML = '<div class="score-filter-empty">No jobs loaded</div>';
+    _updateScoreFilterBadge();
+    return;
+  }
+  const pills = keys.map(key => {
+    const isNone = key === 'score=none';
+    const rawScore = isNone ? null : parseFloat(key.slice(6));
+    const cls = scoreClass(rawScore);
+    const label = isNone ? 'n/a' : rawScore.toFixed(1);
+    const active = _badgeFilters.has(key) ? ' active' : '';
+    return `<span class="score-pill ${cls}${active}" onclick="toggleBadgeFilter('${key}')">${label}<span class="n">${counts.get(key)}</span></span>`;
+  }).join('');
+  panel.innerHTML = `<div class="score-filter-title">Filter by score</div>` +
+    `<div class="score-filter-grid">${pills}</div>` +
+    `<button type="button" class="score-filter-clear" onclick="_clearScoreFilters()">Clear score filter</button>`;
+  _updateScoreFilterBadge();
+}
+
+function _clearScoreFilters() {
+  for (const f of [..._badgeFilters]) if (f.startsWith('score=')) _badgeFilters.delete(f);
+  _buildScoreFilterPanel();
+  render();
+}
+
+function _updateScoreFilterBadge() {
+  const el = document.getElementById('score-filter-badge');
+  if (!el) return;
+  const n = [..._badgeFilters].filter(f => f.startsWith('score=')).length;
+  el.style.display = n ? '' : 'none';
+  el.textContent = n;
+}
+
+function toggleScoreFilterPanel(e) {
+  e.stopPropagation();
+  const panel = document.getElementById('score-filter-panel');
+  const opening = panel.style.display === 'none';
+  panel.style.display = opening ? 'block' : 'none';
+  if (opening) _buildScoreFilterPanel();
+}
+
+document.addEventListener('click', (e) => {
+  const wrap = document.getElementById('score-filter-wrap');
+  const panel = document.getElementById('score-filter-panel');
+  if (wrap && panel && !wrap.contains(e.target)) panel.style.display = 'none';
+});
+
 function toggleBadgeFilter(f) {
   _badgeFilters.has(f) ? _badgeFilters.delete(f) : _badgeFilters.add(f);
+  if (f.startsWith('score=')) _buildScoreFilterPanel(); else _updateScoreFilterBadge();
   render();
 }
 
 function removeBadgeFilter(f) {
   _badgeFilters.delete(f);
+  if (f.startsWith('score=')) _buildScoreFilterPanel(); else _updateScoreFilterBadge();
   render();
 }
 
 function clearBadgeFilters() {
   _badgeFilters.clear();
+  _buildScoreFilterPanel();
   render();
 }
 
 function _filterLabel(f) {
   if (f === 'remote' || f === 'hybrid') return f;
+  if (f.startsWith('score=')) return f.slice(6) === 'none' ? 'score: not scored' : `score: ${f.slice(6)}`;
   return f.includes('=') ? f.split('=')[1] : f;
 }
 
@@ -1319,7 +1409,6 @@ document.getElementById('search').addEventListener('input', () => {
   clearTimeout(searchTimeout);
   searchTimeout = setTimeout(loadJobs, 300);
 });
-document.getElementById('min-score').addEventListener('change', loadJobs);
 document.getElementById('source-filter').addEventListener('change', loadJobs);
 document.getElementById('sort').addEventListener('change', render);
 

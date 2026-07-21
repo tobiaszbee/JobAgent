@@ -19,6 +19,15 @@ _DISTRACTION_URLS = [
 ]
 
 
+def _reading_seconds(text: str) -> float:
+    """Base reading-time estimate for a description: word count / reading speed,
+    with natural variance, clamped to a plausible range. Split out from the sleeping
+    wrapper so the formula itself is unit-testable."""
+    words = len(text.split())
+    seconds = words / (STEALTH["desc_reading_wpm"] / 60) * random.uniform(0.85, 1.15)
+    return max(STEALTH["desc_delay_min"], min(STEALTH["desc_delay_max"], seconds))
+
+
 class LinkedInSource(JobSource):
     requires_stealth_pauses = True
 
@@ -91,9 +100,10 @@ class LinkedInSource(JobSource):
     def search(self, title: str, location: str, days_back: int | None = None, max_results: int | None = None, known_urls: set[str] | None = None) -> list[RawJob]:
         days = days_back if days_back is not None else self._days_back
         seconds = days * 24 * 3600
+        exact_phrase = f'"{title}"'  # quoted phrase — LinkedIn otherwise matches loosely on individual words
         url = (
             f"{_SEARCH_URL}"
-            f"?keywords={quote(title)}"
+            f"?keywords={quote(exact_phrase)}"
             f"&location={quote(location)}"
             f"&f_WT=2"
             f"&f_TPR=r{seconds}"
@@ -123,12 +133,7 @@ class LinkedInSource(JobSource):
             time.sleep(random.uniform(1, 3))
             self._scroll_to_bottom()
 
-        self._human_delay(
-            STEALTH["desc_delay_min"],
-            STEALTH["desc_delay_max"],
-        )
-
-        return self._page.evaluate("""
+        text = self._page.evaluate("""
             () => {
                 // Try LinkedIn's structured description element first (prefer longer content)
                 const descEl = document.querySelector('.jobs-description__content, .jobs-box__html-content, .description__text');
@@ -153,6 +158,14 @@ class LinkedInSource(JobSource):
             }
         """) or None
 
+        if text:
+            self._reading_delay(text)
+        else:
+            # Nothing to read — still spend some time on the page before giving up.
+            self._human_delay(STEALTH["desc_delay_min"], STEALTH["desc_delay_max"])
+
+        return text
+
     def distract(self) -> None:
         """Visit a random non-job LinkedIn page to simulate organic browsing."""
         url = random.choice(_DISTRACTION_URLS)
@@ -172,6 +185,16 @@ class LinkedInSource(JobSource):
         r = random.betavariate(2, 5)   # peaks near 0.25 of range
         wait = min_sec + r * (max_sec - min_sec)
         if random.random() < 0.05:     # 5% — "went to make coffee"
+            wait += random.uniform(60, 300)
+        time.sleep(wait)
+        return wait
+
+    def _reading_delay(self, text: str) -> float:
+        """Delay scaled to how long a human would take to read this specific
+        description, clamped to a plausible range. Same 5% "coffee break" chance
+        as _human_delay for occasional distraction."""
+        wait = _reading_seconds(text)
+        if random.random() < 0.05:
             wait += random.uniform(60, 300)
         time.sleep(wait)
         return wait
@@ -219,6 +242,14 @@ class LinkedInSource(JobSource):
                 self._page.wait_for_selector(".scaffold-layout__list-item", timeout=10_000)
             except PlaywrightTimeout:
                 print("  No results found or LinkedIn page structure changed.")
+                break
+
+            # When a query genuinely matches nothing, LinkedIn shows a "no results" banner
+            # alongside an unrelated "Jobs you may be interested in" widget — which reuses
+            # the exact same .scaffold-layout__list-item markup as real results. Without
+            # this check we'd silently scrape someone's personalized recommendations.
+            if self._page.query_selector(".jobs-search-no-results-banner"):
+                print("  No matching jobs — LinkedIn showed unrelated recommendations instead. Skipping.")
                 break
 
             self._scroll_to_bottom()

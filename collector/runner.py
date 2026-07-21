@@ -8,8 +8,8 @@ logger = logging.getLogger(__name__)
 
 from config import STEALTH
 from db.migrations import init_db
-from db.repositories import job_repository, session_repository, criteria_repository
-from collector.filters import apply_keyword_filter
+from db.repositories import job_repository, session_repository, criteria_repository, search_stats_repository
+from collector.filters import apply_keyword_filter, title_banned_reason
 from collector.sources import available as available_sources, make as make_source
 from collector.sources.linkedin import LinkedInSource
 
@@ -70,6 +70,19 @@ def _fetch_descriptions_in_batches(jobs_pending_description: list[tuple[str, str
     logger.info(f"\nDescriptions: {ok_total} fetched, {fail_total} still missing")
 
 
+def _search_pause_seconds(new_count: int) -> float:
+    """Post-search pause modeling a human glancing at results: a flat look at the
+    page (always, duplicates need no extra attention) plus reading time for each
+    newly-found job. A search that surfaces nothing new is over in seconds; one
+    that finds several new listings takes proportionally longer."""
+    glance = random.uniform(STEALTH["search_glance_min"], STEALTH["search_glance_max"])
+    reading = sum(
+        random.uniform(STEALTH["search_new_min"], STEALTH["search_new_max"])
+        for _ in range(new_count)
+    )
+    return glance + reading
+
+
 def _collect_job_cards(
     selected_sources: list[str],
     search_queries: list[str],
@@ -77,10 +90,13 @@ def _collect_job_cards(
     days_back: int,
     max_jobs: int | None,
     known_urls: set[str],
+    rejected_kw: list[str],
+    session_id: int,
 ) -> tuple[int, int, list[tuple[str, str]]]:
     jobs_found = 0
     jobs_new = 0
     jobs_pending_description: list[tuple[str, str]] = []
+    jobs_prefiltered = 0
 
     for source_id in selected_sources:
         logger.info(f"\n[{source_id}] Starting source...")
@@ -91,6 +107,7 @@ def _collect_job_cards(
                 source.login()
 
                 first_search = True
+                pending_pause = 0.0
                 for title in search_queries:
                     if max_jobs and jobs_new >= max_jobs:
                         break
@@ -99,13 +116,9 @@ def _collect_job_cards(
                             break
 
                         if not first_search and source.requires_stealth_pauses:
-                            pause = random.uniform(
-                                STEALTH["search_pause_min"],
-                                STEALTH["search_pause_max"],
-                            )
-                            resume = (datetime.now() + timedelta(seconds=pause)).strftime("%H:%M")
-                            logger.info(f"  [stealth] Pausing {pause:.0f}s before next search... → resume ~{resume}")
-                            time.sleep(pause)
+                            resume = (datetime.now() + timedelta(seconds=pending_pause)).strftime("%H:%M")
+                            logger.info(f"  [stealth] Pausing {pending_pause:.0f}s before next search... → resume ~{resume}")
+                            time.sleep(pending_pause)
                         first_search = False
 
                         logger.info(f"\nSearching: {title!r} in {location!r}")
@@ -113,6 +126,7 @@ def _collect_job_cards(
                         raw_jobs = source.search(title, location, max_results=remaining, known_urls=known_urls)
                         jobs_found += len(raw_jobs)
 
+                        new_this_search = 0
                         for raw in raw_jobs:
                             if max_jobs and jobs_new >= max_jobs:
                                 break
@@ -130,13 +144,31 @@ def _collect_job_cards(
                                 continue
 
                             jobs_new += 1
+                            new_this_search += 1
                             known_urls.add(raw.url)
                             if not raw.description:
-                                jobs_pending_description.append((job_id, raw.url))
+                                reason = title_banned_reason(raw.title, rejected_kw) if rejected_kw else None
+                                if reason:
+                                    job_repository.update_score_and_status(job_id, 0.0, reason, "auto_rejected")
+                                    jobs_prefiltered += 1
+                                    logger.info(f"  [prefilter] {raw.title} @ {raw.company} — {reason}")
+                                else:
+                                    jobs_pending_description.append((job_id, raw.url))
                             logger.info(f"  [{jobs_new}{'/' + str(max_jobs) if max_jobs else ''}] {raw.title} @ {raw.company}")
+
+                        search_stats_repository.record(
+                            session_id, source_id, title, location,
+                            cards_found=len(raw_jobs), new_found=new_this_search,
+                        )
+
+                        if source.requires_stealth_pauses:
+                            pending_pause = _search_pause_seconds(new_this_search)
 
         except Exception as exc:
             logger.warning(f"[{source_id}] Source failed — skipping: {exc}")
+
+    if jobs_prefiltered:
+        logger.info(f"\n[prefilter] Skipped description fetch for {jobs_prefiltered} job(s) — banned keyword in title")
 
     return jobs_found, jobs_new, jobs_pending_description
 
@@ -179,9 +211,10 @@ def run(
         known_urls = job_repository.get_all_urls()
         logger.info(f"Loaded {len(known_urls)} known URLs for early-stop deduplication.")
 
+        rejected_kw = [r.lower() for r in criteria["rejected"]]
         jobs_found, jobs_new, jobs_pending_description = _collect_job_cards(
             selected_sources, search_queries, criteria["locations"],
-            days_back, max_jobs, known_urls,
+            days_back, max_jobs, known_urls, rejected_kw, session_id,
         )
 
         if jobs_pending_description:
