@@ -42,8 +42,8 @@ class TestRerankJobs:
 
         assert result[0]["rerank_score"] == 0.77
 
-    def test_truncates_description_to_1000_chars(self):
-        long_desc = "x" * 2000
+    def test_truncates_description_to_6000_chars(self):
+        long_desc = "x" * 10000
         jobs = [_job("j1", description=long_desc)]
         captured = []
 
@@ -59,24 +59,53 @@ class TestRerankJobs:
             rerank_jobs(jobs, "query")
 
         assert len(captured) == 1
-        assert "x" * 1001 not in captured[0]
+        assert "x" * 6001 not in captured[0]
+        assert "x" * 6000 in captured[0]
 
-    def test_uses_default_query_when_none_given(self):
-        jobs = [_job("j1")]
-        used_query = []
-
-        def capture(query, documents, top_k):
-            used_query.append(query)
-            return [{"index": 0, "score": 0.5}]
-
+    def test_skips_cross_encoder_when_no_query_given(self):
+        # A generic placeholder query would produce a rerank_score that looks
+        # considered but isn't — the cross-encoder must not be called at all.
+        jobs = [_job("j1"), _job("j2")]
         with patch("ranker.reranker._get_client") as mock_get:
             mock_client = MagicMock()
-            mock_client.rerank.side_effect = capture
             mock_get.return_value = mock_client
 
-            rerank_jobs(jobs, query=None)
+            result = rerank_jobs(jobs, query=None)
 
-        assert used_query[0] == "software engineer developer"
+        mock_client.rerank.assert_not_called()
+        assert [r["id"] for r in result] == ["j1", "j2"]
+
+    def test_skips_cross_encoder_when_query_is_blank(self):
+        jobs = [_job("j1")]
+        with patch("ranker.reranker._get_client") as mock_get:
+            mock_client = MagicMock()
+            mock_get.return_value = mock_client
+
+            rerank_jobs(jobs, query="   ")
+
+        mock_client.rerank.assert_not_called()
+
+    def test_no_query_falls_back_to_embedding_score(self):
+        jobs = [_job("j1")]
+        jobs[0]["_embedding_score"] = 0.33
+
+        result = rerank_jobs(jobs, query=None)
+
+        assert result[0]["rerank_score"] == 0.33
+
+    def test_no_query_and_no_embedding_score_defaults_to_zero(self):
+        jobs = [_job("j1")]
+
+        result = rerank_jobs(jobs, query=None)
+
+        assert result[0]["rerank_score"] == 0.0
+
+    def test_no_query_respects_top_k(self):
+        jobs = [_job(f"j{i}") for i in range(5)]
+
+        result = rerank_jobs(jobs, query=None, top_k=2)
+
+        assert len(result) == 2
 
     def test_fallback_on_api_error_preserves_original_order(self):
         jobs = [_job("j1"), _job("j2"), _job("j3")]

@@ -116,3 +116,26 @@ class TestEvaluatorRunner:
             result = run()
         assert result["jobs_auto_rejected"] == 0
         assert job_repository.search()[0]["status"] == "new"
+
+    def test_divergence_cases_passed_to_build_system_prompt(self):
+        _insert_scoreable()
+        fake_cases = [{"divergence_type": "false_positive", "listwise_rank": 2, "title": "X", "rejection_reason": "Y"}]
+        with patch("evaluator.runner.load_active_profile", return_value="fake profile"):
+            with patch("evaluator.runner.divergence_cases", return_value=fake_cases):
+                with patch("evaluator.runner.build_system_prompt", return_value="fake") as mock_prompt:
+                    with patch("evaluator.runner.score_job", return_value=_good_score()):
+                        run()
+        assert mock_prompt.call_args.kwargs["divergence_cases"] == fake_cases
+
+    def test_divergence_cases_capped_at_limit(self):
+        _insert_scoreable()
+        many_cases = [
+            {"divergence_type": "false_positive", "listwise_rank": i, "title": f"Job {i}", "rejection_reason": "x"}
+            for i in range(50)
+        ]
+        with patch("evaluator.runner.load_active_profile", return_value="fake profile"):
+            with patch("evaluator.runner.divergence_cases", return_value=many_cases):
+                with patch("evaluator.runner.build_system_prompt", return_value="fake") as mock_prompt:
+                    with patch("evaluator.runner.score_job", return_value=_good_score()):
+                        run()
+        assert len(mock_prompt.call_args.kwargs["divergence_cases"]) == 10

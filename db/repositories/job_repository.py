@@ -16,6 +16,7 @@ def insert(
     source: str,
     source_id: str | None = None,
     description: str | None = None,
+    search_query: str | None = None,
 ) -> str | None:
     conn = get_connection()
     try:
@@ -35,9 +36,9 @@ def insert(
 
         job_id = _generate_id(url)
         conn.execute(
-            """INSERT INTO jobs (id, title, company, location, url, description, source, source_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (job_id, title, company, location, url, description, source, source_id),
+            """INSERT INTO jobs (id, title, company, location, url, description, source, source_id, search_query)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (job_id, title, company, location, url, description, source, source_id, search_query),
         )
         conn.commit()
         return job_id
@@ -54,11 +55,12 @@ def get_all_urls() -> set[str]:
 
 
 def get_missing_descriptions() -> list[dict]:
-    """LinkedIn jobs without a description that are not yet scored — candidates for backfill."""
+    """Jobs (any source) without a description that are not yet scored — candidates
+    for backfill."""
     conn = get_connection()
     rows = conn.execute(
-        "SELECT id, url FROM jobs WHERE source = 'linkedin'"
-        " AND (description IS NULL OR description = '') AND score IS NULL ORDER BY created_at DESC"
+        "SELECT id, url, source FROM jobs"
+        " WHERE (description IS NULL OR description = '') AND score IS NULL ORDER BY created_at DESC"
     ).fetchall()
     conn.close()
     return [dict(row) for row in rows]
@@ -74,11 +76,11 @@ def update_description(job_id: str, description: str) -> None:
     conn.close()
 
 
-def update_score(job_id: str, score: float, reason: str) -> None:
+def update_score(job_id: str, score: float, reason: str, breakdown: dict | None = None) -> None:
     conn = get_connection()
     conn.execute(
-        "UPDATE jobs SET score = ?, score_reason = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-        (score, reason, job_id)
+        "UPDATE jobs SET score = ?, score_reason = ?, score_breakdown = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (score, reason, json.dumps(breakdown, ensure_ascii=False) if breakdown is not None else None, job_id)
     )
     conn.commit()
     conn.close()
@@ -100,12 +102,12 @@ def update_status(job_id: str, status: str, rejection_reason: str | None = None)
     conn.close()
 
 
-def update_score_and_status(job_id: str, score: float, reason: str, status: str) -> None:
+def update_score_and_status(job_id: str, score: float, reason: str, status: str, breakdown: dict | None = None) -> None:
     """Atomic update of score and status in a single transaction."""
     conn = get_connection()
     conn.execute(
-        "UPDATE jobs SET score = ?, score_reason = ?, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-        (score, reason, status, job_id)
+        "UPDATE jobs SET score = ?, score_reason = ?, score_breakdown = ?, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (score, reason, json.dumps(breakdown, ensure_ascii=False) if breakdown is not None else None, status, job_id)
     )
     conn.commit()
     conn.close()
@@ -282,14 +284,16 @@ def update_ranking_scores(
     rerank_score: float | None,
     listwise_rank: int | None,
     rank_reason: str | None = None,
+    debate_flag: str | None = None,
+    debate_note: str | None = None,
 ) -> None:
     conn = get_connection()
     conn.execute(
         """UPDATE jobs
            SET embedding_score = ?, rerank_score = ?, listwise_rank = ?, rank_reason = ?,
-               updated_at = CURRENT_TIMESTAMP
+               debate_flag = ?, debate_note = ?, updated_at = CURRENT_TIMESTAMP
            WHERE id = ?""",
-        (embedding_score, rerank_score, listwise_rank, rank_reason, job_id),
+        (embedding_score, rerank_score, listwise_rank, rank_reason, debate_flag, debate_note, job_id),
     )
     conn.commit()
     conn.close()
@@ -337,6 +341,64 @@ def count_decisions() -> int:
     return n
 
 
+def get_query_outcome_stats(source: str) -> list[dict]:
+    """Per search_query outcome totals for one source — terminal_total excludes
+    'new' (not yet decided), so a query only accrues signal once its jobs have
+    actually been evaluated/reviewed. Feeds scripts/prune_search_queries.py; not
+    wired into any exclusion decision here."""
+    conn = get_connection()
+    rows = conn.execute(
+        """SELECT
+               search_query,
+               COUNT(*)                                                          AS terminal_total,
+               SUM(CASE WHEN status IN ('rejected','auto_rejected') THEN 1 ELSE 0 END) AS reject_total,
+               SUM(CASE WHEN status = 'applied'  THEN 1 ELSE 0 END)              AS applied_total,
+               SUM(CASE WHEN status = 'reviewed' THEN 1 ELSE 0 END)              AS reviewed_total
+           FROM jobs
+           WHERE source = ? AND search_query IS NOT NULL AND status != 'new'
+           GROUP BY search_query""",
+        (source,),
+    ).fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+
+def update_would_apply(job_id: str, would_apply: bool, reason: str) -> None:
+    conn = get_connection()
+    conn.execute(
+        "UPDATE jobs SET would_apply = ?, would_apply_reason = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (1 if would_apply else 0, reason, job_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_would_apply_stats() -> dict:
+    """Precision of the 'would apply' flag against decisions made since: of jobs
+    flagged would_apply=1 that the candidate has since applied to or rejected
+    (still-'new'/'reviewed' jobs are inconclusive and excluded), what fraction
+    were applied? This is the number the ≥90% auto-apply gate is measured against."""
+    conn = get_connection()
+    row = conn.execute("""
+        SELECT
+            COUNT(*)                                             AS flagged_total,
+            SUM(CASE WHEN status = 'applied'  THEN 1 ELSE 0 END) AS applied,
+            SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) AS rejected
+        FROM jobs
+        WHERE would_apply = 1
+    """).fetchone()
+    conn.close()
+    decided = (row["applied"] or 0) + (row["rejected"] or 0)
+    precision = round(row["applied"] / decided, 3) if decided else None
+    return {
+        "flagged_total": row["flagged_total"] or 0,
+        "applied": row["applied"] or 0,
+        "rejected": row["rejected"] or 0,
+        "decided": decided,
+        "precision": precision,
+    }
+
+
 def get_stats() -> JobStats:
     conn = get_connection()
     row = conn.execute("""
@@ -347,7 +409,8 @@ def get_stats() -> JobStats:
             COUNT(CASE WHEN status = 'applied'       THEN 1 END) AS applied,
             COUNT(CASE WHEN status = 'rejected'      THEN 1 END) AS rejected,
             COUNT(CASE WHEN status = 'auto_rejected' THEN 1 END) AS auto_rejected,
-            ROUND(AVG(CASE WHEN score IS NOT NULL THEN score END), 2) AS avg_score
+            ROUND(AVG(CASE WHEN score IS NOT NULL THEN score END), 2) AS avg_score,
+            ROUND(AVG(CASE WHEN status = 'new' AND score IS NOT NULL THEN score END), 2) AS avg_score_new
         FROM jobs
     """).fetchone()
     last = conn.execute(

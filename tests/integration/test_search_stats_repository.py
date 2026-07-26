@@ -58,3 +58,30 @@ class TestGetQuerySummary:
 
     def test_returns_empty_when_no_stats_recorded(self):
         assert search_stats_repository.get_query_summary("linkedin") == []
+
+
+class TestGetZeroYieldQueries:
+    def test_flags_query_with_zero_new_across_min_searches(self):
+        session_id = session_repository.start()
+        for _ in range(5):
+            search_stats_repository.record(session_id, "linkedin", "Dead Query", "Austria", cards_found=3, new_found=0)
+        assert search_stats_repository.get_zero_yield_queries("linkedin", min_searches=5) == ["Dead Query"]
+
+    def test_below_min_searches_not_flagged(self):
+        session_id = session_repository.start()
+        for _ in range(4):
+            search_stats_repository.record(session_id, "linkedin", "Dead Query", "Austria", cards_found=3, new_found=0)
+        assert search_stats_repository.get_zero_yield_queries("linkedin", min_searches=5) == []
+
+    def test_any_nonzero_new_found_excludes_query(self):
+        session_id = session_repository.start()
+        for _ in range(4):
+            search_stats_repository.record(session_id, "linkedin", "Good Query", "Austria", cards_found=3, new_found=0)
+        search_stats_repository.record(session_id, "linkedin", "Good Query", "Belgium", cards_found=2, new_found=1)
+        assert search_stats_repository.get_zero_yield_queries("linkedin", min_searches=5) == []
+
+    def test_scoped_by_source(self):
+        session_id = session_repository.start()
+        for _ in range(5):
+            search_stats_repository.record(session_id, "remotive", "Dead Query", "Austria", cards_found=3, new_found=0)
+        assert search_stats_repository.get_zero_yield_queries("linkedin", min_searches=5) == []

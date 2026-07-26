@@ -107,6 +107,8 @@ class TestEvalReport:
         assert "precision_at_5" in report
         assert "divergence_cases" in report
         assert "total_ranked" in report
+        assert "would_apply" in report
+        assert "would_apply_score_floor" in report
 
     def test_report_combines_data(self):
         _insert_ranked("Applied top", "applied", 1)
@@ -115,3 +117,14 @@ class TestEvalReport:
         assert report["n_evaluated_5"] == 2
         assert len(report["divergence_cases"]) == 1  # rank 3 + rejected → FP
         assert report["total_ranked"] == 2
+
+    def test_would_apply_reflects_repository_stats(self):
+        job_id = job_repository.insert(
+            title="Flagged job", company="Acme", location="Remote",
+            url="https://ex.com/flagged", source="linkedin",
+        )
+        job_repository.update_would_apply(job_id, True, "Score 8.0 >= 7.0, no dealbreaker risk flagged")
+        job_repository.update_status(job_id, "applied")
+        report = eval_report()
+        assert report["would_apply"]["flagged_total"] == 1
+        assert report["would_apply"]["precision"] == 1.0

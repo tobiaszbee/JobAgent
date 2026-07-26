@@ -1,0 +1,221 @@
+"""justjoin.it source — Poland-focused IT job board, public and unauthenticated.
+
+Search results are fetched with a plain HTTP GET: the listing data (title, company,
+salary, skills, workplace type) is embedded as structured JSON inside the server-rendered
+page (verified live against the real site), so no browser is needed for search(). Full
+descriptions aren't in that listing payload, so each new job's detail page is rendered
+with Playwright to read the description text — the description is itself streamed inside
+Next.js's internal RSC wire format, and reverse-engineering that byte-for-byte proved too
+fragile (unstable across page loads) to rely on for real content.
+
+This is a Poland-only board — search() only fires anything when `location` resolves to
+Poland, to avoid firing the same query once per configured country for no reason.
+"""
+import json
+import re
+import logging
+from datetime import datetime, timedelta, timezone
+
+import httpx
+from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
+
+from collector.base import JobSource, RawJob
+
+logger = logging.getLogger(__name__)
+
+_SEARCH_URL = "https://justjoin.it/job-offers/all-locations"
+_DETAIL_URL = "https://justjoin.it/job-offer/{slug}"
+_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                  "(KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+}
+_POLAND_ALIASES = {"poland", "polska", "pl"}
+
+
+def _parse_rsc_offers(html: str) -> list[dict]:
+    """Extract the job-listing array embedded in the page's Next.js RSC payload.
+
+    Each `self.__next_f.push([<id>, "<json>"])` script tag is a self-contained JSON
+    array — the second element is itself a JSON-escaped string of the form
+    `<hex_id>:<json>` (a React Server Components "row"). We only need the one row that
+    carries the dehydrated react-query state with the OFFERS listing, so we scan each
+    push call independently for that content and parse just that one — no need to
+    reassemble a general cross-chunk stream (other row kinds, e.g. text/hint rows, use
+    a different micro-syntax we don't need to understand for this).
+    """
+    for m in re.finditer(r"self\.__next_f\.push\(", html):
+        start = m.end() - 1
+        depth = 0
+        i = start
+        while i < len(html):
+            if html[i] == "(":
+                depth += 1
+            elif html[i] == ")":
+                depth -= 1
+                if depth == 0:
+                    break
+            i += 1
+        arg_str = html[start + 1:i]
+        try:
+            arr = json.loads(arg_str)
+        except Exception:
+            continue
+        if not (isinstance(arr, list) and len(arr) == 2 and isinstance(arr[1], str)):
+            continue
+        text = arr[1]
+        if '"companyName"' not in text or '"employmentTypes"' not in text:
+            continue
+
+        try:
+            colon_idx = text.index(":")
+            data = json.loads(text[colon_idx + 1:])
+            queries = data[3]["state"]["queries"]
+        except Exception:
+            continue
+
+        for q in queries:
+            key = q.get("queryKey")
+            if key and key[0] == "OFFERS":
+                try:
+                    pages = q["state"]["data"]["pages"]
+                except (KeyError, TypeError):
+                    continue
+                offers = []
+                for page in pages:
+                    offers.extend(page.get("data", []))
+                return offers
+    return []
+
+
+class JustJoinSource(JobSource):
+    def __init__(self, days_back: int = 7, **_):
+        self._days_back = days_back
+        self._client: httpx.Client | None = None
+        self._playwright = None
+        self._browser = None
+        self._page = None
+
+    @property
+    def name(self) -> str:
+        return "justjoin"
+
+    def __enter__(self):
+        self._client = httpx.Client(headers=_HEADERS, timeout=30, follow_redirects=True)
+        self._playwright = sync_playwright().start()
+        self._browser = self._playwright.chromium.launch(channel="chrome", headless=True)
+        self._page = self._browser.new_page()
+        return self
+
+    def __exit__(self, *args):
+        if self._client:
+            self._client.close()
+        if self._browser:
+            self._browser.close()
+        if self._playwright:
+            self._playwright.stop()
+        self._client = None
+        self._browser = None
+        self._playwright = None
+        self._page = None
+
+    def fetch_description(self, url: str) -> str | None:
+        try:
+            self._page.goto(url, wait_until="domcontentloaded", timeout=20_000)
+        except PlaywrightTimeout:
+            return None
+
+        try:
+            self._page.wait_for_selector(".editor-paragraph", timeout=6_000)
+            paras = self._page.eval_on_selector_all(
+                ".editor-paragraph",
+                "els => els.map(e => e.textContent.trim()).filter(Boolean)",
+            )
+            text = "\n".join(paras).strip()
+            if text:
+                return text
+        except PlaywrightTimeout:
+            pass
+        except Exception:
+            pass
+
+        # Some postings don't use the rich-text-editor markup above (verified live —
+        # a real posting rendered its description as plain text under a "Job description"
+        # heading instead). The sibling element's CSS class is MUI's auto-generated
+        # hash (not stable across deploys), but the heading-text + next-sibling
+        # structure is, so fall back to that instead of giving up.
+        try:
+            fallback = self._page.evaluate("""
+                () => {
+                    const headings = document.querySelectorAll('h1,h2,h3,h4');
+                    for (const el of headings) {
+                        if ((el.textContent || '').trim().toLowerCase() === 'job description') {
+                            const sib = el.nextElementSibling;
+                            return sib ? sib.textContent.trim() : '';
+                        }
+                    }
+                    return '';
+                }
+            """)
+        except Exception:
+            return None
+        return fallback or None
+
+    def search(
+        self,
+        title: str,
+        location: str,
+        days_back: int | None = None,
+        max_results: int | None = None,
+        known_urls: set[str] | None = None,
+    ) -> list[RawJob]:
+        if location.strip().lower() not in _POLAND_ALIASES:
+            return []
+
+        days = days_back if days_back is not None else self._days_back
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+
+        try:
+            resp = self._client.get(_SEARCH_URL, params={"keyword": title, "workplace": "remote"})
+        except Exception as e:
+            logger.warning(f"justjoin.it request failed: {e}")
+            return []
+        if resp.status_code != 200:
+            return []
+
+        offers = _parse_rsc_offers(resp.text)
+        if not offers:
+            return []
+
+        results: list[RawJob] = []
+        for offer in offers:
+            if max_results and len(results) >= max_results:
+                break
+
+            slug = offer.get("slug")
+            if not slug:
+                continue
+
+            pub_str = offer.get("publishedAt") or offer.get("lastPublishedAt")
+            try:
+                pub_dt = datetime.fromisoformat(pub_str.replace("Z", "+00:00")) if pub_str else None
+            except ValueError:
+                pub_dt = None
+            if pub_dt and pub_dt < cutoff:
+                continue
+
+            url = _DETAIL_URL.format(slug=slug)
+            if known_urls and url in known_urls:
+                continue
+
+            city = offer.get("city") or "Poland"
+            results.append(RawJob(
+                title=offer.get("title", ""),
+                company=offer.get("companyName", ""),
+                location=f"{city}, Poland (Remote)",
+                url=url,
+                source=self.name,
+                source_id=offer.get("guid"),
+                description=self.fetch_description(url),
+            ))
+
+        return results

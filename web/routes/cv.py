@@ -44,6 +44,11 @@ def list_profiles():
     return jsonify(cv_repository.list_all())
 
 
+@bp.get("/api/cv/active")
+def active_profile():
+    return jsonify(cv_repository.get_active())
+
+
 @bp.post("/api/cv/upload")
 def upload_cv():
     if "file" not in request.files:

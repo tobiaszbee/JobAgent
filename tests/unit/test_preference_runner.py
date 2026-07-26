@@ -1,7 +1,7 @@
-from preference_agent.runner import _build_prompt, _job_line
+from preference_agent.runner import _build_prompt, _job_line, _build_dismissed_section
 
 
-def _job(title="Dev", company="Corp", location="Remote", description="PHP Symfony", rejection_reason=None, score_reason=None):
+def _job(title="Dev", company="Corp", location="Remote", description="PHP Symfony", rejection_reason=None, score_reason=None, source=None):
     return {
         "title": title,
         "company": company,
@@ -9,6 +9,7 @@ def _job(title="Dev", company="Corp", location="Remote", description="PHP Symfon
         "description": description,
         "rejection_reason": rejection_reason,
         "score_reason": score_reason,
+        "source": source,
     }
 
 
@@ -63,6 +64,15 @@ def test_build_prompt_rejected_empty():
     assert "REJECTED (0 jobs)" in prompt
 
 
+def test_job_line_strips_linkedin_junk():
+    # Regression guard: _job_line used to slice job["description"] raw, letting
+    # LinkedIn's page-chrome junk pollute the preference-distillation prompt.
+    j = _job(description="Real content about the role.\nSet alert for similar jobs\nUnrelated junk.", source="linkedin")
+    line = _job_line(j)
+    assert "Real content about the role." in line
+    assert "Unrelated junk" not in line
+
+
 def test_build_prompt_description_not_truncated():
     long_desc = "PHP " * 200  # 800 chars
     prompt = _build_prompt([_job(description=long_desc)], [])
@@ -78,3 +88,25 @@ def test_build_prompt_caps_rejected_at_max_and_shows_most_recent():
     assert "Job 0" in prompt
     assert f"Job {_MAX_REJECTED}" not in prompt
     assert "older omitted" in prompt
+
+
+def test_build_dismissed_section_empty_returns_empty_string():
+    assert _build_dismissed_section([]) == ""
+
+
+def test_build_dismissed_section_formats_con():
+    items = [{"item_type": "con", "item_text": "UK-based, timezone concern", "reason": "not an issue for me",
+              "title": "Backend Dev", "company": "AcmeCo"}]
+    section = _build_dismissed_section(items)
+    assert "CON" in section
+    assert "UK-based, timezone concern" in section
+    assert "not an issue for me" in section
+    assert "Backend Dev" in section
+    assert "AcmeCo" in section
+
+
+def test_build_dismissed_section_formats_pro():
+    items = [{"item_type": "pro", "item_text": "Fully remote", "reason": "actually I prefer hybrid",
+              "title": "Dev", "company": "Corp"}]
+    section = _build_dismissed_section(items)
+    assert "PRO" in section

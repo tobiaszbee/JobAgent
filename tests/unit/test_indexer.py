@@ -52,6 +52,23 @@ class TestJobToText:
         assert "x" * 2000 in text
         assert "x" * 2001 not in text
 
+    def test_strips_linkedin_junk_before_embedding(self):
+        # Regression guard: _job_to_text used to slice job["description"] raw, so
+        # LinkedIn's page-chrome junk (footer links, "people also viewed") could land
+        # inside the embedded text for short postings. It must go through
+        # build_excerpt() so junk is stripped first, same as every other consumer.
+        job = {
+            "title": "Dev", "company": "Co", "location": None, "source": "linkedin",
+            "description": "Real job content here.\nSet alert for similar jobs\nUnrelated junk.",
+        }
+        text = _job_to_text(job)
+        assert "Real job content here." in text
+        assert "Unrelated junk" not in text
+
+    def test_non_linkedin_source_passes_description_through_unchanged(self):
+        job = {"title": "Dev", "company": "Co", "location": None, "source": "remotive", "description": "Clean text"}
+        assert "Clean text" in _job_to_text(job)
+
 
 class TestBuildIdealVector:
     def test_returns_none_when_no_applied_jobs(self):
@@ -95,6 +112,30 @@ class TestBuildIdealVector:
         _insert_job("j1", status="applied")  # no embedding → skipped
         # query returns zero rows → no applied embeddings → None
         assert build_ideal_vector() is None
+
+    def test_no_applied_jobs_no_profile_returns_none(self):
+        assert build_ideal_vector(candidate_profile=None) is None
+        assert build_ideal_vector(candidate_profile="") is None
+
+    @patch("embeddings.indexer._get_client")
+    def test_falls_back_to_embedding_candidate_profile_when_no_applied_jobs(self, mock_get_client):
+        mock_client = MagicMock()
+        mock_client.embed.return_value = [[0.7, 0.7]]
+        mock_get_client.return_value = mock_client
+
+        result = build_ideal_vector(candidate_profile="CANDIDATE:\n- Senior PHP Developer")
+
+        assert result == [0.7, 0.7]
+        mock_client.embed.assert_called_once_with(["CANDIDATE:\n- Senior PHP Developer"], input_type="query")
+
+    def test_applied_history_takes_priority_over_profile_fallback(self):
+        _insert_job("j1", status="applied")
+        _insert_embedding("j1", [1.0, 0.0])
+
+        result = build_ideal_vector(candidate_profile="CANDIDATE:\n- Senior PHP Developer")
+
+        assert result is not None
+        assert abs(result[0] - 1.0) < 1e-9
 
 
 class TestEmbedWithRetry:

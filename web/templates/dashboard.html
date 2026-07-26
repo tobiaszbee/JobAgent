@@ -1,301 +1,317 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Job Agent Dashboard</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JobAgent — Dashboard</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
 </head>
 <body>
 
-<header>
-  <h1>Job Agent Dashboard</h1>
-  <div class="header-right">
-    <span id="last-updated"></span>
-    <div class="agent-indicator" id="agent-indicator" style="display:none" onclick="openActivityModal()">
-      <span class="agent-dot"></span>
-      <span>Running</span>
-    </div>
-    <button class="btn-prefs" id="btn-prefs" onclick="openPrefsModal()">&#129504; Preferences</button>
-    <button class="btn-run" id="btn-run" onclick="openRunModal()">&#9654; Run Agent</button>
+<header class="topbar">
+  <div class="brand">
+    <span class="wordmark">JobAgent<span class="dot">.</span></span>
+    <span class="sub">Dashboard</span>
+  </div>
+  <div class="top-actions">
+    <span class="last-run" id="last-run">last run —</span>
+    <button class="running-pill" id="running-pill" onclick="openActivityModal()">
+      <span class="blip"></span> Agent running
+    </button>
+    <button class="icon-btn" onclick="openActionsModal()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg>
+      Actions
+    </button>
+    <button class="run-btn" id="run-btn" onclick="openRunModal()">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+      Run agent
+    </button>
+    <details class="nav-menu">
+      <summary class="icon-btn" aria-label="Menu" title="Menu">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+      </summary>
+      <nav class="nav-menu-panel">
+        <a href="/">Dashboard</a>
+        <a href="/questionnaire">Preferences</a>
+        <a href="/how-it-works">How it works</a>
+        <a href="https://github.com/tobiaszbee/JobAgent" target="_blank" rel="noopener">GitHub <span class="ext">↗</span></a>
+        <a href="https://www.linkedin.com/in/baranskitomasz/" target="_blank" rel="noopener">Author <span class="ext">↗</span></a>
+        <button type="button" onclick="toggleTheme()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+          Theme
+        </button>
+      </nav>
+    </details>
   </div>
 </header>
 
-<div class="stats">
-  <div class="stat"><div class="val" id="s-total">—</div><div class="lbl">Total</div></div>
-  <div class="stat"><div class="val" id="s-new">—</div><div class="lbl">New</div></div>
-  <div class="stat"><div class="val" id="s-reviewed">—</div><div class="lbl">Reviewed</div></div>
-  <div class="stat"><div class="val" id="s-applied">—</div><div class="lbl">Applied</div></div>
-  <div class="stat"><div class="val" id="s-rejected">—</div><div class="lbl">Rejected</div></div>
-  <div class="stat"><div class="val" id="s-auto-rejected">—</div><div class="lbl">Auto-rejected</div></div>
-  <div class="stat"><div class="val" id="s-avg">—</div><div class="lbl">Avg Score</div></div>
-  <div class="stat stat-ranked" onclick="openEvalModal()" title="Open eval report"><div class="val" id="s-ranked">—</div><div class="lbl">Ranked &#128202;</div></div>
-  <div class="stat stat-cost" title="Approximate API costs (Anthropic + Voyage). Prices are estimates.">
-    <div class="val cost-val"><span id="s-cost-today">—</span></div>
-    <div class="lbl">Today / Total <span id="s-cost-total" class="cost-total"></span></div>
+<div class="wrap">
+
+  <div class="cv-banner" id="cv-banner" style="display:none">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4M12 17h.01M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
+    No CV uploaded — jobs won't be scored until you <a href="/questionnaire">upload your CV</a>.
   </div>
-</div>
 
-<div class="status-tabs">
-  <div class="tab active" data-status="new">New</div>
-  <div class="tab" data-status="reviewed">Reviewed</div>
-  <div class="tab" data-status="applied">Applied</div>
-  <div class="tab" data-status="rejected">Rejected</div>
-  <div class="tab" data-status="auto_rejected">Auto-rejected</div>
-  <div class="tab" data-status="all">All</div>
-  <div class="tab-right-group">
-    <div class="tab" data-status="cv">&#9998; CV</div>
-    <div class="tab" data-status="criteria">&#9881; Criteria</div>
+  <div class="summary">
+    <div class="panel">
+      <div class="panel-label">Pipeline</div>
+      <div class="funnel" id="funnel">
+        <button type="button" class="step" data-status="new"><span class="num" id="f-new">—</span><span class="cap">New</span></button>
+        <button type="button" class="step" data-status="reviewed"><span class="num" id="f-reviewed">—</span><span class="cap">Reviewed</span></button>
+        <button type="button" class="step" data-status="applied"><span class="num" id="f-applied">—</span><span class="cap">Applied</span></button>
+        <button type="button" class="step" data-status="rejected"><span class="num" id="f-rejected">—</span><span class="cap">Rejected</span></button>
+        <button type="button" class="step" data-status="auto_rejected"><span class="num" id="f-auto">—</span><span class="cap">Auto-rej.</span></button>
+      </div>
+    </div>
+
+    <div class="panel mini-stat">
+      <div class="panel-label">
+        <span class="lbl-with-info">Avg score
+          <span class="info"><button type="button" class="info-btn">?</button>
+            <span class="tip">Average score across <b>new, unreviewed</b> jobs only. Reviewed/applied/rejected jobs are excluded so old decisions don't drag this number around — it reflects what's waiting on you right now.</span>
+          </span>
+        </span>
+      </div>
+      <div class="mono-lg" id="s-avg-new">—</div>
+      <div class="cap"><b>pending</b> · new jobs only</div>
+    </div>
+
+    <div class="panel calib" id="calib-panel" onclick="openEvalModal()">
+      <div class="panel-label">
+        <span class="lbl-with-info">Calibration
+          <span class="info"><button type="button" class="info-btn">?</button>
+            <span class="tip">How well the AI ranking matches your actual decisions. <b>Precision@5/@10</b>: of the top-ranked jobs you've since decided on, what fraction were good calls (applied/reviewed, not rejected). Click for the full report.</span>
+          </span>
+        </span>
+        <span class="open-cue">Details →</span>
+      </div>
+      <div class="calib-metrics">
+        <div class="m"><span class="mv" id="calib-p5">—</span><span class="ml">Precision@5</span></div>
+        <div class="m"><span class="mv" id="calib-p10">—</span><span class="ml">Precision@10</span></div>
+      </div>
+      <div class="calib-div"><span class="tick"></span><span id="calib-div-count">—</span> divergence cases found</div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-label">Cost</div>
+      <div class="cost-rows">
+        <div class="cost-row primary"><span class="k">per 100 jobs</span><span class="v" id="cost-per100">—</span></div>
+        <div class="cost-row sub"><span class="k">today</span><span class="v" id="cost-today">—</span></div>
+        <div class="cost-row sub"><span class="k">all time</span><span class="v" id="cost-total">—</span></div>
+      </div>
+    </div>
   </div>
-</div>
 
-<div class="banner-warning" id="no-cv-banner" style="display:none">
-  ⚠️ No CV uploaded — jobs won't be scored until you <a href="#" onclick="document.querySelector('[data-status=cv]').click();return false">upload your CV</a>.
-</div>
-
-<div class="toolbar" id="jobs-toolbar">
-  <input type="text" id="search" placeholder="Search title, company, description, AI summary...">
-  <div class="score-filter" id="score-filter-wrap">
-    <button type="button" class="score-filter-btn" id="score-filter-btn" onclick="toggleScoreFilterPanel(event)">
-      Score <span class="score-filter-badge" id="score-filter-badge" style="display:none"></span> &#9662;
+  <div class="panel learned-card" id="learned-card">
+    <div class="lc-head">
+      <div class="lc-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"/><path d="M9 21h6M10 17h4"/></svg>
+        What the agent learned
+        <span class="info"><button type="button" class="info-btn">?</button>
+          <span class="tip">Distilled from the jobs you've applied to and rejected. These signals get fed back into every future scoring pass so the AI adapts to your actual taste over time.</span>
+        </span>
+      </div>
+      <div class="lc-sub"><a href="#" onclick="openLearnedModal(); return false;">View full profile →</a></div>
+    </div>
+    <div class="lc-signals" id="lc-signals"><span class="lc-empty">No profile yet — click refresh to distill one from your feedback history.</span></div>
+    <button class="lc-refresh" id="lc-refresh" onclick="distillPreferences()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.5 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.65 4.36A9 9 0 0 0 20.5 15"/></svg>
+      Refresh
     </button>
-    <div class="score-filter-panel" id="score-filter-panel" style="display:none"></div>
   </div>
-  <select id="source-filter">
-    <option value="">All sources</option>
-  </select>
-  <select id="sort">
-    <option value="rank">Sort by AI rank</option>
-    <option value="score">Sort by score</option>
-    <option value="date">Sort by date</option>
-    <option value="company">Sort by company</option>
-  </select>
-  <span class="count" id="count"></span>
-  <button class="btn-reevaluate" id="btn-reevaluate" onclick="reevaluateRejected()" style="display:none"
-    data-tip="Resets auto-rejected jobs and re-runs the keyword filter + Sonnet scoring with your current criteria. Use after changing Auto-reject keywords.">&#8635; Re-evaluate auto-rejected</button>
-  <button class="btn-rescore" id="btn-rescore" onclick="rescoreNew()" style="display:none"
-    data-tip="Re-runs Sonnet scoring on all 'new' jobs using your latest preferences. Use after preference distillation or uploading a new CV.">&#8635; Re-score new</button>
-  <button class="btn-rank" id="btn-rank" onclick="rankJobs()" style="display:none"
-    data-tip="Runs the full AI ranking pipeline on new jobs: Voyage semantic search → Voyage cross-encoder rerank → Claude Opus listwise ranking with extended thinking.">&#9733; Rank jobs (AI)</button>
-  <button class="btn-suggest" onclick="openSuggestModal()"
-    data-tip="Claude analyzes jobs you applied to and suggests new LinkedIn search queries to find similar roles. Requires at least 3 applied jobs.">&#128161; Suggest searches</button>
-  <button class="btn-backfill" id="btn-backfill" onclick="openBackfillModal()" style="display:none">&#8635; Fetch missing descriptions (<span id="backfill-count">0</span>)</button>
-  <button class="btn-delete-jobs" onclick="openDeleteModal()">&#128465; Delete jobs</button>
-  <button class="btn-select-mode" id="btn-select-mode" onclick="toggleSelectMode()">&#9776; Bulk actions</button>
-</div>
 
-<div class="bulk-bar" id="bulk-bar" style="display:none">
-  <span id="bulk-count">0 selected</span>
-  <button class="bulk-meta" onclick="selectAll()">Select all</button>
-  <button class="bulk-meta" onclick="deselectAll()">None</button>
-  <button class="bulk-action btn-bulk-applied" onclick="bulkSetStatus('applied')" disabled>&#10003; Applied</button>
-  <button class="bulk-action btn-bulk-reviewed" onclick="bulkSetStatus('reviewed')" disabled>Reviewed</button>
-  <button class="bulk-action btn-bulk-reject" onclick="openBulkRejectModal()" disabled>&#10007; Reject&hellip;</button>
-</div>
-
-<div class="filter-bar" id="filter-bar" style="display:none">
-  <span class="filter-bar-label">Filters:</span>
-  <span id="filter-chips"></span>
-  <button class="filter-clear" onclick="clearBadgeFilters()">Clear all</button>
-</div>
-
-<div class="jobs" id="jobs-container"></div>
-
-<div class="criteria-panel" id="criteria-panel" style="display:none">
-  <div class="criteria-grid" id="criteria-grid"></div>
-</div>
-
-<div class="cv-panel" id="cv-panel" style="display:none">
-  <div class="cv-upload-section">
-    <h3>Upload CV</h3>
-    <p class="cv-hint">Upload a PDF — Claude will extract your stack, experience, and preferences to use when scoring jobs.</p>
-    <div class="cv-upload-row">
-      <input type="file" id="cv-file" accept=".pdf">
-      <button class="btn-cv-upload" id="btn-cv-upload" onclick="uploadCV()">Upload &amp; Parse</button>
-    </div>
-    <div id="cv-upload-status"></div>
+  <div class="tabs" id="tabs">
+    <button class="tab active" data-status="new">New <span class="cnt" id="t-new">—</span></button>
+    <button class="tab" data-status="reviewed">Reviewed <span class="cnt" id="t-reviewed">—</span></button>
+    <button class="tab" data-status="applied">Applied <span class="cnt" id="t-applied">—</span></button>
+    <button class="tab" data-status="rejected">Rejected <span class="cnt" id="t-rejected">—</span></button>
+    <button class="tab" data-status="auto_rejected">Auto-rejected <span class="cnt" id="t-auto">—</span></button>
+    <button class="tab" data-status="all">All <span class="cnt" id="t-all">—</span></button>
   </div>
-  <div id="cv-profiles"></div>
-  <div id="cv-suggestions" style="display:none">
-    <div class="cv-suggest-header">
-      <h3>Suggested search criteria</h3>
-      <span class="cv-suggest-hint">Select which to add to Criteria</span>
+
+  <div class="toolbar">
+    <div class="search-wrap">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+      <input type="text" id="search" placeholder="Search title, company, description, AI summary…">
     </div>
-    <div class="cv-suggest-cols">
-      <div class="cv-suggest-group">
-        <strong>Search Queries <span class="cv-suggest-tag">used for LinkedIn search</span></strong>
-        <div id="suggest-search-queries"></div>
-      </div>
-      <div class="cv-suggest-group">
-        <strong>Job Titles <span class="cv-suggest-tag">used for scoring</span></strong>
-        <div id="suggest-titles"></div>
-      </div>
-      <div class="cv-suggest-group">
-        <strong>Locations</strong>
-        <div id="suggest-locations"></div>
-      </div>
-      <div class="cv-suggest-group">
-        <strong>Required keywords</strong>
-        <div id="suggest-required"></div>
-      </div>
-      <div class="cv-suggest-group">
-        <strong>Preferred keywords</strong>
-        <div id="suggest-preferred"></div>
-      </div>
+    <div class="scoref">
+      <button type="button" class="tool-btn" id="scoref-btn" onclick="toggleScoreFilterPanel(event)">
+        Score <span class="fbadge" id="scoref-badge"></span>
+      </button>
+      <div class="scoref-panel" id="scoref-panel"></div>
     </div>
-    <div class="cv-suggest-footer">
-      <button class="btn-cv-apply" id="btn-cv-apply" onclick="applySuggestions()">Add selected to Criteria</button>
-      <button class="btn-cv-cancel" onclick="document.getElementById('cv-suggestions').style.display='none'">Cancel</button>
-    </div>
+    <select class="tool-select" id="source-filter"><option value="">All sources</option></select>
+    <select class="tool-select" id="sort">
+      <option value="rank">Sort: AI rank</option>
+      <option value="score">Sort: score</option>
+      <option value="date">Sort: date</option>
+      <option value="company">Sort: company</option>
+    </select>
+    <button type="button" class="tool-btn" id="more-filters-btn" onclick="openFiltersModal()">
+      More filters <span class="fbadge" id="more-filters-badge"></span>
+    </button>
+    <button type="button" class="tool-btn" id="select-toggle" onclick="toggleSelectMode()">Select</button>
+    <span class="result-count" id="count"></span>
   </div>
+
+  <div class="filter-bar" id="filter-bar">
+    <span class="fb-label">Active filters:</span>
+    <span id="filter-chips"></span>
+    <button type="button" class="fb-clear" onclick="clearBadgeFilters()">Clear all</button>
+  </div>
+
+  <div class="bulk-bar" id="bulk-bar">
+    <span class="n" id="bulk-count">0 selected</span>
+    <div class="sep"></div>
+    <button type="button" class="bulk-meta" onclick="selectAll()">Select all</button>
+    <button type="button" class="bulk-meta" onclick="deselectAll()">None</button>
+    <div class="sep"></div>
+    <button type="button" class="bulk-act applied" onclick="bulkSetStatus('applied')" disabled>Mark applied</button>
+    <button type="button" class="bulk-act" onclick="bulkSetStatus('reviewed')" disabled>Mark reviewed</button>
+    <button type="button" class="bulk-act reject" onclick="openBulkRejectModal()" disabled>Reject…</button>
+  </div>
+
+  <div class="jobs" id="jobs-container"></div>
+
 </div>
 
-<!-- Bulk Reject Modal -->
-<div class="modal-overlay" id="bulk-reject-overlay" style="display:none" onclick="if(event.target===this) closeBulkRejectModal()">
-  <div class="modal modal-sm">
-    <div class="modal-header">
-      <h2>Reject selected jobs</h2>
-      <button class="modal-close" onclick="closeBulkRejectModal()">&#x2715;</button>
-    </div>
-    <div class="modal-body">
-      <p id="bulk-reject-msg" class="modal-hint"></p>
-      <input type="text" id="bulk-reject-reason" placeholder="Rejection reason (optional, applies to all)..."
-             onkeydown="if(event.key==='Enter') confirmBulkReject(); if(event.key==='Escape') closeBulkRejectModal()">
-    </div>
-    <div class="modal-footer">
-      <button class="btn-secondary" onclick="closeBulkRejectModal()">Cancel</button>
-      <button class="btn-danger" onclick="confirmBulkReject()">Reject all</button>
-    </div>
-  </div>
-</div>
+{% include "_footer.html" %}
 
-<!-- Run Modal -->
-<div class="modal-overlay" id="run-modal" style="display:none">
-  <div class="modal modal-run">
-    <div class="modal-header">
-      <h2>Run Agent</h2>
-      <button class="modal-close" onclick="closeRunModal()">&#x2715;</button>
-    </div>
-    <div class="modal-body">
-
-      <div class="run-spec" id="run-spec">
-        <button class="run-spec-toggle" onclick="toggleRunSpec()">
-          <span id="run-spec-arrow">▼</span> Specification
-        </button>
-        <div class="run-spec-body" id="run-spec-body">
-          <div class="run-params">
-            <label>Search last <input type="number" id="run-days" value="1" min="1" max="30"> days</label>
-            <label>Max new jobs <input type="number" id="run-max-jobs" placeholder="unlimited" min="1"></label>
-          </div>
-          <div class="run-criteria-row">
-            <div class="run-criteria-group">
-              <div class="run-criteria-header">
-                <strong id="run-search-queries-title">Search Queries</strong>
-                <button class="btn-select-all" onclick="toggleRunAll('search-query')">Toggle all</button>
-              </div>
-              <div id="run-search-queries" class="run-checks"></div>
-            </div>
-            <div class="run-criteria-group">
-              <div class="run-criteria-header">
-                <strong>Sources</strong>
-                <button class="btn-select-all" onclick="toggleRunAll('source')">Toggle all</button>
-              </div>
-              <div id="run-sources" class="run-checks"></div>
-            </div>
-          </div>
-          <div class="run-criteria-group">
-            <div class="run-criteria-header">
-              <strong>Locations</strong>
-              <button class="btn-select-all" onclick="toggleRunAll('location')">Toggle all</button>
-            </div>
-            <div id="run-locations" class="run-checks run-checks-grid"></div>
-          </div>
+<!-- Run modal -->
+<div class="overlay" id="run-modal">
+  <div class="modal">
+    <div class="modal-hd"><h2 id="run-modal-title">Run agent</h2><button class="modal-close" onclick="closeRunModal()">✕</button></div>
+    <div class="modal-bd">
+      <div id="run-modal-params">
+        <label class="since-toggle">
+          <input type="checkbox" id="run-since-last" checked onchange="_onSinceLastToggle()">
+          <span class="st-tx"><span class="t">Search since last run</span><span class="d">Automatically covers every day since the last successful run.</span></span>
+        </label>
+        <div class="run-params">
+          <label class="f disabled" id="run-days-label">Search last <input type="number" id="run-days" value="1" min="1" max="60" disabled> days</label>
         </div>
+        <p class="modal-hint">Search queries, countries, and sources are derived from your <a href="/questionnaire">preferences</a>.</p>
       </div>
-
       <div class="run-log" id="run-log"></div>
     </div>
-    <div class="modal-footer">
-      <button class="btn-start" id="btn-start" onclick="startAgent()">&#9654; Start</button>
-      <button class="btn-cancel" onclick="closeRunModal()">Close</button>
+    <div class="modal-ft">
+      <button class="btn-ghost" onclick="closeRunModal()">Close</button>
+      <button class="btn-stop" id="btn-generic-stop" style="display:none" onclick="stopAgent()">■ Stop</button>
+      <button class="btn-primary" id="btn-start" onclick="startAgent()">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg> Start
+      </button>
     </div>
   </div>
 </div>
 
-<!-- Backfill Modal -->
-<div class="modal-overlay" id="backfill-modal" style="display:none">
-  <div class="modal modal-sm">
-    <div class="modal-header">
-      <h2>Fetch Missing Descriptions</h2>
-      <button class="modal-close" onclick="closeBackfillModal()">&#x2715;</button>
+<!-- Actions modal -->
+<div class="overlay" id="actions-modal">
+  <div class="modal">
+    <div class="modal-hd"><h2>Actions</h2><button class="modal-close" onclick="closeActionsModal()">✕</button></div>
+    <div class="modal-bd">
+      <div class="op-list">
+        <button type="button" class="op" onclick="closeActionsModal(); rankJobs()">
+          <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l2.4 7.4H22l-6 4.4 2.3 7.2L12 16.6l-6.3 4.4 2.3-7.2-6-4.4h7.6z"/></svg></span>
+          <span class="tx"><span class="t">Rank jobs (AI)</span><span class="d">Voyage semantic search → cross-encoder rerank → Claude Opus listwise ranking.</span></span>
+        </button>
+        <button type="button" class="op" onclick="closeActionsModal(); rescoreNew()">
+          <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.5 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.65 4.36A9 9 0 0 0 20.5 15"/></svg></span>
+          <span class="tx"><span class="t">Re-score new jobs</span><span class="d">Re-runs scoring on all "new" jobs with latest preferences.</span></span>
+        </button>
+        <button type="button" class="op" onclick="closeActionsModal(); reevaluateRejected()">
+          <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.5 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.65 4.36A9 9 0 0 0 20.5 15"/></svg></span>
+          <span class="tx"><span class="t">Re-evaluate auto-rejected</span><span class="d">Resets auto-rejects, re-runs keyword filter + scoring.</span></span>
+        </button>
+        <button type="button" class="op" id="op-backfill" onclick="closeActionsModal(); openBackfillModal()">
+          <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M4 9h16M9 4v16"/></svg></span>
+          <span class="tx"><span class="t">Fetch missing descriptions</span><span class="d"><span id="backfill-count">0</span> jobs have no description yet.</span></span>
+          <span class="badge-n" id="op-backfill-n" style="display:none">0</span>
+        </button>
+        <button type="button" class="op" onclick="closeActionsModal(); openExcludedQueriesModal()">
+          <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/><path d="M8 11h6"/></svg></span>
+          <span class="tx"><span class="t">Auto-excluded search queries</span><span class="d">LinkedIn queries dropped for a very high reject rate with zero applied/reviewed jobs, or for consistently finding nothing new.</span></span>
+        </button>
+        <div class="op-divide"></div>
+        <a class="op" href="/questionnaire">
+          <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>
+          <span class="tx"><span class="t">Change criteria</span><span class="d">Edit your questionnaire — CV, salary floor, remote/hybrid, dealbreakers.</span></span>
+          <span class="go-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg></span>
+        </a>
+        <div class="op-divide"></div>
+        <button type="button" class="op danger" onclick="closeActionsModal(); openDeleteModal()">
+          <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg></span>
+          <span class="tx"><span class="t">Delete jobs</span><span class="d">Bulk-delete by status and date range.</span></span>
+        </button>
+      </div>
     </div>
-    <div class="modal-body">
-      <p class="backfill-info">Opens LinkedIn for each job without a description and fetches its content.</p>
-      <div class="backfill-progress" id="backfill-progress" style="display:none">
-        <div class="progress-bar-wrap">
-          <div class="progress-bar" id="progress-bar" style="width:0%"></div>
-        </div>
+  </div>
+</div>
+
+<!-- Eval / Calibration modal -->
+<div class="overlay" id="eval-modal">
+  <div class="modal md">
+    <div class="modal-hd"><h2><svg class="tt" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18M7 15l4-4 3 3 5-6"/></svg> Calibration report</h2><button class="modal-close" onclick="closeEvalModal()">✕</button></div>
+    <div class="modal-bd" id="eval-body"><p>Loading…</p></div>
+    <div class="modal-ft"><button class="btn-ghost" onclick="closeEvalModal()">Close</button></div>
+  </div>
+</div>
+
+<!-- Excluded search queries modal -->
+<div class="overlay" id="excluded-queries-modal">
+  <div class="modal md">
+    <div class="modal-hd"><h2><svg class="tt" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg> Auto-excluded search queries</h2><button class="modal-close" onclick="closeExcludedQueriesModal()">✕</button></div>
+    <div class="modal-bd" id="excluded-queries-body"><p>Loading…</p></div>
+    <div class="modal-ft"><button class="btn-ghost" onclick="closeExcludedQueriesModal()">Close</button></div>
+  </div>
+</div>
+
+<!-- Learned (full profile) modal -->
+<div class="overlay" id="learned-modal">
+  <div class="modal">
+    <div class="modal-hd"><h2>Preference profile</h2><button class="modal-close" onclick="closeLearnedModal()">✕</button></div>
+    <div class="modal-bd">
+      <div class="learned-meta-bar" id="learned-meta"></div>
+      <div class="learned-full" id="learned-full">No profile yet.</div>
+    </div>
+    <div class="modal-ft">
+      <button class="btn-ghost" onclick="closeLearnedModal()">Close</button>
+      <button class="btn-primary" id="btn-learned-refresh" onclick="distillPreferences()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.5 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.65 4.36A9 9 0 0 0 20.5 15"/></svg> Refresh
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Backfill modal -->
+<div class="overlay" id="backfill-modal">
+  <div class="modal">
+    <div class="modal-hd"><h2>Fetch missing descriptions</h2><button class="modal-close" onclick="closeBackfillModal()">✕</button></div>
+    <div class="modal-bd">
+      <p class="modal-hint">Opens each job without a description and fetches its content.</p>
+      <div class="progress-wrap" id="backfill-progress" style="display:none">
+        <div class="progress-bar-track"><div class="progress-bar-fill" id="progress-bar" style="width:0%"></div></div>
         <div class="progress-label" id="progress-label">0 / 0</div>
       </div>
       <div class="run-log" id="backfill-log"></div>
     </div>
-    <div class="modal-footer">
-      <button class="btn-start" id="btn-backfill-start" onclick="startBackfill()">&#9654; Start</button>
-      <button class="btn-cancel" onclick="closeBackfillModal()">Close</button>
+    <div class="modal-ft">
+      <button class="btn-ghost" onclick="closeBackfillModal()">Close</button>
+      <button class="btn-primary" id="btn-backfill-start" onclick="startBackfill()">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg> Start
+      </button>
     </div>
   </div>
 </div>
 
-<!-- Query Expansion Modal -->
-<div class="modal-overlay" id="suggest-modal" style="display:none">
-  <div class="modal modal-sm">
-    <div class="modal-header">
-      <h2>&#128161; Suggested Search Queries</h2>
-      <button class="modal-close" onclick="closeSuggestModal()">&#x2715;</button>
-    </div>
-    <div class="modal-body">
-      <p class="suggest-hint">Based on jobs you've applied to, Claude suggests these LinkedIn search queries. Check the ones you want to add.</p>
-      <div id="suggest-loading"><p>Analyzing applied jobs…</p></div>
-      <div id="suggest-list" style="display:none"></div>
-      <div id="suggest-error" style="display:none;color:var(--error)"></div>
-    </div>
-    <div class="modal-footer">
-      <button class="btn-secondary" onclick="closeSuggestModal()">Cancel</button>
-      <button class="btn-primary" id="btn-suggest-apply" onclick="applySuggestions()" style="display:none">Add selected</button>
-    </div>
-  </div>
-</div>
-
-<!-- Eval Report Modal -->
-<div class="modal-overlay" id="eval-modal" style="display:none">
-  <div class="modal modal-md">
-    <div class="modal-header">
-      <h2>&#128202; Ranking Eval Report</h2>
-      <button class="modal-close" onclick="closeEvalModal()">&#x2715;</button>
-    </div>
-    <div class="modal-body">
-      <div id="eval-body"><p class="eval-loading">Loading…</p></div>
-    </div>
-    <div class="modal-footer">
-      <button class="btn-secondary" onclick="closeEvalModal()">Close</button>
-    </div>
-  </div>
-</div>
-
-<!-- Delete Jobs Modal -->
-<div class="modal-overlay" id="delete-modal" style="display:none">
-  <div class="modal modal-sm">
-    <div class="modal-header">
-      <h2>Delete Jobs</h2>
-      <button class="modal-close" onclick="closeDeleteModal()">&#x2715;</button>
-    </div>
-
-    <!-- Step 1: filters -->
+<!-- Delete modal -->
+<div class="overlay" id="delete-modal">
+  <div class="modal sm">
+    <div class="modal-hd"><h2>Delete jobs</h2><button class="modal-close" onclick="closeDeleteModal()">✕</button></div>
     <div id="delete-step-1">
-      <div class="modal-body">
-        <div class="delete-field">
-          <label class="delete-label">Status</label>
-          <div class="delete-statuses">
+      <div class="modal-bd">
+        <div class="del-field">
+          <label class="del-label">Status</label>
+          <div class="del-statuses">
             <label><input type="checkbox" class="del-status" value="auto_rejected" checked> Auto-rejected</label>
             <label><input type="checkbox" class="del-status" value="new"> New</label>
             <label><input type="checkbox" class="del-status" value="reviewed"> Reviewed</label>
@@ -303,68 +319,55 @@
             <label><input type="checkbox" class="del-status" value="applied"> Applied</label>
           </div>
         </div>
-        <div class="delete-field">
-          <label class="delete-label">Date added</label>
-          <div class="delete-dates">
+        <div class="del-field">
+          <label class="del-label">Date added</label>
+          <div class="del-dates">
             <input type="date" id="del-date-from" onchange="updateDeleteCount()">
             <span>—</span>
             <input type="date" id="del-date-to" onchange="updateDeleteCount()">
           </div>
         </div>
-        <div class="delete-preview">Will delete: <strong id="del-count">—</strong> jobs</div>
+        <div class="del-preview">Will delete: <strong id="del-count">—</strong> jobs</div>
       </div>
-      <div class="modal-footer">
-        <button class="btn-delete-confirm" id="btn-delete-go" onclick="deleteStep2()">Delete</button>
-        <button class="btn-cancel" onclick="closeDeleteModal()">Cancel</button>
+      <div class="modal-ft">
+        <button class="btn-ghost" onclick="closeDeleteModal()">Cancel</button>
+        <button class="btn-stop" id="btn-delete-go" onclick="deleteStep2()">Delete</button>
       </div>
     </div>
-
-    <!-- Step 2: confirmation -->
     <div id="delete-step-2" style="display:none">
-      <div class="modal-body">
-        <p class="delete-confirm-msg" id="delete-confirm-msg"></p>
-      </div>
-      <div class="modal-footer">
-        <button class="btn-delete-confirm" onclick="executeDelete()">Yes, delete</button>
-        <button class="btn-cancel" onclick="deleteBack()">Back</button>
+      <div class="modal-bd"><p id="delete-confirm-msg"></p></div>
+      <div class="modal-ft">
+        <button class="btn-ghost" onclick="deleteBack()">Back</button>
+        <button class="btn-stop" onclick="executeDelete()">Yes, delete</button>
       </div>
     </div>
   </div>
 </div>
 
-<!-- Activity Modal -->
-<div class="modal-overlay" id="activity-modal" style="display:none">
+<!-- Bulk reject modal -->
+<div class="overlay" id="bulk-reject-modal">
+  <div class="modal sm">
+    <div class="modal-hd"><h2>Reject selected jobs</h2><button class="modal-close" onclick="closeBulkRejectModal()">✕</button></div>
+    <div class="modal-bd">
+      <p class="modal-hint" id="bulk-reject-msg"></p>
+      <input type="text" class="tool-select" style="width:100%" id="bulk-reject-reason" placeholder="Rejection reason (optional, applies to all)…"
+             onkeydown="if(event.key==='Enter') confirmBulkReject(); if(event.key==='Escape') closeBulkRejectModal()">
+    </div>
+    <div class="modal-ft">
+      <button class="btn-ghost" onclick="closeBulkRejectModal()">Cancel</button>
+      <button class="btn-stop" onclick="confirmBulkReject()">Reject all</button>
+    </div>
+  </div>
+</div>
+
+<!-- All-filters modal -->
+<div class="overlay" id="filters-modal">
   <div class="modal">
-    <div class="modal-header">
-      <h2>Agent Activity <span class="activity-status-badge" id="activity-status-badge"></span></h2>
-      <button class="modal-close" onclick="closeActivityModal()">&#x2715;</button>
-    </div>
-    <div class="modal-body">
-      <div class="run-log" id="activity-log">No logs yet.</div>
-    </div>
-    <div class="modal-footer">
-      <button class="btn-stop" id="btn-activity-stop" onclick="stopAgent()" style="display:none">&#9632; Stop</button>
-      <button class="btn-cancel" onclick="closeActivityModal()">Close</button>
-    </div>
-  </div>
-</div>
-
-<!-- Preferences Modal -->
-<div class="modal-overlay" id="prefs-modal" style="display:none">
-  <div class="modal modal-prefs">
-    <div class="modal-header">
-      <h2>Preference Profile</h2>
-      <button class="modal-close" onclick="closePrefsModal()">&#x2715;</button>
-    </div>
-    <div class="modal-body">
-      <div id="prefs-meta" class="prefs-meta"></div>
-      <div id="prefs-content" class="prefs-content">
-        <span class="prefs-empty">No profile yet. Click "Refresh" to distill from your feedback history.</span>
-      </div>
-    </div>
-    <div class="modal-footer">
-      <button class="btn-prefs-refresh" id="btn-prefs-refresh" onclick="distillPreferences()">&#8635; Refresh Profile</button>
-      <button class="btn-cancel" onclick="closePrefsModal()">Close</button>
+    <div class="modal-hd"><h2>Filters</h2><button class="modal-close" onclick="closeFiltersModal()">✕</button></div>
+    <div class="modal-bd" id="filters-body"></div>
+    <div class="modal-ft">
+      <button class="btn-ghost" onclick="clearBadgeFilters()">Clear all</button>
+      <button class="btn-primary" onclick="closeFiltersModal()">Done</button>
     </div>
   </div>
 </div>

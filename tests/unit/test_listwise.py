@@ -120,3 +120,18 @@ def test_listwise_rank_fallback_on_no_tool_block(mock_anthropic):
 def test_listwise_rank_empty_input():
     result = listwise_rank([], "", [])
     assert result == []
+
+
+@patch("ranker.listwise.anthropic.Anthropic")
+def test_system_prompt_forbids_deliberation_in_reason(mock_anthropic):
+    # Opus has leaked raw self-correction ("wait, correcting...") directly into a
+    # "reason" value before — guard against the prompt instruction being dropped.
+    jobs = [_job("j1")]
+    mock_anthropic.return_value.messages.create.return_value = _make_ranking_response(
+        [{"job_id": "j1", "reason": "Good match"}]
+    )
+
+    listwise_rank(jobs, "", [])
+
+    system_prompt = mock_anthropic.return_value.messages.create.call_args.kwargs["system"]
+    assert "deliberation" in system_prompt.lower() or "wait, correcting" in system_prompt.lower()

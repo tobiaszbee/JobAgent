@@ -1,26 +1,54 @@
-from flask import Flask, render_template
+from flask import Flask, redirect, render_template
+from config import DEPLOYMENT_MODE
 from db.migrations import init_db
-from db.repositories import session_repository
-from web.routes import jobs, criteria, runner, cv, sources, preferences, ranking, query_expansion, evaluation
+from db.repositories import candidate_preferences_repository, cv_repository, session_repository
+from web.routes import (
+    candidate_preferences, jobs, jobs_admin, criteria, runner, cv, sources, preferences,
+    ranking, query_expansion, evaluation, search_queries,
+)
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.config["TEMPLATES_AUTO_RELOAD"] = True
 
+# "web" (JobAgentWeb, public + password-gated): browse jobs, change status, view the
+# read-only Calibration report — nothing else. "local" (default): everything,
+# including RunAgent/collector/pipeline config. This is enforced here at the route
+# level (blueprints simply aren't registered in web mode, so those endpoints don't
+# exist and return 404), not just hidden in the UI.
 app.register_blueprint(jobs.bp)
-app.register_blueprint(criteria.bp)
-app.register_blueprint(runner.bp)
-app.register_blueprint(cv.bp)
-app.register_blueprint(sources.bp)
-app.register_blueprint(preferences.bp)
-app.register_blueprint(ranking.bp)
-app.register_blueprint(query_expansion.bp)
 app.register_blueprint(evaluation.bp)
-runner.init_sock(app)
+
+if DEPLOYMENT_MODE != "web":
+    app.register_blueprint(jobs_admin.bp)
+    app.register_blueprint(criteria.bp)
+    app.register_blueprint(runner.bp)
+    app.register_blueprint(cv.bp)
+    app.register_blueprint(sources.bp)
+    app.register_blueprint(preferences.bp)
+    app.register_blueprint(candidate_preferences.bp)
+    app.register_blueprint(ranking.bp)
+    app.register_blueprint(query_expansion.bp)
+    app.register_blueprint(search_queries.bp)
+    runner.init_sock(app)
 
 
 @app.get("/")
 def dashboard():
+    if not candidate_preferences_repository.get_active():
+        return render_template("landing.html")
     return render_template("dashboard.html")
+
+
+@app.get("/questionnaire")
+def questionnaire():
+    if not cv_repository.get_active():
+        return redirect("/")
+    return render_template("questionnaire.html")
+
+
+@app.get("/how-it-works")
+def how_it_works():
+    return render_template("how_it_works.html")
 
 
 if __name__ == "__main__":

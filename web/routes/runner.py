@@ -1,5 +1,6 @@
 import glob
 import json
+import math
 import os
 import subprocess
 import sys
@@ -7,6 +8,8 @@ import threading
 from datetime import datetime
 from flask import Blueprint
 from flask_sock import Sock
+
+from db.repositories import session_repository, usage_repository
 
 bp = Blueprint("runner", __name__)
 sock = Sock()
@@ -21,17 +24,65 @@ _KEEP_LOGS = 30
 
 _agent_process: subprocess.Popen | None = None
 _lock = threading.Lock()
+_run_active = False
 
 
 def init_sock(app):
     sock.init_app(app)
 
 
+_DEFAULT_DAYS_NO_PRIOR_RUN = 7
+
+
+def _days_since_last_run() -> int:
+    """Collector sources filter by whole days, not exact timestamps — so "since last
+    run" is approximated as the number of days back that comfortably covers the time
+    since the last successful run, rounded up. Slight overlap is harmless (the
+    collector already dedupes by URL); under-covering would silently miss postings."""
+    last_finished = session_repository.get_last_finished_at()
+    if not last_finished:
+        return _DEFAULT_DAYS_NO_PRIOR_RUN
+    try:
+        last_dt = datetime.strptime(last_finished, "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return _DEFAULT_DAYS_NO_PRIOR_RUN
+    hours_elapsed = (datetime.utcnow() - last_dt).total_seconds() / 3600
+    return max(1, math.ceil(hours_elapsed / 24))
+
+
 def _is_run_active() -> bool:
+    if _run_active:
+        return True
     if _agent_process is not None and _agent_process.poll() is None:
         return True
     from db.repositories import session_repository
     return session_repository.has_active_run()
+
+
+class _RunGuard:
+    """Marks a websocket-triggered run (agent/backfill/rescore/reevaluate/rank — they
+    all share the same _agent_process global) as active for the guard's *entire*
+    lifetime, not just until the first subprocess spawns. The old pattern only held
+    _lock around the initial _is_run_active() check, then released it before
+    ws.receive() (which can block indefinitely on a slow client) and before
+    _run_script() actually set _agent_process — so two near-simultaneous websocket
+    connections could both pass the check before either process existed. A multi-stage
+    run (agent_ws's collector → extractor → evaluator → ... sequence) had the same gap
+    between stages, however briefly, since _agent_process briefly points at an
+    already-exited Popen between _run_script() calls. Usage: `with _RunGuard() as
+    acquired: if not acquired: ...bail out...`."""
+
+    def __enter__(self) -> bool:
+        global _run_active
+        with _lock:
+            if _is_run_active():
+                return False
+            _run_active = True
+            return True
+
+    def __exit__(self, *_exc):
+        global _run_active
+        _run_active = False
 
 
 @bp.get("/api/agent/status")
@@ -145,169 +196,174 @@ def _latest_log() -> str | None:
     return files[-1] if files else None
 
 
+# Stages run after a successful collection, in order: (header, script path, args).
+# Pulled out as a plain function (rather than inlined in agent_ws) so the sequence —
+# in particular that EXTRACTOR sits BEFORE EVALUATOR — is unit-testable without a
+# websocket. EXTRACTOR must run first: evaluator/dealbreakers.py's pre-LLM filter
+# reads structured_data, and jobs never re-enter the "unscored" pool once the
+# evaluator scores them — so if extraction ran after evaluation, freshly-collected
+# jobs would always hit the dealbreaker filter with no structured_data yet, and
+# never get a second chance. Running extraction first means listwise ranking also
+# always sees fresh structured_data tags, as a side benefit.
+def _post_collect_stages() -> list[tuple[str, str, list[str]]]:
+    return [
+        ("DISTILL PREFERENCES", os.path.join(ROOT, "scripts", "distill_preferences.py"), []),
+        ("EXTRACTOR",           os.path.join(ROOT, "scripts", "extract_jobs.py"), []),
+        ("EVALUATOR",           os.path.join(ROOT, "evaluator", "runner.py"), []),
+        ("PRUNE QUERIES",       os.path.join(ROOT, "scripts", "prune_search_queries.py"), []),
+        ("AI RANKING",          os.path.join(ROOT, "scripts", "rank_jobs.py"), []),
+    ]
+
+
 @sock.route("/ws/agent")
 def agent_ws(ws):
     global _agent_process
 
-    with _lock:
-        if _is_run_active():
+    with _RunGuard() as acquired:
+        if not acquired:
             ws.send("ERROR: Agent is already running.\n")
             return
 
-    raw_params = ws.receive()
-    try:
-        params = json.loads(raw_params)
-    except Exception:
-        params = {}
-
-    try:
-        days = int(params.get("days", 1))
-    except (ValueError, TypeError):
-        ws.send("ERROR: Invalid parameter 'days' — must be an integer.\n")
-        return
-
-    max_jobs_raw = params.get("max_jobs")
-    max_jobs = None
-    if max_jobs_raw:
+        raw_params = ws.receive()
         try:
-            max_jobs = int(max_jobs_raw)
-        except (ValueError, TypeError):
-            ws.send("ERROR: Invalid parameter 'max_jobs' — must be an integer.\n")
-            return
-    search_queries = params.get("search_queries") or []
-    locations      = params.get("locations") or []
-    sources        = params.get("sources") or []
+            params = json.loads(raw_params)
+        except Exception:
+            params = {}
 
-    collector_args = ["--days", str(days)]
-    if max_jobs:
-        collector_args += ["--max-jobs", str(max_jobs)]
-    if search_queries:
-        collector_args += ["--search-queries"] + search_queries
-    if locations:
-        collector_args += ["--locations"] + locations
-    if sources:
-        collector_args += ["--sources"] + sources
-
-    with _open_log() as log_file:
-        header = f"=== COLLECTOR (days={days}, max_jobs={max_jobs or 'unlimited'}) ===\n"
-        log_file.write(header)
-        _safe_send(ws, header)
-        exit_code = _run_script(ws, os.path.join(ROOT, "collector", "runner.py"), collector_args, log_file=log_file)
-
-        if exit_code != 0:
-            msg = f"\nCollector failed (exit code {exit_code}). Skipping evaluator.\n"
-            log_file.write(msg)
-            _safe_send(ws, msg)
+        if params.get("since_last_run"):
+            days = _days_since_last_run()
         else:
-            msg = "\n=== DISTILL PREFERENCES ===\n"
-            log_file.write(msg)
-            _safe_send(ws, msg)
-            _run_script(ws, os.path.join(ROOT, "scripts", "distill_preferences.py"), log_file=log_file)
+            try:
+                days = int(params.get("days", 1))
+            except (ValueError, TypeError):
+                ws.send("ERROR: Invalid parameter 'days' — must be an integer.\n")
+                return
 
-            msg = "\n=== EVALUATOR ===\n"
-            log_file.write(msg)
-            _safe_send(ws, msg)
-            _run_script(ws, os.path.join(ROOT, "evaluator", "runner.py"), log_file=log_file)
+        collector_args = ["--days", str(days)]
+        started_at = usage_repository.now_iso()
 
-            msg = "\n=== AI RANKING ===\n"
-            log_file.write(msg)
-            _safe_send(ws, msg)
-            _run_script(ws, os.path.join(ROOT, "scripts", "rank_jobs.py"), log_file=log_file)
+        with _open_log() as log_file:
+            header = f"=== COLLECTOR (days={days}) ===\n"
+            log_file.write(header)
+            _safe_send(ws, header)
+            exit_code = _run_script(ws, os.path.join(ROOT, "collector", "runner.py"), collector_args, log_file=log_file)
 
-    _agent_process = None
-    _safe_send(ws, "\n__DONE__\n")
+            if exit_code != 0:
+                msg = f"\nCollector failed (exit code {exit_code}). Skipping evaluator.\n"
+                log_file.write(msg)
+                _safe_send(ws, msg)
+            else:
+                for label, script_path, args in _post_collect_stages():
+                    msg = f"\n=== {label} ===\n"
+                    log_file.write(msg)
+                    _safe_send(ws, msg)
+                    _run_script(ws, script_path, args, log_file=log_file)
+
+        usage_repository.record_run_summary("run_agent", started_at)
+        _agent_process = None
+        _safe_send(ws, "\n__DONE__\n")
 
 
 @sock.route("/ws/backfill")
 def backfill_ws(ws):
     global _agent_process
 
-    with _lock:
-        if _is_run_active():
+    with _RunGuard() as acquired:
+        if not acquired:
             ws.send("ERROR: Agent is already running.\n")
             return
 
-    script = os.path.join(ROOT, "scripts", "backfill_descriptions.py")
+        script = os.path.join(ROOT, "scripts", "backfill_descriptions.py")
+        started_at = usage_repository.now_iso()
 
-    with _open_log() as log_file:
-        header = "=== BACKFILL DESCRIPTIONS ===\n"
-        log_file.write(header)
-        _safe_send(ws, header)
-        exit_code = _run_script(ws, script, log_file=log_file)
+        with _open_log() as log_file:
+            header = "=== BACKFILL DESCRIPTIONS ===\n"
+            log_file.write(header)
+            _safe_send(ws, header)
+            exit_code = _run_script(ws, script, log_file=log_file)
 
-        if exit_code == 0:
-            msg = "\n=== EVALUATOR ===\n"
-            log_file.write(msg)
-            _safe_send(ws, msg)
-            _run_script(ws, os.path.join(ROOT, "evaluator", "runner.py"), log_file=log_file)
+            if exit_code == 0:
+                msg = "\n=== EVALUATOR ===\n"
+                log_file.write(msg)
+                _safe_send(ws, msg)
+                _run_script(ws, os.path.join(ROOT, "evaluator", "runner.py"), log_file=log_file)
 
-    _agent_process = None
-    _safe_send(ws, "\n__DONE__\n")
+        usage_repository.record_run_summary("backfill", started_at)
+        _agent_process = None
+        _safe_send(ws, "\n__DONE__\n")
 
 
 @sock.route("/ws/reevaluate-rejected")
 def reevaluate_rejected_ws(ws):
     global _agent_process
 
-    with _lock:
-        if _is_run_active():
+    with _RunGuard() as acquired:
+        if not acquired:
             ws.send("ERROR: Agent is already running.\n")
             return
 
-    script = os.path.join(ROOT, "scripts", "reevaluate_rejected.py")
+        script = os.path.join(ROOT, "scripts", "reevaluate_rejected.py")
+        started_at = usage_repository.now_iso()
 
-    with _open_log() as log_file:
-        header = "=== RE-EVALUATE AUTO-REJECTED ===\n"
-        log_file.write(header)
-        _safe_send(ws, header)
-        _run_script(ws, script, log_file=log_file)
+        with _open_log() as log_file:
+            header = "=== RE-EVALUATE AUTO-REJECTED ===\n"
+            log_file.write(header)
+            _safe_send(ws, header)
+            _run_script(ws, script, log_file=log_file)
 
-    _agent_process = None
-    _safe_send(ws, "\n__DONE__\n")
+        usage_repository.record_run_summary("reevaluate_rejected", started_at)
+        _agent_process = None
+        _safe_send(ws, "\n__DONE__\n")
 
 
 @sock.route("/ws/rescore-new")
 def rescore_new_ws(ws):
     global _agent_process
 
-    with _lock:
-        if _is_run_active():
+    with _RunGuard() as acquired:
+        if not acquired:
             ws.send("ERROR: Agent is already running.\n")
             return
 
-    with _open_log() as log_file:
-        header = "=== RE-SCORE NEW JOBS ===\n"
-        log_file.write(header)
-        _safe_send(ws, header)
+        started_at = usage_repository.now_iso()
 
-        msg = "--- Distilling preferences...\n"
-        log_file.write(msg)
-        _safe_send(ws, msg)
-        _run_script(ws, os.path.join(ROOT, "scripts", "distill_preferences.py"), log_file=log_file)
+        with _open_log() as log_file:
+            header = "=== RE-SCORE NEW JOBS ===\n"
+            log_file.write(header)
+            _safe_send(ws, header)
 
-        msg = "--- Scoring...\n"
-        log_file.write(msg)
-        _safe_send(ws, msg)
-        _run_script(ws, os.path.join(ROOT, "scripts", "rescore_new.py"), log_file=log_file)
+            msg = "--- Distilling preferences...\n"
+            log_file.write(msg)
+            _safe_send(ws, msg)
+            _run_script(ws, os.path.join(ROOT, "scripts", "distill_preferences.py"), log_file=log_file)
 
-    _agent_process = None
-    _safe_send(ws, "\n__DONE__\n")
+            msg = "--- Scoring...\n"
+            log_file.write(msg)
+            _safe_send(ws, msg)
+            _run_script(ws, os.path.join(ROOT, "scripts", "rescore_new.py"), log_file=log_file)
+
+        usage_repository.record_run_summary("rescore_new", started_at)
+        _agent_process = None
+        _safe_send(ws, "\n__DONE__\n")
 
 
 @sock.route("/ws/rank")
 def rank_ws(ws):
     global _agent_process
 
-    with _lock:
-        if _is_run_active():
+    with _RunGuard() as acquired:
+        if not acquired:
             ws.send("ERROR: Agent is already running.\n")
             return
 
-    with _open_log() as log_file:
-        header = "=== AI RANKING (Voyage + Claude Opus) ===\n"
-        log_file.write(header)
-        _safe_send(ws, header)
-        _run_script(ws, os.path.join(ROOT, "scripts", "rank_jobs.py"), log_file=log_file)
+        started_at = usage_repository.now_iso()
 
-    _agent_process = None
-    _safe_send(ws, "\n__DONE__\n")
+        with _open_log() as log_file:
+            header = "=== AI RANKING (Voyage + Claude Opus) ===\n"
+            log_file.write(header)
+            _safe_send(ws, header)
+            _run_script(ws, os.path.join(ROOT, "scripts", "rank_jobs.py"), log_file=log_file)
+
+        usage_repository.record_run_summary("rank", started_at)
+        _agent_process = None
+        _safe_send(ws, "\n__DONE__\n")

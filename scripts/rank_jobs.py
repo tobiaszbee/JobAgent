@@ -19,6 +19,8 @@ from db.repositories import job_repository, preference_repository
 from embeddings.indexer import build_ideal_vector, score_by_similarity, index_jobs
 from ranker.reranker import rerank_jobs
 from ranker.listwise import listwise_rank
+from ranker.debate import debate_rank
+from ranker.would_apply import compute_would_apply
 from evaluator.profile import load_active_profile
 from config import RANKING
 
@@ -56,9 +58,11 @@ if unindexed:
     print(f"  Indexed {indexed} job(s)")
 
 # Step 2: Semantic similarity
-ideal = build_ideal_vector()
+has_applied_history = bool(job_repository.get_applied_job_ids())
+ideal = build_ideal_vector(candidate_profile)
 if ideal:
-    print("\nScoring by semantic similarity to applied jobs...")
+    basis = "applied jobs" if has_applied_history else "CV profile (no applied jobs yet)"
+    print(f"\nScoring by semantic similarity to {basis}...")
     job_ids = [j["id"] for j in jobs]
     sim_scores = score_by_similarity(job_ids, ideal)
     for job in jobs:
@@ -67,7 +71,7 @@ if ideal:
     top_scores = [round(j["_embedding_score"], 3) for j in jobs_by_sim[:5]]
     print(f"  Top-5 similarity scores: {top_scores}")
 else:
-    print("\nNo applied jobs with embeddings yet — skipping semantic retrieval.")
+    print("\nNo applied jobs and no CV profile — skipping semantic retrieval.")
     jobs_by_sim = jobs
     for job in jobs:
         job["_embedding_score"] = None
@@ -99,6 +103,21 @@ if listwise_pool:
 else:
     ranked = []
 
+# Step 4b: Debate — second-opinion critique of the shortlist only (not the full pool)
+if ranked:
+    print(f"\nDebate review of top-{len(ranked)} with a second model...")
+    ranked = debate_rank(ranked, candidate_profile)
+
+# Step 4c: Would-apply flag — phase 1 of the auto-apply plan (flag-and-validate
+# only, never sends anything). See ranker/would_apply.py for the gate logic.
+would_apply_count = 0
+for job in ranked:
+    flagged, reason = compute_would_apply(job.get("score"), job.get("debate_flag"))
+    would_apply_count += flagged
+    job_repository.update_would_apply(job["id"], flagged, reason)
+if would_apply_count:
+    print(f"\nWould-apply: flagged {would_apply_count}/{len(ranked)} job(s) for validation")
+
 # Step 5: Save ranking results
 for job in ranked:
     job_repository.update_ranking_scores(
@@ -107,6 +126,8 @@ for job in ranked:
         rerank_score=job.get("rerank_score"),
         listwise_rank=job.get("listwise_rank"),
         rank_reason=job.get("rank_reason"),
+        debate_flag=job.get("debate_flag"),
+        debate_note=job.get("debate_note"),
     )
 
 # Save embedding scores for jobs outside the listwise pool

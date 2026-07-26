@@ -1,0 +1,119 @@
+import itertools
+
+import config
+from db.repositories import job_repository, search_stats_repository, excluded_search_queries_repository, session_repository
+from collector.query_pruning import prune_queries
+
+_counter = itertools.count()
+
+
+def _terminal_jobs(query, rejected=0, auto_rejected=0, applied=0, reviewed=0, source="linkedin"):
+    # Globally unique url/title/company per job (across separate calls too) — the
+    # title+company AND url dedup rules in job_repository.insert() would otherwise
+    # silently drop later jobs sharing an earlier call's values.
+    for _ in range(rejected):
+        n = next(_counter)
+        job_id = job_repository.insert(f"Title {n}", f"Co {n}", "PL", f"https://a.com/{query}/{n}", source, search_query=query)
+        job_repository.update_status(job_id, "rejected")
+    for _ in range(auto_rejected):
+        n = next(_counter)
+        job_id = job_repository.insert(f"Title {n}", f"Co {n}", "PL", f"https://a.com/{query}/{n}", source, search_query=query)
+        job_repository.update_score_and_status(job_id, 0.0, "no match", "auto_rejected")
+    for _ in range(applied):
+        n = next(_counter)
+        job_id = job_repository.insert(f"Title {n}", f"Co {n}", "PL", f"https://a.com/{query}/{n}", source, search_query=query)
+        job_repository.update_status(job_id, "applied")
+    for _ in range(reviewed):
+        n = next(_counter)
+        job_id = job_repository.insert(f"Title {n}", f"Co {n}", "PL", f"https://a.com/{query}/{n}", source, search_query=query)
+        job_repository.update_status(job_id, "reviewed")
+
+
+class TestPruneQueriesRejectRate:
+    def test_excludes_query_above_threshold_with_enough_samples(self, monkeypatch):
+        monkeypatch.setitem(config.QUERY_PRUNING, "min_terminal_sample", 10)
+        monkeypatch.setitem(config.QUERY_PRUNING, "reject_rate_threshold", 0.9)
+        _terminal_jobs("Bad Query", rejected=10)
+
+        result = prune_queries("linkedin")
+
+        assert [r["search_query"] for r in result] == ["Bad Query"]
+        assert excluded_search_queries_repository.get_excluded("linkedin") == {
+            "Bad Query": "reject rate 100% over 10 jobs, 0 applied/reviewed"
+        }
+
+    def test_below_min_sample_not_excluded(self, monkeypatch):
+        monkeypatch.setitem(config.QUERY_PRUNING, "min_terminal_sample", 10)
+        monkeypatch.setitem(config.QUERY_PRUNING, "reject_rate_threshold", 0.9)
+        _terminal_jobs("Small Sample", rejected=9)
+
+        assert prune_queries("linkedin") == []
+        assert excluded_search_queries_repository.get_excluded("linkedin") == {}
+
+    def test_below_reject_rate_threshold_not_excluded(self, monkeypatch):
+        monkeypatch.setitem(config.QUERY_PRUNING, "min_terminal_sample", 10)
+        monkeypatch.setitem(config.QUERY_PRUNING, "reject_rate_threshold", 0.95)
+        _terminal_jobs("Average Query", rejected=9, applied=1)  # 90% reject, but also has an applied
+
+        assert prune_queries("linkedin") == []
+
+    def test_any_applied_job_prevents_exclusion_even_at_high_reject_rate(self, monkeypatch):
+        monkeypatch.setitem(config.QUERY_PRUNING, "min_terminal_sample", 10)
+        monkeypatch.setitem(config.QUERY_PRUNING, "reject_rate_threshold", 0.9)
+        _terminal_jobs("Good But Noisy", rejected=19, applied=1)  # 95% reject rate
+
+        assert prune_queries("linkedin") == []
+
+    def test_any_reviewed_job_prevents_exclusion(self, monkeypatch):
+        monkeypatch.setitem(config.QUERY_PRUNING, "min_terminal_sample", 10)
+        monkeypatch.setitem(config.QUERY_PRUNING, "reject_rate_threshold", 0.9)
+        _terminal_jobs("Reviewed Query", rejected=19, reviewed=1)
+
+        assert prune_queries("linkedin") == []
+
+    def test_rerunning_refreshes_reason_without_duplicating(self, monkeypatch):
+        monkeypatch.setitem(config.QUERY_PRUNING, "min_terminal_sample", 10)
+        monkeypatch.setitem(config.QUERY_PRUNING, "reject_rate_threshold", 0.9)
+        _terminal_jobs("Bad Query", rejected=10)
+        prune_queries("linkedin")
+
+        _terminal_jobs("Bad Query", auto_rejected=5)  # more rejects, same query
+        prune_queries("linkedin")
+
+        assert len(excluded_search_queries_repository.get_all()) == 1
+        assert "15 jobs" in excluded_search_queries_repository.get_excluded("linkedin")["Bad Query"]
+
+    def test_defaults_to_linkedin_when_no_source_given(self, monkeypatch):
+        monkeypatch.setitem(config.QUERY_PRUNING, "min_terminal_sample", 10)
+        monkeypatch.setitem(config.QUERY_PRUNING, "reject_rate_threshold", 0.9)
+        _terminal_jobs("Bad Query", rejected=10)
+
+        prune_queries()
+
+        assert "Bad Query" in excluded_search_queries_repository.get_excluded("linkedin")
+
+
+class TestPruneQueriesZeroYield:
+    def test_excludes_query_that_never_finds_anything_new(self, monkeypatch):
+        monkeypatch.setitem(config.QUERY_PRUNING, "min_searches_for_zero_yield", 5)
+        session_id = session_repository.start()
+        for _ in range(5):
+            search_stats_repository.record(session_id, "linkedin", "Redundant Query", "Austria", cards_found=4, new_found=0)
+
+        result = prune_queries("linkedin")
+
+        assert [r["search_query"] for r in result] == ["Redundant Query"]
+
+    def test_does_not_duplicate_when_query_already_excluded_by_reject_rate(self, monkeypatch):
+        monkeypatch.setitem(config.QUERY_PRUNING, "min_terminal_sample", 10)
+        monkeypatch.setitem(config.QUERY_PRUNING, "reject_rate_threshold", 0.9)
+        monkeypatch.setitem(config.QUERY_PRUNING, "min_searches_for_zero_yield", 5)
+        _terminal_jobs("Both Bad", rejected=10)
+        session_id = session_repository.start()
+        for _ in range(5):
+            search_stats_repository.record(session_id, "linkedin", "Both Bad", "Austria", cards_found=0, new_found=0)
+
+        result = prune_queries("linkedin")
+
+        assert len(result) == 1
+        assert len(excluded_search_queries_repository.get_all()) == 1

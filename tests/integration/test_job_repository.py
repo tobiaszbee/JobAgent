@@ -1,3 +1,5 @@
+import json
+
 from db.repositories import job_repository
 
 
@@ -32,6 +34,62 @@ class TestInsert:
             "PHP Dev", "Co", "PL", "https://a.com/nodesc", "linkedin"
         )
         assert job_id is not None
+
+    def test_search_query_defaults_to_none(self):
+        job_id = _insert()
+        row = job_repository.search(status="all")[0]
+        assert row["search_query"] is None
+
+    def test_search_query_is_stored(self):
+        _insert(search_query="Senior PHP Developer")
+        row = job_repository.search(status="all")[0]
+        assert row["search_query"] == "Senior PHP Developer"
+
+
+class TestGetQueryOutcomeStats:
+    def test_excludes_jobs_still_new(self):
+        _insert(search_query="PHP Developer")
+        assert job_repository.get_query_outcome_stats("linkedin") == []
+
+    def test_excludes_jobs_without_search_query(self):
+        job_id = _insert()
+        job_repository.update_status(job_id, "rejected")
+        assert job_repository.get_query_outcome_stats("linkedin") == []
+
+    def test_counts_reject_and_applied_totals(self):
+        rejected_id = _insert(url="https://a.com/1", company="Co A", search_query="PHP Developer")
+        job_repository.update_status(rejected_id, "rejected")
+        auto_rejected_id = _insert(url="https://a.com/2", company="Co B", search_query="PHP Developer")
+        job_repository.update_score_and_status(auto_rejected_id, 0.0, "no match", "auto_rejected")
+        applied_id = _insert(url="https://a.com/3", company="Co C", search_query="PHP Developer")
+        job_repository.update_status(applied_id, "applied")
+
+        stats = job_repository.get_query_outcome_stats("linkedin")
+        assert len(stats) == 1
+        row = stats[0]
+        assert row["search_query"] == "PHP Developer"
+        assert row["terminal_total"] == 3
+        assert row["reject_total"] == 2
+        assert row["applied_total"] == 1
+        assert row["reviewed_total"] == 0
+
+    def test_filters_by_source(self):
+        job_id = job_repository.insert(
+            "PHP Dev", "Co", "PL", "https://a.com/other-source", "remotive",
+            search_query="PHP Developer",
+        )
+        job_repository.update_status(job_id, "rejected")
+        assert job_repository.get_query_outcome_stats("linkedin") == []
+
+    def test_separate_rows_per_query(self):
+        php_id = _insert(url="https://a.com/1", company="Co A", search_query="PHP Developer")
+        job_repository.update_status(php_id, "rejected")
+        python_id = _insert(url="https://a.com/2", company="Co B", search_query="Python Developer")
+        job_repository.update_status(python_id, "applied")
+
+        stats = {row["search_query"]: row for row in job_repository.get_query_outcome_stats("linkedin")}
+        assert stats["PHP Developer"]["reject_total"] == 1
+        assert stats["Python Developer"]["applied_total"] == 1
 
 
 class TestGetUnscored:
@@ -71,6 +129,35 @@ class TestUpdateScoreAndStatus:
         job_id = _insert()
         job_repository.update_score_and_status(job_id, 0.0, "Rejected", "auto_rejected")
         assert job_repository.get_unscored() == []
+
+    def test_breakdown_stored_as_json(self):
+        job_id = _insert()
+        breakdown = {"sub_scores": {"stack_fit": 8}, "pros": ["Good stack"], "cons": []}
+        job_repository.update_score_and_status(job_id, 0.0, "Rejected", "auto_rejected", breakdown)
+        job = job_repository.search()[0]
+        assert json.loads(job["score_breakdown"]) == breakdown
+
+    def test_no_breakdown_leaves_column_null(self):
+        job_id = _insert()
+        job_repository.update_score_and_status(job_id, 0.0, "Rejected", "auto_rejected")
+        job = job_repository.search()[0]
+        assert job["score_breakdown"] is None
+
+
+class TestUpdateScoreBreakdown:
+    def test_breakdown_round_trips_as_json(self):
+        job_id = _insert()
+        breakdown = {"sub_scores": {"stack_fit": 8, "seniority_fit": 6}, "pros": ["A"], "cons": ["B"]}
+        job_repository.update_score(job_id, 7.5, "Good fit", breakdown)
+        job = job_repository.search()[0]
+        assert job["score"] == 7.5
+        assert json.loads(job["score_breakdown"]) == breakdown
+
+    def test_no_breakdown_leaves_column_null(self):
+        job_id = _insert()
+        job_repository.update_score(job_id, 7.5, "Good fit")
+        job = job_repository.search()[0]
+        assert job["score_breakdown"] is None
 
 
 class TestGetExamples:
@@ -143,6 +230,12 @@ class TestGetMissingDescriptions:
         job_id = job_repository.insert("Dev", "Co", "PL", "https://a.com/s", "linkedin")
         job_repository.update_score(job_id, 7.0, "OK")
         assert job_repository.get_missing_descriptions() == []
+
+    def test_includes_non_linkedin_sources(self):
+        job_repository.insert("Dev", "Co", "PL", "https://justjoin.it/job-offer/nd", "justjoin")
+        result = job_repository.get_missing_descriptions()
+        assert len(result) == 1
+        assert result[0]["source"] == "justjoin"
 
 
 class TestGetStats:
@@ -303,6 +396,62 @@ class TestUpdateRankingScores:
     def test_accepts_none_values(self):
         id1 = _insert(url="https://a.com/1")
         job_repository.update_ranking_scores(id1, None, None, None)  # should not raise
+
+
+class TestUpdateWouldApply:
+    def test_flags_job_true_with_reason(self):
+        id1 = _insert(url="https://a.com/1")
+        job_repository.update_would_apply(id1, True, "Score 8.0 >= 7.0, no dealbreaker risk flagged")
+        job = job_repository.search()[0]
+        assert job["would_apply"] == 1
+        assert job["would_apply_reason"] == "Score 8.0 >= 7.0, no dealbreaker risk flagged"
+
+    def test_flags_job_false(self):
+        id1 = _insert(url="https://a.com/1")
+        job_repository.update_would_apply(id1, False, "")
+        job = job_repository.search()[0]
+        assert job["would_apply"] == 0
+
+
+class TestGetWouldApplyStats:
+    def test_no_flagged_jobs_returns_zeroed_stats(self):
+        stats = job_repository.get_would_apply_stats()
+        assert stats == {"flagged_total": 0, "applied": 0, "rejected": 0, "decided": 0, "precision": None}
+
+    def test_counts_applied_and_rejected_among_flagged(self):
+        applied_id = _insert(company="A", url="https://a.com/1")
+        rejected_id = _insert(company="B", url="https://a.com/2")
+        open_id = _insert(company="C", url="https://a.com/3")
+        for jid in (applied_id, rejected_id, open_id):
+            job_repository.update_would_apply(jid, True, "Score 8.0 >= 7.0, no dealbreaker risk flagged")
+        job_repository.update_status(applied_id, "applied")
+        job_repository.update_status(rejected_id, "rejected")
+
+        stats = job_repository.get_would_apply_stats()
+        assert stats["flagged_total"] == 3
+        assert stats["applied"] == 1
+        assert stats["rejected"] == 1
+        assert stats["decided"] == 2
+        assert abs(stats["precision"] - 0.5) < 1e-9
+
+    def test_unflagged_jobs_are_excluded(self):
+        id1 = _insert(url="https://a.com/1")
+        job_repository.update_would_apply(id1, False, "")
+        job_repository.update_status(id1, "applied")
+        stats = job_repository.get_would_apply_stats()
+        assert stats["flagged_total"] == 0
+
+    def test_reviewed_and_new_are_excluded_from_decided(self):
+        flagged_new = _insert(company="A", url="https://a.com/1")
+        flagged_reviewed = _insert(company="B", url="https://a.com/2")
+        job_repository.update_would_apply(flagged_new, True, "reason")
+        job_repository.update_would_apply(flagged_reviewed, True, "reason")
+        job_repository.update_status(flagged_reviewed, "reviewed")
+
+        stats = job_repository.get_would_apply_stats()
+        assert stats["flagged_total"] == 2
+        assert stats["decided"] == 0
+        assert stats["precision"] is None
 
 
 class TestGetJobsForRanking:

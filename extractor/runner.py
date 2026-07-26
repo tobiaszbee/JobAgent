@@ -3,6 +3,7 @@ import logging
 import anthropic
 
 from config import ANTHROPIC_API_KEY, CLAUDE_EXTRACT_MODEL
+from collector.utils import build_excerpt
 from db.repositories import job_repository
 
 logger = logging.getLogger(__name__)
@@ -20,8 +21,13 @@ _EXTRACT_TOOL = {
                 "enum": ["junior", "mid", "senior", "lead", "director", None],
                 "description": "Expected seniority level.",
             },
-            "salary_min":      {"type": ["integer", "null"], "description": "Min salary/rate (gross annual or monthly)."},
-            "salary_max":      {"type": ["integer", "null"], "description": "Max salary/rate."},
+            "salary_min":      {"type": ["integer", "null"], "description": "Min salary/rate, gross, in whatever period salary_period identifies (e.g. a B2B rate of '100-145 PLN/h' is salary_min=100 with salary_period='hourly' — do not silently assume monthly/annual)."},
+            "salary_max":      {"type": ["integer", "null"], "description": "Max salary/rate, same period as salary_min."},
+            "salary_period": {
+                "type": ["string", "null"],
+                "enum": ["hourly", "monthly", "yearly", None],
+                "description": "The pay period salary_min/salary_max are expressed in. null if not determinable from the text.",
+            },
             "salary_currency": {
                 "type": ["string", "null"],
                 "enum": ["PLN", "EUR", "USD", "GBP", None],
@@ -46,7 +52,7 @@ _EXTRACT_TOOL = {
         },
         "required": [
             "remote", "hybrid", "seniority",
-            "salary_min", "salary_max", "salary_currency",
+            "salary_min", "salary_max", "salary_period", "salary_currency",
             "stack", "company_type", "product_vs_outsourcing", "working_language",
         ],
     },
@@ -62,8 +68,9 @@ def _get_client() -> anthropic.Anthropic:
     return _client
 
 
-def extract_job(description: str) -> dict:
+def extract_job(description: str, source: str | None = None) -> dict:
     """Extract structured data from a single job description using Haiku. Returns {} on failure."""
+    excerpt = build_excerpt(description, source)[:3000]
     try:
         response = _get_client().messages.create(
             model=CLAUDE_EXTRACT_MODEL,
@@ -72,7 +79,7 @@ def extract_job(description: str) -> dict:
                 "Extract structured information from the job description. "
                 "Use null for fields not explicitly stated — do not infer or assume."
             ),
-            messages=[{"role": "user", "content": f"Extract structured data:\n\n{description[:3000]}"}],
+            messages=[{"role": "user", "content": f"Extract structured data:\n\n{excerpt}"}],
             tools=[_EXTRACT_TOOL],
             tool_choice={"type": "tool", "name": "submit_structured_data"},
         )
@@ -94,7 +101,7 @@ def run_extraction(jobs: list[dict]) -> int:
 
     updated = 0
     for job in to_extract:
-        data = extract_job(job["description"])
+        data = extract_job(job["description"], job.get("source"))
         if data:
             job_repository.update_structured_data(job["id"], data)
             logger.info(f"  Extracted: {job['title']} @ {job['company']} → {json.dumps(data, ensure_ascii=False)[:120]}")

@@ -33,3 +33,22 @@ def get_query_summary(source: str) -> list[dict]:
     ).fetchall()
     conn.close()
     return [dict(row) for row in rows]
+
+
+def get_zero_yield_queries(source: str, min_searches: int) -> list[str]:
+    """search_query values searched at least min_searches times for this source
+    where every single search found zero *new* jobs (cards_found may be nonzero —
+    they were all duplicates already surfaced by another query). Independent of
+    reject-rate: a query can be low-yield without ever producing a bad job, it's
+    just pure redundancy against the rest of the search set."""
+    conn = get_connection()
+    rows = conn.execute(
+        """SELECT search_query
+           FROM search_stats
+           WHERE source = ?
+           GROUP BY search_query
+           HAVING COUNT(*) >= ? AND SUM(new_found) = 0""",
+        (source, min_searches),
+    ).fetchall()
+    conn.close()
+    return [row["search_query"] for row in rows]

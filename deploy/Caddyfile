@@ -1,0 +1,11 @@
+# /etc/caddy/Caddyfile on the VPS.
+# 1. Replace yourdomain.pl with the real domain (A record must already point at
+#    this VPS's IP for Caddy's automatic Let's Encrypt TLS to succeed).
+# 2. Generate the password hash: caddy hash-password
+#    Paste the result in place of REPLACE_WITH_HASH below.
+yourdomain.pl {
+    basicauth {
+        viewer REPLACE_WITH_HASH
+    }
+    reverse_proxy 127.0.0.1:8000
+}

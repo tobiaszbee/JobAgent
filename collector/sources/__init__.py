@@ -3,6 +3,11 @@ from collector.sources.remotive import RemotiveSource
 from collector.sources.remoteok import RemoteOKSource
 from collector.sources.workingnomads import WorkingNomadsSource
 from collector.sources.weworkremotely import WWRSource
+from collector.sources.justjoin import JustJoinSource
+from collector.sources.theprotocol import TheProtocolSource
+from collector.sources.itpracuj import ItPracujSource
+from collector.sources.nofluffjobs import NoFluffJobsSource
+from collector.sources.solidjobs import SolidJobsSource
 
 _REGISTRY: dict[str, dict] = {
     "linkedin":        {"name": "LinkedIn",          "cls": LinkedInSource},
@@ -10,6 +15,11 @@ _REGISTRY: dict[str, dict] = {
     "remoteok":        {"name": "Remote OK",         "cls": RemoteOKSource},
     "workingnomads":   {"name": "Working Nomads",    "cls": WorkingNomadsSource},
     "weworkremotely":  {"name": "We Work Remotely",  "cls": WWRSource},
+    "justjoin":        {"name": "justjoin.it",       "cls": JustJoinSource},
+    "theprotocol":     {"name": "theprotocol.it",    "cls": TheProtocolSource},
+    "itpracuj":        {"name": "it.pracuj.pl",      "cls": ItPracujSource},
+    "nofluffjobs":     {"name": "NoFluffJobs",       "cls": NoFluffJobsSource},
+    "solidjobs":       {"name": "SOLID.Jobs",        "cls": SolidJobsSource},
 }
 
 

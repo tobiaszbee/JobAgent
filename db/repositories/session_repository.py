@@ -1,4 +1,5 @@
 from db.connection import get_connection
+from config import DB_BACKEND
 
 
 def start() -> int:
@@ -37,12 +38,22 @@ def cancel_active() -> None:
 def has_active_run() -> bool:
     """True if a session started within the last 6 hours is still running."""
     conn = get_connection()
+    recency_clause = ("started_at > NOW() - INTERVAL '6 hours'" if DB_BACKEND == "postgres"
+                       else "started_at > datetime('now', '-6 hours')")
     row = conn.execute(
-        """SELECT id FROM sessions WHERE status = 'running'
-           AND started_at > datetime('now', '-6 hours')"""
+        f"SELECT id FROM sessions WHERE status = 'running' AND {recency_clause}"
     ).fetchone()
     conn.close()
     return row is not None
+
+
+def get_last_finished_at() -> str | None:
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT finished_at FROM sessions WHERE status = 'done' ORDER BY finished_at DESC LIMIT 1"
+    ).fetchone()
+    conn.close()
+    return row["finished_at"] if row else None
 
 
 def get_latest() -> dict | None:

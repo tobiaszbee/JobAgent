@@ -3,6 +3,7 @@ import logging
 import time
 
 from config import VOYAGE_EMBED_MODEL
+from collector.utils import build_excerpt
 from db.connection import get_connection
 from embeddings.client import VoyageClient
 
@@ -25,8 +26,9 @@ def _job_to_text(job: dict) -> str:
     parts = [f"{job['title']} at {job['company']}"]
     if job.get("location"):
         parts.append(f"Location: {job['location']}")
-    if job.get("description"):
-        parts.append(job["description"][:2000])
+    excerpt = build_excerpt(job.get("description"), job.get("source"))
+    if excerpt:
+        parts.append(excerpt[:2000])
     return "\n".join(parts)
 
 
@@ -82,11 +84,19 @@ def index_jobs(jobs: list[dict]) -> int:
     return indexed
 
 
-def build_ideal_vector() -> list[float] | None:
+def build_ideal_vector(candidate_profile: str | None = None) -> list[float] | None:
     """
     Compute the 'ideal job' embedding vector:
     centroid(applied) - 0.3 × centroid(rejected)
-    Returns None if no applied jobs are embedded yet.
+
+    Falls back to embedding `candidate_profile` (the CV summary) as a query vector when
+    there's no applied-job history yet. Without this fallback, a new candidate's semantic
+    retrieval step is skipped entirely (this function returned None) and the top-N pool
+    reaching the paid rerank/listwise stages ends up ordered by scrape recency
+    (`get_jobs_for_ranking`'s `ORDER BY created_at DESC`), not by fit — i.e. every new
+    candidate's first run was scored on an essentially arbitrary slice of the pool.
+    Returns None only when there's truly nothing to build a vector from (no applied jobs
+    and no candidate profile).
     """
     conn = get_connection()
     try:
@@ -97,7 +107,11 @@ def build_ideal_vector() -> list[float] | None:
         """).fetchall()
 
         if not applied_rows:
-            return None
+            if not candidate_profile:
+                return None
+            client = _get_client()
+            [vec] = client.embed([candidate_profile], input_type="query")
+            return vec
 
         applied_vecs = [json.loads(r["embedding"]) for r in applied_rows]
         dim = len(applied_vecs[0])

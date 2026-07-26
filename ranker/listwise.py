@@ -4,6 +4,7 @@ import re
 import anthropic
 
 from config import ANTHROPIC_API_KEY, CLAUDE_RANK_MODEL
+from collector.utils import build_excerpt
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +56,9 @@ def _format_job(job: dict, position: int) -> str:
         if structured.get("seniority"):
             tags.append(structured["seniority"])
         if structured.get("salary_min") and structured.get("salary_max"):
-            tags.append(f"{structured['salary_min']}-{structured['salary_max']} {structured.get('salary_currency', '')}")
+            period = structured.get("salary_period")
+            period_suffix = f"/{period}" if period else ""
+            tags.append(f"{structured['salary_min']}-{structured['salary_max']} {structured.get('salary_currency', '')}{period_suffix}")
         if structured.get("company_type") and structured["company_type"] != "unknown":
             tags.append(structured["company_type"])
         if structured.get("product_vs_outsourcing") and structured["product_vs_outsourcing"] != "unknown":
@@ -65,7 +68,7 @@ def _format_job(job: dict, position: int) -> str:
         if tags:
             parts.append(f"Tags: {' | '.join(tags)}")
 
-    desc = (job.get("description") or "")[:600].replace("\n", " ")
+    desc = build_excerpt(job.get("description"), job.get("source")).replace("\n", " ")
     parts.append(f"Description: {desc}")
     return "\n".join(parts)
 
@@ -105,6 +108,8 @@ def listwise_rank(jobs: list[dict], candidate_profile: str, preferences: list[di
 - Dealbreakers (REJECT[conf=ABSOLUTE/HIGH] signals)
 
 Every job must appear exactly once in the ranking.
+
+Do all your reordering and self-correction before you start writing the JSON — once you begin the <ranking> block, each "reason" must already be your settled, final answer for that job. Never write deliberation, corrections, or meta-commentary about the ranking process itself (e.g. "wait, correcting...", "actually X is better", "placing here by ID") into a "reason" value — it is shown directly to the candidate and must read as a clean, final one-sentence explanation of that job's fit.
 
 After your analysis, output ONLY the final ranking as a JSON array inside <ranking> tags, like this:
 <ranking>

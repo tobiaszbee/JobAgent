@@ -1,0 +1,180 @@
+"""solid.jobs source — Poland-focused IT job board built around transparent salary
+ranges, public and unauthenticated.
+
+The site is an Angular SPA and calls a clean REST API for both listing and detail data,
+but a bare request to either endpoint 404s ("API endpoint nie istnieje") — the API
+content-negotiates on a vendor-specific `Accept` header that a plain browser UA alone
+doesn't imply. Adding the right `Accept` value (found by inspecting the real request the
+SPA makes) is enough; no Playwright is needed for either search() or fetch_description(),
+verified live:
+
+- listing:  GET /api/offers?division=it&sortOrder=default
+            Accept: application/vnd.solidjobs.jobofferlist+json, application/json, text/plain, */*
+- detail:   GET /api/offers/{id}/{jobOfferUrl}
+            Accept: application/vnd.solidjobs.jobofferdetails+json, application/json, text/plain, */*
+
+The listing endpoint doesn't support server-side keyword search (confirmed — no query
+param changes the result set) or a `division=it` recency filter, so the *entire* IT
+division (1500+ offers) is fetched once per collection run and cached, then filtered
+client-side per title/remote-mode/date — same shape as remotive.py's per-source cache,
+just keyed by nothing (there's only one list to fetch) rather than by search term.
+"""
+import logging
+from datetime import datetime, timedelta, timezone
+
+import httpx
+
+from collector.base import JobSource, RawJob
+from collector.utils import strip_html
+
+logger = logging.getLogger(__name__)
+
+_LIST_URL = "https://solid.jobs/api/offers"
+_DETAIL_URL = "https://solid.jobs/api/offers/{id}/{slug}"
+_PAGE_URL = "https://solid.jobs/offer/{id}/{slug}"
+_LIST_ACCEPT = "application/vnd.solidjobs.jobofferlist+json, application/json, text/plain, */*"
+_DETAIL_ACCEPT = "application/vnd.solidjobs.jobofferdetails+json, application/json, text/plain, */*"
+_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                  "(KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+}
+_POLAND_ALIASES = {"poland", "polska", "pl"}
+# "Hybrydowo" (hybrid) and "Możliwa częściowo" (partially possible) are deliberately
+# excluded — remote-only, matching every other Polish source in this collector.
+_REMOTE_VALUES = {"w całości", "możliwa w całości", "dowolnie", "stacjonarnie lub zdalnie"}
+
+
+class SolidJobsSource(JobSource):
+    def __init__(self, days_back: int = 7, **_):
+        self._days_back = days_back
+        self._client: httpx.Client | None = None
+        self._offers_cache: list[dict] | None = None
+
+    @property
+    def name(self) -> str:
+        return "solidjobs"
+
+    def __enter__(self):
+        self._client = httpx.Client(headers=_HEADERS, timeout=30, follow_redirects=True)
+        self._offers_cache = None
+        return self
+
+    def __exit__(self, *args):
+        if self._client:
+            self._client.close()
+        self._client = None
+        self._offers_cache = None
+
+    def _fetch_all_offers(self) -> list[dict]:
+        if self._offers_cache is not None:
+            return self._offers_cache
+        try:
+            resp = self._client.get(
+                _LIST_URL,
+                params={"division": "it", "sortOrder": "default"},
+                headers={"Accept": _LIST_ACCEPT},
+            )
+        except Exception as e:
+            logger.warning(f"solid.jobs list request failed: {e}")
+            self._offers_cache = []
+            return []
+        if resp.status_code != 200:
+            self._offers_cache = []
+            return []
+        try:
+            self._offers_cache = resp.json()
+        except ValueError:
+            self._offers_cache = []
+        return self._offers_cache
+
+    def fetch_description(self, url: str) -> str | None:
+        parts = url.rstrip("/").split("/")
+        if len(parts) < 2:
+            return None
+        offer_id, slug = parts[-2], parts[-1]
+        try:
+            resp = self._client.get(
+                _DETAIL_URL.format(id=offer_id, slug=slug),
+                headers={"Accept": _DETAIL_ACCEPT},
+            )
+        except Exception as e:
+            logger.warning(f"solid.jobs detail request failed: {e}")
+            return None
+        if resp.status_code != 200:
+            return None
+        try:
+            data = resp.json()
+        except ValueError:
+            return None
+        details = data.get("jobOfferDetails") or {}
+        parts_out = [
+            strip_html(details.get("jobDescription", "")) or "",
+            strip_html(details.get("candidateProfile", "")) or "",
+        ]
+        text = "\n\n".join(p for p in parts_out if p).strip()
+        return text or None
+
+    def search(
+        self,
+        title: str,
+        location: str,
+        days_back: int | None = None,
+        max_results: int | None = None,
+        known_urls: set[str] | None = None,
+    ) -> list[RawJob]:
+        if location.strip().lower() not in _POLAND_ALIASES:
+            return []
+        if not title.strip():
+            return []
+
+        days = days_back if days_back is not None else self._days_back
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        keyword = title.strip().lower()
+
+        offers = self._fetch_all_offers()
+
+        results: list[RawJob] = []
+        for offer in offers:
+            if max_results and len(results) >= max_results:
+                break
+
+            job_title = offer.get("jobTitle", "")
+            skills = [s.get("name", "") for s in offer.get("requiredSkills") or []]
+            haystack = f"{job_title} {' '.join(skills)}".lower()
+            if keyword not in haystack:
+                continue
+
+            if (offer.get("remotePossible") or "").strip().lower() not in _REMOTE_VALUES:
+                continue
+
+            valid_from = offer.get("validFrom")
+            try:
+                valid_dt = datetime.fromisoformat(valid_from) if valid_from else None
+            except ValueError:
+                valid_dt = None
+            if valid_dt and valid_dt < cutoff:
+                continue
+
+            offer_id = offer.get("id")
+            slug = offer.get("jobOfferUrl")
+            if not offer_id or not slug:
+                continue
+
+            job_url = _PAGE_URL.format(id=offer_id, slug=slug)
+            if known_urls and job_url in known_urls:
+                continue
+
+            city = offer.get("companyCity")
+            location_str = f"{city}, Poland (Remote)" if city else "Poland (Remote)"
+
+            results.append(RawJob(
+                title=job_title,
+                company=offer.get("companyName", ""),
+                location=location_str,
+                url=job_url,
+                source=self.name,
+                source_id=str(offer_id),
+                description=self.fetch_description(job_url),
+            ))
+
+        return results

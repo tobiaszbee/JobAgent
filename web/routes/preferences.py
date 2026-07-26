@@ -15,6 +15,7 @@ def get_preferences():
     signals = profile.get("signals", [])
     return jsonify({
         "profile": {
+            "signals": signals,
             "content": render_signals(signals) if signals else profile["content"],
             "applied_count": profile["applied_count"],
             "rejected_count": profile["rejected_count"],

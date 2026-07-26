@@ -6,8 +6,14 @@ logger = logging.getLogger(__name__)
 from config import SCORING
 from db.migrations import init_db
 from db.repositories import job_repository, criteria_repository, preference_repository
+from evaluation.harness import divergence_cases
+from evaluator.dealbreakers import apply_dealbreaker_filter
 from evaluator.scorer import score_job, build_system_prompt
 from evaluator.profile import load_active_profile
+
+# Cap on how many past ranking mistakes get fed back into the scoring prompt — bounds
+# prompt size as more divergence cases accumulate over time.
+_CALIBRATION_LIMIT = 10
 
 
 def run(force_rescore: bool = False) -> dict:
@@ -23,6 +29,13 @@ def run(force_rescore: bool = False) -> dict:
     if not unscored_jobs:
         logger.info("No jobs to evaluate.")
         return {"jobs_scored": 0}
+
+    unscored_jobs, dealbreaker_stats = apply_dealbreaker_filter(unscored_jobs)
+    if dealbreaker_stats["auto_rejected"]:
+        logger.info(f"Dealbreaker filter: auto-rejected {dealbreaker_stats['auto_rejected']}/{dealbreaker_stats['checked']} job(s) before scoring")
+    if not unscored_jobs:
+        logger.info("No jobs left to evaluate after dealbreaker filter.")
+        return {"jobs_scored": 0, "jobs_auto_rejected": dealbreaker_stats["auto_rejected"]}
 
     try:
         candidate_profile = load_active_profile()
@@ -40,8 +53,13 @@ def run(force_rescore: bool = False) -> dict:
         limit_positive=example_limit, limit_negative=example_limit
     )
 
+    calibration_cases = divergence_cases()[:_CALIBRATION_LIMIT]
+    if calibration_cases:
+        logger.info(f"Calibration: feeding {len(calibration_cases)} past ranking divergence(s) into scoring")
+
     shared_system_prompt = build_system_prompt(
-        criteria, positive_examples, negative_examples, candidate_profile, learned_preferences
+        criteria, positive_examples, negative_examples, candidate_profile, learned_preferences,
+        divergence_cases=calibration_cases,
     )
 
     logger.info(f"Evaluating {len(unscored_jobs)} job(s)...")
@@ -66,21 +84,21 @@ def run(force_rescore: bool = False) -> dict:
 
         if result["score"] <= auto_reject_threshold:
             job_repository.update_score_and_status(
-                job["id"], result["score"], result["score_reason"], "auto_rejected"
+                job["id"], result["score"], result["score_reason"], "auto_rejected", result.get("breakdown")
             )
             jobs_auto_rejected += 1
             logger.info(f"  Score: {result['score']}/10 — auto-rejected — {result['score_reason']}")
         else:
-            job_repository.update_score(job["id"], result["score"], result["score_reason"])
+            job_repository.update_score(job["id"], result["score"], result["score_reason"], result.get("breakdown"))
             logger.info(f"  Score: {result['score']}/10 — {result['score_reason']}")
 
         jobs_scored += 1
 
+    total_auto_rejected = jobs_auto_rejected + dealbreaker_stats["auto_rejected"]
     logger.info("\n" + "=" * 50)
-    logger.info(f"Done. Scored: {jobs_scored} (auto-rejected: {jobs_auto_rejected})")
+    logger.info(f"Done. Scored: {jobs_scored} (auto-rejected: {total_auto_rejected}, of which {dealbreaker_stats['auto_rejected']} by dealbreaker filter)")
 
-
-    return {"jobs_scored": jobs_scored, "jobs_auto_rejected": jobs_auto_rejected}
+    return {"jobs_scored": jobs_scored, "jobs_auto_rejected": total_auto_rejected}
 
 
 if __name__ == "__main__":

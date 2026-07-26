@@ -14,6 +14,13 @@ from collector.utils import strip_html as _strip_html
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+def _recent_pub_date() -> str:
+    """A pubDate that's always within the default 7-day search window, regardless of
+    when the test suite happens to run (a hardcoded absolute date here previously went
+    stale and started failing every "days_back" filter test once real time caught up)."""
+    return (datetime.now(tz=timezone.utc) - timedelta(days=1)).strftime("%a, %d %b %Y %H:%M:%S +0000")
+
+
 def _make_feed(items: list[dict]) -> str:
     """Build a minimal RSS feed XML string from a list of item dicts."""
     items_xml = ""
@@ -21,7 +28,7 @@ def _make_feed(items: list[dict]) -> str:
         title = it.get("title", "AcmeCo: PHP Developer")
         region = it.get("region", "Anywhere in the World")
         link = it.get("link", "https://weworkremotely.com/remote-jobs/acmeco-php-developer")
-        pub_date = it.get("pubDate", "Thu, 02 Jul 2026 12:00:00 +0000")
+        pub_date = it.get("pubDate") or _recent_pub_date()
         description = it.get("description", "<p>Some description</p>")
         items_xml += f"""
         <item>

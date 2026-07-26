@@ -230,12 +230,13 @@ def _get_job_status(url: str) -> str:
 # E2 filter tests
 # ---------------------------------------------------------------------------
 class TestE2Filter:
-    def test_job_without_required_keywords_passes_filter(self):
-        # 'required' keywords are no longer hard-rejected; they are soft context for AI ranking.
+    def test_job_without_required_keywords_gets_auto_rejected(self):
+        # Missing every 'required' keyword (php, remote) in both title and description
+        # is a hard rejection — see collector/filters.py::apply_keyword_filter.
         job_repository.insert(**_JOB_E2_NO_REQUIRED_KEYWORDS)
         result = apply_keyword_filter()
-        assert result["auto_rejected"] == 0
-        assert _get_job_status(_JOB_E2_NO_REQUIRED_KEYWORDS["url"]) == "new"
+        assert result["auto_rejected"] == 1
+        assert _get_job_status(_JOB_E2_NO_REQUIRED_KEYWORDS["url"]) == "auto_rejected"
 
     def test_rejects_job_with_rejected_keyword(self):
         job_repository.insert(**_JOB_E2_REJECTED_KEYWORD)

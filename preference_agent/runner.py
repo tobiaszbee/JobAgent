@@ -6,8 +6,9 @@ logger = logging.getLogger(__name__)
 import anthropic
 
 from config import ANTHROPIC_API_KEY, CLAUDE_DISTILL_MODEL
+from collector.utils import build_excerpt
 from db.migrations import init_db
-from db.repositories import job_repository, preference_repository
+from db.repositories import job_repository, preference_repository, dismissed_item_repository
 from preference_agent.profile import _DISTILL_TOOL, render_signals
 
 _SYSTEM = """\
@@ -25,6 +26,12 @@ Analyze ALL dimensions relevant to job-candidate fit, including but not limited 
 - Any other patterns consistently visible in the feedback
 
 Do NOT include: location, remote/on-site, geography, visa — filtered upstream.
+
+You may also see a DISMISSED SCORE FACTORS section: cases where the candidate looked at a specific
+pro/con from a past AI evaluation and explicitly said it doesn't apply to them, with a reason. This is
+the strongest signal available — direct correction, not inference. Fold each into whichever dimension it
+belongs to (e.g. dismissing a timezone/right-to-work con → work_culture; dismissing a company-size con →
+company_type) rather than repeating the dismissed text verbatim, and weight it at least conf=HIGH.
 
 Use ONLY these dimension names (sub-values are free-form):
   compensation, company_type, contract_form, work_culture, tech_stack, seniority, domain, role_scope
@@ -69,7 +76,7 @@ def _job_line(job: dict, include_reason: bool = False) -> str:
     title = job.get("title", "?")
     company = job.get("company", "?")
     location = job.get("location", "")
-    description = (job.get("description") or "").replace("\n", " ").strip()
+    description = build_excerpt(job.get("description"), job.get("source")).replace("\n", " ").strip()
     job_parts = [f'"{title}" @ {company}']
     if location:
         job_parts.append(f"[{location}]")
@@ -80,6 +87,21 @@ def _job_line(job: dict, include_reason: bool = False) -> str:
         if reason:
             job_parts.append(f"| reason: {reason[:120]}")
     return " ".join(job_parts)
+
+
+def _build_dismissed_section(items: list[dict]) -> str:
+    if not items:
+        return ""
+    lines = ["DISMISSED SCORE FACTORS (candidate says these specific pros/cons don't apply to them):"]
+    for it in items:
+        kind = "CON" if it["item_type"] == "con" else "PRO"
+        title = it.get("title", "?")
+        company = it.get("company", "?")
+        lines.append(
+            f'  - {kind} on "{title}" @ {company}: "{it["item_text"]}" '
+            f'— dismissed because: "{it["reason"]}"'
+        )
+    return "\n\n" + "\n".join(lines)
 
 
 def _build_prompt(applied: list[dict], rejected: list[dict]) -> str:
@@ -110,14 +132,16 @@ def run() -> dict:
     init_db()
 
     applied, rejected = job_repository.get_all_feedback()
-    if not applied and not rejected:
-        logger.info("No feedback data yet — apply or reject some jobs first.")
+    dismissed_total = dismissed_item_repository.count_all()
+    if not applied and not rejected and not dismissed_total:
+        logger.info("No feedback data yet — apply, reject, or dismiss a score factor first.")
         return {"ok": False, "reason": "no_data"}
 
     previous_profile = preference_repository.get_latest()
     if previous_profile:
         if (len(applied) == previous_profile["applied_count"] and
-                len(rejected) == previous_profile["rejected_count"]):
+                len(rejected) == previous_profile["rejected_count"] and
+                dismissed_total == (previous_profile.get("dismissed_count") or 0)):
             logger.info("No new feedback since last distillation — profile is up to date.")
             signals = previous_profile.get("signals", [])
             return {
@@ -127,8 +151,12 @@ def run() -> dict:
                 "content": render_signals(signals),
             }
 
-    logger.info(f"Distilling from {len(applied)} applied + {len(rejected)} rejected jobs...")
+    logger.info(
+        f"Distilling from {len(applied)} applied + {len(rejected)} rejected "
+        f"+ {dismissed_total} dismissed score factor(s)..."
+    )
     prompt = _build_prompt(applied, rejected)
+    prompt += _build_dismissed_section(dismissed_item_repository.get_recent(50))
 
     from evaluation.harness import divergence_cases
     divergences = divergence_cases()
@@ -174,7 +202,7 @@ def run() -> dict:
             return {"ok": False, "reason": "invalid_signal", "signal": sig}
 
     rendered = render_signals(signals)
-    preference_repository.save(signals, len(applied), len(rejected))
+    preference_repository.save(signals, len(applied), len(rejected), dismissed_total)
     logger.info(f"Preference profile updated ({len(signals)} signals).")
     logger.info(f"Profile:\n{rendered}")
 

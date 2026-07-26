@@ -1,0 +1,19 @@
+[Unit]
+Description=JobAgentWeb - password-gated public job viewer (read + status only)
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=jobagent
+WorkingDirectory=/opt/jobagent
+EnvironmentFile=/opt/jobagent/.env.web
+# init_db() is idempotent (ADD COLUMN IF NOT EXISTS) — running it before every start
+# means schema changes shipped in a future `git pull` apply automatically on restart,
+# with no separate manual migration step.
+ExecStartPre=/opt/jobagent/.venv/bin/python -c "from db.migrations import init_db; init_db()"
+ExecStart=/opt/jobagent/.venv/bin/gunicorn -w 2 -b 127.0.0.1:8000 web.app:app
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

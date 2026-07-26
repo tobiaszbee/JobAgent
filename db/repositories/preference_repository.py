@@ -18,12 +18,12 @@ def get_latest() -> dict | None:
     return result
 
 
-def save(signals: list[dict], applied_count: int, rejected_count: int) -> None:
+def save(signals: list[dict], applied_count: int, rejected_count: int, dismissed_count: int = 0) -> None:
     conn = get_connection()
     conn.execute(
-        """INSERT INTO preference_profiles (content, content_format, applied_count, rejected_count, updated_at)
-           VALUES (?, 'json', ?, ?, CURRENT_TIMESTAMP)""",
-        (json.dumps(signals), applied_count, rejected_count),
+        """INSERT INTO preference_profiles (content, content_format, applied_count, rejected_count, dismissed_count, updated_at)
+           VALUES (?, 'json', ?, ?, ?, CURRENT_TIMESTAMP)""",
+        (json.dumps(signals), applied_count, rejected_count, dismissed_count),
     )
     conn.commit()
     conn.close()

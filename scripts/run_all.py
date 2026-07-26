@@ -63,19 +63,11 @@ def main() -> int:
     parser.add_argument("--search-queries", nargs="*", default=None, help="Override LinkedIn search queries")
     parser.add_argument("--locations",      nargs="*", default=None, help="Override search locations")
     parser.add_argument("--log-file",       default=None,            help="Append output to this file (e.g. data/logs/run.log)")
-    parser.add_argument("--random-start",   type=int,  default=0,    help="Sleep random(0, N) seconds before starting (scheduler jitter)")
     args = parser.parse_args()
 
     handlers = _configure_logging(args.log_file)
 
     try:
-        if args.random_start > 0:
-            import random
-            import time
-            delay = random.randint(0, args.random_start)
-            logger.info(f"[stealth] Random startup delay: {delay // 60}m {delay % 60}s")
-            time.sleep(delay)
-
         logger.info("=" * 60)
         logger.info(f"JobAgent run started — {datetime.now().strftime('%Y-%m-%d %H:%M')}")
         logger.info("=" * 60)
@@ -96,15 +88,11 @@ def main() -> int:
 
         logger.info(f"\nCollector result: found={c_result['jobs_found']}  new={c_result['jobs_new']}")
 
-        logger.info("\n=== EVALUATOR ===")
-        try:
-            e_result = evaluate()
-        except Exception as e:
-            logger.error(f"Evaluator failed: {e}")
-            return 1
-
-        logger.info(f"\nEvaluator result: scored={e_result.get('jobs_scored', 0)}")
-
+        # Extraction runs BEFORE evaluation: evaluator/dealbreakers.py's pre-LLM filter
+        # reads structured_data, and a job never re-enters the "unscored" pool once the
+        # evaluator scores it — so extraction has to happen first, or the dealbreaker
+        # filter always sees empty structured_data for freshly-collected jobs and never
+        # gets a second chance.
         logger.info("\n=== EXTRACTOR ===")
         try:
             from db.repositories import job_repository as _jr
@@ -113,6 +101,15 @@ def main() -> int:
             logger.info(f"Extractor result: structured_data updated for {extracted} job(s)")
         except Exception as e:
             logger.warning(f"Extractor failed (non-fatal): {e}")
+
+        logger.info("\n=== EVALUATOR ===")
+        try:
+            e_result = evaluate()
+        except Exception as e:
+            logger.error(f"Evaluator failed: {e}")
+            return 1
+
+        logger.info(f"\nEvaluator result: scored={e_result.get('jobs_scored', 0)}")
 
         logger.info("\n=== EMBEDDINGS + RANKING ===")
         try:

@@ -49,6 +49,29 @@ def test_extract_job_returns_empty_when_no_tool_block(mock_get_client):
     assert result == {}
 
 
+@patch("extractor.runner._get_client")
+def test_extract_job_strips_linkedin_junk_before_extraction(mock_get_client):
+    # Regression guard: extract_job used to send description[:3000] raw, so LinkedIn's
+    # page-chrome junk could land inside the extraction window for short postings.
+    mock_get_client.return_value.messages.create.return_value = _make_tool_response({})
+    description = "Senior Python Developer, remote.\nSet alert for similar jobs\nUnrelated footer junk."
+
+    extract_job(description, source="linkedin")
+
+    sent_content = mock_get_client.return_value.messages.create.call_args.kwargs["messages"][0]["content"]
+    assert "Senior Python Developer" in sent_content
+    assert "Unrelated footer junk" not in sent_content
+
+
+@patch("extractor.runner._get_client")
+def test_extract_job_non_linkedin_source_unaffected(mock_get_client):
+    mock_get_client.return_value.messages.create.return_value = _make_tool_response({})
+    extract_job("Clean posting text", source="remotive")
+
+    sent_content = mock_get_client.return_value.messages.create.call_args.kwargs["messages"][0]["content"]
+    assert "Clean posting text" in sent_content
+
+
 @patch("extractor.runner.job_repository")
 @patch("extractor.runner.extract_job")
 def test_run_extraction_skips_jobs_without_description(mock_extract, mock_repo):
@@ -78,6 +101,15 @@ def test_run_extraction_calls_update_on_success(mock_extract, mock_repo):
     count = run_extraction(jobs)
     assert count == 1
     mock_repo.update_structured_data.assert_called_once()
+
+
+@patch("extractor.runner.job_repository")
+@patch("extractor.runner.extract_job")
+def test_run_extraction_passes_job_source_through(mock_extract, mock_repo):
+    mock_extract.return_value = {}
+    jobs = [{"id": "j1", "title": "Dev", "company": "Co", "source": "linkedin", "description": "desc", "structured_data": None}]
+    run_extraction(jobs)
+    mock_extract.assert_called_once_with("desc", "linkedin")
 
 
 @patch("extractor.runner.job_repository")

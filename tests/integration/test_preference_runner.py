@@ -1,7 +1,7 @@
 from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
-from db.repositories import job_repository, preference_repository
+from db.repositories import job_repository, preference_repository, dismissed_item_repository
 from preference_agent.runner import run
 
 
@@ -175,3 +175,59 @@ class TestPreferenceRunner:
         prompt_content = call_kwargs["messages"][0]["content"]
         assert "APPLIED" in prompt_content
         assert "REJECTED" in prompt_content
+
+    def test_dismissed_only_triggers_run(self):
+        # No applied/rejected feedback at all — a lone dismissed score factor must
+        # still be enough to run distillation, not just apply/reject decisions.
+        jid = job_repository.insert(
+            title="Dev", company="Corp", location="Remote", source="linkedin",
+            url="https://example.com/dismiss/1", description="PHP role.",
+        )
+        dismissed_item_repository.insert(jid, "con", "UK-based, timezone concern", "not an issue for me")
+        with _patched_api() as (mock_client, _):
+            result = run()
+        assert result["ok"]
+        mock_client.messages.create.assert_called_once()
+
+    def test_prompt_includes_dismissed_section(self):
+        _insert_applied()
+        job_id = job_repository.insert(
+            title="Dev", company="Corp", location="Remote", source="linkedin",
+            url="https://example.com/dismiss/2", description="PHP role.",
+        )
+        dismissed_item_repository.insert(job_id, "con", "UK-based, timezone concern", "not an issue for me")
+        with _patched_api() as (mock_client, _):
+            run()
+        prompt_content = mock_client.messages.create.call_args.kwargs["messages"][0]["content"]
+        assert "DISMISSED SCORE FACTORS" in prompt_content
+        assert "UK-based, timezone concern" in prompt_content
+        assert "not an issue for me" in prompt_content
+
+    def test_new_dismissed_item_triggers_redistillation_even_if_counts_unchanged(self):
+        _insert_applied()
+        _insert_rejected()
+        preference_repository.save(_SIGNALS, applied_count=1, rejected_count=1, dismissed_count=0)
+        job_id = job_repository.insert(
+            title="Dev", company="Corp", location="Remote", source="linkedin",
+            url="https://example.com/dismiss/3", description="PHP role.",
+        )
+        dismissed_item_repository.insert(job_id, "con", "New concern", "reason")
+        with _patched_api() as (mock_client, _):
+            result = run()
+        assert result["ok"]
+        mock_client.messages.create.assert_called_once()
+
+    def test_no_new_dismissed_items_still_skips(self):
+        _insert_applied()
+        _insert_rejected()
+        job_id = job_repository.insert(
+            title="Dev", company="Corp", location="Remote", source="linkedin",
+            url="https://example.com/dismiss/4", description="PHP role.",
+        )
+        dismissed_item_repository.insert(job_id, "con", "A concern", "reason")
+        preference_repository.save(_SIGNALS, applied_count=1, rejected_count=1, dismissed_count=1)
+        with _patched_api() as (mock_client, _):
+            result = run()
+        assert result["ok"]
+        assert result["reason"] == "no_new_data"
+        mock_client.messages.create.assert_not_called()

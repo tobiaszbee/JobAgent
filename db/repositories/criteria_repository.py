@@ -1,4 +1,5 @@
 from db.connection import get_connection
+from config import DB_BACKEND
 
 VALID_TYPES = {"title", "location", "required", "preferred", "rejected", "search_query"}
 
@@ -37,10 +38,10 @@ def insert(type_: str, value: str) -> None:
     if type_ not in VALID_TYPES:
         raise ValueError(f"Invalid criteria type: {type_!r}. Must be one of {VALID_TYPES}")
     conn = get_connection()
-    conn.execute(
-        "INSERT OR IGNORE INTO criteria (type, value) VALUES (?, ?)",
-        (type_, value.strip())
-    )
+    sql = ("INSERT INTO criteria (type, value) VALUES (?, ?) ON CONFLICT (type, value) DO NOTHING"
+           if DB_BACKEND == "postgres" else
+           "INSERT OR IGNORE INTO criteria (type, value) VALUES (?, ?)")
+    conn.execute(sql, (type_, value.strip()))
     conn.commit()
     conn.close()
 

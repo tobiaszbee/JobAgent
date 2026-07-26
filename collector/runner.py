@@ -8,28 +8,48 @@ logger = logging.getLogger(__name__)
 
 from config import STEALTH
 from db.migrations import init_db
-from db.repositories import job_repository, session_repository, criteria_repository, search_stats_repository
+from db.repositories import job_repository, session_repository, criteria_repository, search_stats_repository, excluded_search_queries_repository
 from collector.filters import apply_keyword_filter, title_banned_reason
+from collector.language_filter import apply_language_filter
 from collector.sources import available as available_sources, make as make_source
 from collector.sources.linkedin import LinkedInSource
 
 
-def _fetch_descriptions_in_batches(jobs_pending_description: list[tuple[str, str]]) -> None:
+def _fetch_one(source, job_id: str, url: str, source_id: str) -> bool:
+    """Fetch a single pending description, retrying once on failure. Returns True on
+    success; marks the job auto_rejected (listing gone) on a second failure."""
+    desc = source.fetch_description(url)
+    if desc:
+        job_repository.update_description(job_id, desc)
+        logger.info(f"  OK: {url.rstrip('/').split('/')[-1]}")
+        return True
+
+    logger.info(f"  Retry: {url.rstrip('/').split('/')[-1]}")
+    time.sleep(random.uniform(30, 60))
+    desc = source.fetch_description(url)
+    if desc:
+        job_repository.update_description(job_id, desc)
+        logger.info("  Retry OK")
+        return True
+
+    logger.info(f"  Failed (unavailable): {url}")
+    job_repository.update_score_and_status(job_id, 0.0, f"Job listing no longer available on {source_id}", "auto_rejected")
+    return False
+
+
+def _fetch_descriptions_stealthily(jobs: list[tuple[str, str]]) -> tuple[int, int]:
+    """LinkedIn-specific path: batches with stealth pauses and periodic distraction
+    between them, a fresh browser session per batch."""
     batch_size = STEALTH["batch_size"]
     distract_every = STEALTH["distract_every_n_batches"]
-    batches = [jobs_pending_description[i:i + batch_size] for i in range(0, len(jobs_pending_description), batch_size)]
+    batches = [jobs[i:i + batch_size] for i in range(0, len(jobs), batch_size)]
 
-    logger.info(f"\nFetching descriptions in {len(batches)} batch(es) of ≤{batch_size}...")
+    logger.info(f"\nFetching {len(jobs)} LinkedIn description(s) in {len(batches)} batch(es) of ≤{batch_size}...")
 
-    ok_total = 0
-    fail_total = 0
-
+    ok_total = fail_total = 0
     for batch_idx, batch in enumerate(batches):
         if batch_idx > 0:
-            pause = random.uniform(
-                STEALTH["batch_pause_min"],
-                STEALTH["batch_pause_max"],
-            )
+            pause = random.uniform(STEALTH["batch_pause_min"], STEALTH["batch_pause_max"])
             resume = (datetime.now() + timedelta(seconds=pause)).strftime("%H:%M")
             logger.info(f"\n[stealth] Pausing {pause / 60:.1f} min before batch {batch_idx + 1}/{len(batches)}... → resume ~{resume}")
             time.sleep(pause)
@@ -38,36 +58,95 @@ def _fetch_descriptions_in_batches(jobs_pending_description: list[tuple[str, str
 
         with LinkedInSource() as source:
             source.login()
-
             if distract_every > 0 and batch_idx > 0 and batch_idx % distract_every == 0:
                 source.distract()
 
-            ok = 0
-            fail = 0
+            ok = fail = 0
             for job_id, url in batch:
-                desc = source.fetch_description(url)
-                if desc:
-                    job_repository.update_description(job_id, desc)
-                    logger.info(f"  OK: {url.split('/')[-2]}")
+                if _fetch_one(source, job_id, url, "linkedin"):
                     ok += 1
                 else:
-                    logger.info(f"  Retry: {url.split('/')[-2]}")
-                    time.sleep(random.uniform(30, 60))
-                    desc = source.fetch_description(url)
-                    if desc:
-                        job_repository.update_description(job_id, desc)
-                        logger.info("  Retry OK")
-                        ok += 1
-                    else:
-                        logger.info(f"  Failed (unavailable): {url}")
-                        job_repository.update_score_and_status(job_id, 0.0, "Job listing no longer available on LinkedIn", "auto_rejected")
-                        fail += 1
+                    fail += 1
 
         logger.info(f"  Batch {batch_idx + 1} done: {ok} OK, {fail} failed")
         ok_total += ok
         fail_total += fail
 
+    return ok_total, fail_total
+
+
+def _fetch_descriptions_directly(source_id: str, jobs: list[tuple[str, str]]) -> tuple[int, int]:
+    """Non-LinkedIn path: no login, no stealth pacing needed — one session, straight
+    through the list."""
+    logger.info(f"\nFetching {len(jobs)} {source_id} description(s)...")
+    try:
+        source = make_source(source_id)
+    except ValueError as e:
+        logger.warning(f"Can't fetch pending descriptions for {source_id!r}: {e}")
+        return 0, len(jobs)
+
+    ok = fail = 0
+    with source:
+        for job_id, url in jobs:
+            if _fetch_one(source, job_id, url, source_id):
+                ok += 1
+            else:
+                fail += 1
+    return ok, fail
+
+
+def _fetch_descriptions_in_batches(jobs_pending_description: list[tuple[str, str, str]]) -> None:
+    by_source: dict[str, list[tuple[str, str]]] = {}
+    for job_id, url, source_id in jobs_pending_description:
+        by_source.setdefault(source_id, []).append((job_id, url))
+
+    ok_total = fail_total = 0
+    for source_id, jobs in by_source.items():
+        if source_id == "linkedin":
+            ok, fail = _fetch_descriptions_stealthily(jobs)
+        else:
+            ok, fail = _fetch_descriptions_directly(source_id, jobs)
+        ok_total += ok
+        fail_total += fail
+
     logger.info(f"\nDescriptions: {ok_total} fetched, {fail_total} still missing")
+
+
+# Which locations a source actually gets searched with, given the candidate's selected
+# countries (remote-mode) and cities (hybrid/onsite-mode) — both flow into the same
+# criteria["locations"] list. The user no longer picks sources/locations manually per
+# run — this table is the whole routing policy:
+# - LinkedIn: one search per selected location (its own per-term search semantics),
+#   accepts both countries and cities.
+# - Remotive/RemoteOK/WorkingNomads/WeWorkRemotely: single global remote-job boards, not
+#   segmented by country. Their shared collector/location.py matching already treats the
+#   literal "Remote" search term as matching everything, so searching once with "Remote"
+#   covers every candidate location in one call instead of N near-duplicate ones.
+# - The Poland-focused boards only ever return anything for a "Poland" search (see each
+#   source's own _POLAND_ALIASES gate) — only run them if the candidate actually wants
+#   Poland, either directly (remote_countries) or via a Polish hybrid/onsite city, and
+#   only ever search "Poland" once, regardless of what else is selected.
+_WORLDWIDE_REMOTE_SOURCES = frozenset({"remotive", "remoteok", "workingnomads", "weworkremotely"})
+_POLAND_ONLY_SOURCES = frozenset({"justjoin", "theprotocol", "itpracuj", "nofluffjobs", "solidjobs"})
+_POLAND_ALIASES = frozenset({"poland", "polska", "pl"})
+_POLAND_CITIES = frozenset({
+    "warsaw", "warszawa", "krakow", "kraków", "wroclaw", "wrocław", "gdansk", "gdańsk",
+    "poznan", "poznań", "lodz", "łódź", "katowice", "szczecin", "lublin", "bydgoszcz",
+    "bialystok", "białystok", "gdynia", "sopot", "torun", "toruń", "rzeszow", "rzeszów",
+    "kielce", "gliwice", "czestochowa", "częstochowa", "radom", "opole",
+})
+
+
+def _locations_for_source(source_id: str, locations: list[str]) -> list[str]:
+    if source_id in _WORLDWIDE_REMOTE_SOURCES:
+        return ["Remote"]
+    if source_id in _POLAND_ONLY_SOURCES:
+        wants_poland = any(
+            l.strip().lower() in _POLAND_ALIASES or l.strip().lower() in _POLAND_CITIES
+            for l in locations
+        )
+        return ["Poland"] if wants_poland else []
+    return locations
 
 
 def _search_pause_seconds(new_count: int) -> float:
@@ -92,13 +171,18 @@ def _collect_job_cards(
     known_urls: set[str],
     rejected_kw: list[str],
     session_id: int,
-) -> tuple[int, int, list[tuple[str, str]]]:
+) -> tuple[int, int, list[tuple[str, str, str]]]:
     jobs_found = 0
     jobs_new = 0
-    jobs_pending_description: list[tuple[str, str]] = []
+    jobs_pending_description: list[tuple[str, str, str]] = []
     jobs_prefiltered = 0
 
     for source_id in selected_sources:
+        locations_for_source = _locations_for_source(source_id, locations)
+        if not locations_for_source:
+            logger.info(f"\n[{source_id}] Skipping — none of the candidate's selected countries apply to this source.")
+            continue
+
         logger.info(f"\n[{source_id}] Starting source...")
         try:
             source = make_source(source_id, days_back=days_back)
@@ -106,12 +190,21 @@ def _collect_job_cards(
             with source:
                 source.login()
 
+                queries_for_source = search_queries
+                if source_id == "linkedin":
+                    excluded = excluded_search_queries_repository.get_excluded("linkedin")
+                    if excluded:
+                        for q in search_queries:
+                            if q in excluded:
+                                logger.info(f"  [prune] Skipping LinkedIn query {q!r} (auto-excluded: {excluded[q]})")
+                        queries_for_source = [q for q in search_queries if q not in excluded]
+
                 first_search = True
                 pending_pause = 0.0
-                for title in search_queries:
+                for title in queries_for_source:
                     if max_jobs and jobs_new >= max_jobs:
                         break
-                    for location in locations:
+                    for location in locations_for_source:
                         if max_jobs and jobs_new >= max_jobs:
                             break
 
@@ -130,15 +223,25 @@ def _collect_job_cards(
                         for raw in raw_jobs:
                             if max_jobs and jobs_new >= max_jobs:
                                 break
-                            job_id = job_repository.insert(
-                                title=raw.title,
-                                company=raw.company,
-                                location=raw.location,
-                                url=raw.url,
-                                source=raw.source,
-                                source_id=raw.source_id,
-                                description=raw.description,
-                            )
+                            try:
+                                job_id = job_repository.insert(
+                                    title=raw.title,
+                                    company=raw.company,
+                                    location=raw.location,
+                                    url=raw.url,
+                                    source=raw.source,
+                                    source_id=raw.source_id,
+                                    description=raw.description,
+                                    search_query=title,
+                                )
+                            except Exception as e:
+                                # A single job's insert failing (e.g. a brief DB
+                                # connection blip when the DB is remote) shouldn't take
+                                # down the whole run — db/connection.py already retries
+                                # transient connection errors on acquisition; anything
+                                # that still fails here is logged and skipped.
+                                logger.warning(f"  Skip (insert failed): {raw.title} @ {raw.company} — {e}")
+                                continue
                             if job_id is None:
                                 logger.info(f"  Skip (duplicate): {raw.title} @ {raw.company}")
                                 continue
@@ -153,7 +256,7 @@ def _collect_job_cards(
                                     jobs_prefiltered += 1
                                     logger.info(f"  [prefilter] {raw.title} @ {raw.company} — {reason}")
                                 else:
-                                    jobs_pending_description.append((job_id, raw.url))
+                                    jobs_pending_description.append((job_id, raw.url, source_id))
                             logger.info(f"  [{jobs_new}{'/' + str(max_jobs) if max_jobs else ''}] {raw.title} @ {raw.company}")
 
                         search_stats_repository.record(
@@ -223,6 +326,13 @@ def run(
             logger.info(f"\n[stealth] Cooldown {cooldown:.0f}s before fetching descriptions... → resume ~{resume}")
             time.sleep(cooldown)
             _fetch_descriptions_in_batches(jobs_pending_description)
+
+        logger.info("\n=== LANGUAGE FILTER ===")
+        lang_result = apply_language_filter()
+        if lang_result["checked"]:
+            logger.info(f"Checked {lang_result['checked']} job(s), auto-rejected {lang_result['auto_rejected']}")
+        else:
+            logger.info("No languages configured — all jobs passed through")
 
         logger.info("\n=== KEYWORD FILTER ===")
         filter_result = apply_keyword_filter()

@@ -139,7 +139,7 @@ class LinkedInSource(JobSource):
                 const descEl = document.querySelector('.jobs-description__content, .jobs-box__html-content, .description__text');
                 const descText = descEl ? descEl.innerText.trim() : '';
                 if (descText.length > 100) {
-                    return descText.slice(0, 5000);
+                    return descText.slice(0, 8000);
                 }
                 // Fall back to section header — multilingual
                 const headers = [
@@ -150,10 +150,10 @@ class LinkedInSource(JobSource):
                 const body = document.body.innerText;
                 for (const h of headers) {
                     const idx = body.indexOf(h);
-                    if (idx !== -1) return body.slice(idx, idx + 5000).trim();
+                    if (idx !== -1) return body.slice(idx, idx + 8000).trim();
                 }
                 // Last resort: use whatever the structured element found, even if short
-                if (descText.length > 0) return descText.slice(0, 5000);
+                if (descText.length > 0) return descText.slice(0, 8000);
                 return '';
             }
         """) or None

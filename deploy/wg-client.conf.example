@@ -1,0 +1,14 @@
+# Import this into the WireGuard Windows client (Import tunnel(s) from file).
+# AllowedIPs is scoped to just the server's WireGuard address — this is a split
+# tunnel that only routes Postgres traffic through WireGuard, not your whole
+# internet connection.
+
+[Interface]
+PrivateKey = <CLIENT_PRIVATE_KEY>
+Address = 10.66.0.2/24
+
+[Peer]
+PublicKey = <SERVER_PUBLIC_KEY>
+Endpoint = <VPS_PUBLIC_IP>:51820
+AllowedIPs = 10.66.0.1/32
+PersistentKeepalive = 25

@@ -1,5 +1,59 @@
+from unittest.mock import MagicMock, patch
+
 from config import STEALTH
-from collector.runner import _search_pause_seconds
+from collector.base import RawJob
+from collector.runner import (
+    _search_pause_seconds, _fetch_one, _fetch_descriptions_directly, _fetch_descriptions_in_batches,
+    _locations_for_source, _collect_job_cards,
+)
+
+
+class TestLocationsForSource:
+    def test_linkedin_gets_every_selected_country_unchanged(self):
+        countries = ["Poland", "Germany", "United Kingdom"]
+        assert _locations_for_source("linkedin", countries) == countries
+
+    def test_worldwide_remote_sources_always_get_a_single_remote_search(self):
+        for source_id in ("remotive", "remoteok", "workingnomads", "weworkremotely"):
+            assert _locations_for_source(source_id, ["Poland", "Germany", "Canada"]) == ["Remote"]
+
+    def test_worldwide_remote_source_ignores_empty_country_list(self):
+        # These sources don't depend on the candidate's country list at all.
+        assert _locations_for_source("remotive", []) == ["Remote"]
+
+    def test_poland_only_source_returns_poland_when_selected(self):
+        assert _locations_for_source("justjoin", ["Germany", "Poland"]) == ["Poland"]
+
+    def test_poland_only_source_returns_empty_when_poland_not_selected(self):
+        assert _locations_for_source("theprotocol", ["Germany", "United Kingdom"]) == []
+
+    def test_poland_only_source_accepts_polish_spelling(self):
+        assert _locations_for_source("itpracuj", ["Polska"]) == ["Poland"]
+
+    def test_poland_only_source_case_insensitive(self):
+        assert _locations_for_source("nofluffjobs", ["POLAND"]) == ["Poland"]
+
+    def test_poland_only_source_empty_country_list_returns_empty(self):
+        assert _locations_for_source("solidjobs", []) == []
+
+    def test_unknown_source_falls_back_to_full_country_list(self):
+        countries = ["Poland", "France"]
+        assert _locations_for_source("some-future-source", countries) == countries
+
+    def test_poland_only_source_triggers_on_polish_hybrid_city(self):
+        # A hybrid/onsite candidate never picks a country — only a city — so the
+        # Polish boards must still activate for a known Polish city.
+        assert _locations_for_source("justjoin", ["Warsaw"]) == ["Poland"]
+
+    def test_poland_only_source_triggers_on_polish_city_with_diacritics(self):
+        assert _locations_for_source("nofluffjobs", ["Kraków"]) == ["Poland"]
+
+    def test_poland_only_source_ignores_non_polish_city(self):
+        assert _locations_for_source("theprotocol", ["Berlin"]) == []
+
+    def test_linkedin_gets_mixed_countries_and_cities_unchanged(self):
+        locations = ["Germany", "Warsaw"]
+        assert _locations_for_source("linkedin", locations) == locations
 
 
 class TestSearchPauseSeconds:
@@ -19,3 +73,159 @@ class TestSearchPauseSeconds:
         few = sum(_search_pause_seconds(1) for _ in range(200)) / 200
         many = sum(_search_pause_seconds(10) for _ in range(200)) / 200
         assert many > few
+
+
+class TestFetchOne:
+    @patch("collector.runner.job_repository")
+    def test_success_on_first_try(self, mock_repo):
+        source = MagicMock()
+        source.fetch_description.return_value = "A real description"
+        result = _fetch_one(source, "job1", "https://example.com/job1", "justjoin")
+        assert result is True
+        mock_repo.update_description.assert_called_once_with("job1", "A real description")
+
+    @patch("collector.runner.time.sleep")
+    @patch("collector.runner.job_repository")
+    def test_success_on_retry(self, mock_repo, mock_sleep):
+        source = MagicMock()
+        source.fetch_description.side_effect = [None, "Description on retry"]
+        result = _fetch_one(source, "job1", "https://example.com/job1", "justjoin")
+        assert result is True
+        mock_repo.update_description.assert_called_once_with("job1", "Description on retry")
+
+    @patch("collector.runner.time.sleep")
+    @patch("collector.runner.job_repository")
+    def test_marks_auto_rejected_after_both_failures(self, mock_repo, mock_sleep):
+        source = MagicMock()
+        source.fetch_description.return_value = None
+        result = _fetch_one(source, "job1", "https://example.com/job1", "justjoin")
+        assert result is False
+        mock_repo.update_score_and_status.assert_called_once()
+        args = mock_repo.update_score_and_status.call_args[0]
+        assert args[0] == "job1"
+        assert "justjoin" in args[2]
+        assert args[3] == "auto_rejected"
+
+
+class TestFetchDescriptionsDirectly:
+    @patch("collector.runner.time.sleep")
+    @patch("collector.runner.job_repository")
+    @patch("collector.runner.make_source")
+    def test_uses_correct_source_class(self, mock_make_source, mock_repo, mock_sleep):
+        mock_source = MagicMock()
+        mock_source.fetch_description.return_value = "Description"
+        mock_make_source.return_value.__enter__.return_value = mock_source
+        ok, fail = _fetch_descriptions_directly("justjoin", [("job1", "https://justjoin.it/job-offer/foo")])
+        assert ok == 1 and fail == 0
+        mock_make_source.assert_called_once_with("justjoin")
+
+    def test_unknown_source_marks_all_failed(self):
+        with patch("collector.runner.make_source", side_effect=ValueError("Unknown source")):
+            ok, fail = _fetch_descriptions_directly("nonexistent", [("job1", "https://x.com/1"), ("job2", "https://x.com/2")])
+        assert ok == 0 and fail == 2
+
+
+class TestFetchDescriptionsInBatches:
+    @patch("collector.runner._fetch_descriptions_directly")
+    @patch("collector.runner._fetch_descriptions_stealthily")
+    def test_groups_jobs_by_source_and_dispatches_correctly(self, mock_stealthy, mock_direct):
+        mock_stealthy.return_value = (1, 0)
+        mock_direct.return_value = (1, 0)
+        jobs = [
+            ("j1", "https://linkedin.com/jobs/view/1", "linkedin"),
+            ("j2", "https://justjoin.it/job-offer/2", "justjoin"),
+        ]
+        _fetch_descriptions_in_batches(jobs)
+        mock_stealthy.assert_called_once_with([("j1", "https://linkedin.com/jobs/view/1")])
+        mock_direct.assert_called_once_with("justjoin", [("j2", "https://justjoin.it/job-offer/2")])
+
+    @patch("collector.runner._fetch_descriptions_directly")
+    def test_never_routes_non_linkedin_jobs_to_stealth_path(self, mock_direct):
+        # Regression guard: a bug once sent every pending job through LinkedIn's
+        # extraction logic regardless of its real source.
+        mock_direct.return_value = (1, 0)
+        with patch("collector.runner._fetch_descriptions_stealthily") as mock_stealthy:
+            _fetch_descriptions_in_batches([("j1", "https://justjoin.it/job-offer/1", "justjoin")])
+            mock_stealthy.assert_not_called()
+
+
+def _mock_source():
+    source = MagicMock()
+    source.requires_stealth_pauses = False
+    source.search.return_value = []
+    source.__exit__.return_value = False
+    return source
+
+
+class TestCollectJobCardsQueryExclusion:
+    @patch("collector.runner.excluded_search_queries_repository")
+    @patch("collector.runner.search_stats_repository")
+    @patch("collector.runner.job_repository")
+    @patch("collector.runner.make_source")
+    def test_skips_excluded_linkedin_query(self, mock_make_source, mock_jobs, mock_stats, mock_excluded):
+        mock_excluded.get_excluded.return_value = {"Bad Query": "reject rate 97% over 30 jobs"}
+        source = _mock_source()
+        mock_make_source.return_value = source
+
+        _collect_job_cards(
+            ["linkedin"], ["Bad Query", "Good Query"], ["Poland"],
+            days_back=1, max_jobs=None, known_urls=set(), rejected_kw=[], session_id=1,
+        )
+
+        searched_titles = [c.args[0] for c in source.search.call_args_list]
+        assert searched_titles == ["Good Query"]
+
+    @patch("collector.runner.excluded_search_queries_repository")
+    @patch("collector.runner.search_stats_repository")
+    @patch("collector.runner.job_repository")
+    @patch("collector.runner.make_source")
+    def test_exclusion_list_only_checked_for_linkedin(self, mock_make_source, mock_jobs, mock_stats, mock_excluded):
+        source = _mock_source()
+        mock_make_source.return_value = source
+
+        _collect_job_cards(
+            ["remotive"], ["Bad Query"], ["Remote"],
+            days_back=1, max_jobs=None, known_urls=set(), rejected_kw=[], session_id=1,
+        )
+
+        searched_titles = [c.args[0] for c in source.search.call_args_list]
+        assert searched_titles == ["Bad Query"]
+        mock_excluded.get_excluded.assert_not_called()
+
+    @patch("collector.runner.search_stats_repository")
+    @patch("collector.runner.job_repository")
+    @patch("collector.runner.make_source")
+    def test_no_exclusions_recorded_runs_every_query(self, mock_make_source, mock_jobs, mock_stats):
+        # No patch on excluded_search_queries_repository — hits the real (empty,
+        # per-test-isolated) DB, confirming an empty exclusion table filters nothing.
+        source = _mock_source()
+        mock_make_source.return_value = source
+
+        _collect_job_cards(
+            ["linkedin"], ["Query A", "Query B"], ["Poland"],
+            days_back=1, max_jobs=None, known_urls=set(), rejected_kw=[], session_id=1,
+        )
+
+        searched_titles = [c.args[0] for c in source.search.call_args_list]
+        assert searched_titles == ["Query A", "Query B"]
+
+
+class TestCollectJobCardsSearchQueryAttribution:
+    @patch("collector.runner.search_stats_repository")
+    @patch("collector.runner.job_repository")
+    @patch("collector.runner.make_source")
+    def test_inserted_job_is_tagged_with_the_query_that_found_it(self, mock_make_source, mock_jobs, mock_stats):
+        source = _mock_source()
+        source.search.return_value = [
+            RawJob(title="PHP Dev", company="Acme", location="Poland",
+                   url="https://a.com/1", source="linkedin", description="desc")
+        ]
+        mock_make_source.return_value = source
+        mock_jobs.insert.return_value = "job123"
+
+        _collect_job_cards(
+            ["linkedin"], ["Senior PHP Developer"], ["Poland"],
+            days_back=1, max_jobs=None, known_urls=set(), rejected_kw=[], session_id=1,
+        )
+
+        assert mock_jobs.insert.call_args.kwargs["search_query"] == "Senior PHP Developer"

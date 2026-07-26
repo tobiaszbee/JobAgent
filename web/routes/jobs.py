@@ -1,6 +1,12 @@
 from flask import Blueprint, jsonify, request
-from db.repositories import job_repository, cv_repository
+from db.repositories import job_repository, cv_repository, dismissed_item_repository
 
+# Public-safe routes only — browsing jobs and changing status. Registered in both
+# "local" and "web" deployment modes (see web/app.py). Anything that mutates beyond
+# a status change (bulk delete, dismissing a score item) or leaks internal counts
+# lives in jobs_admin.bp instead, which "web" mode never registers — this is a
+# route-level allowlist, not a blueprint-level toggle, so a public JobAgentWeb can
+# never reach them even by guessing the URL.
 bp = Blueprint("jobs", __name__)
 
 
@@ -33,26 +39,6 @@ def stats():
     return jsonify(data)
 
 
-@bp.get("/api/jobs/missing-descriptions")
-def missing_descriptions():
-    jobs = job_repository.get_missing_descriptions()
-    return jsonify({"count": len(jobs)})
-
-
-@bp.get("/api/jobs/count")
-def count_jobs():
-    statuses  = request.args.getlist("status")
-    date_from = request.args.get("date_from") or None
-    date_to   = request.args.get("date_to") or None
-    return jsonify({"count": job_repository.count_by_filter(statuses, date_from, date_to)})
-
-
-@bp.delete("/api/jobs")
-def delete_jobs():
-    statuses  = request.args.getlist("status")
-    date_from = request.args.get("date_from") or None
-    date_to   = request.args.get("date_to") or None
-    if not statuses:
-        return jsonify({"error": "At least one status required"}), 400
-    n = job_repository.delete_by_filter(statuses, date_from, date_to)
-    return jsonify({"deleted": n})
+@bp.get("/api/jobs/<job_id>/dismissed-items")
+def get_dismissed_items(job_id):
+    return jsonify({"items": dismissed_item_repository.get_for_job(job_id)})

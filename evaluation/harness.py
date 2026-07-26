@@ -1,4 +1,6 @@
 from db.connection import get_connection
+from db.repositories import job_repository
+from config import WOULD_APPLY
 
 
 def precision_at_k(k: int = 10) -> dict:
@@ -72,7 +74,8 @@ def total_ranked() -> int:
 
 
 def eval_report() -> dict:
-    """Full evaluation report combining precision@K and divergence cases."""
+    """Full evaluation report combining precision@K, divergence cases, and the
+    would-apply flag's precision (the gate for the phase-2 auto-apply decision)."""
     p5  = precision_at_k(5)
     p10 = precision_at_k(10)
     return {
@@ -82,4 +85,6 @@ def eval_report() -> dict:
         "n_evaluated_10":  p10["n_evaluated"],
         "divergence_cases": divergence_cases(),
         "total_ranked": total_ranked(),
+        "would_apply": job_repository.get_would_apply_stats(),
+        "would_apply_score_floor": WOULD_APPLY["score_floor"],
     }

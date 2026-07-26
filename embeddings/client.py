@@ -34,6 +34,13 @@ class VoyageClient:
     def rerank(self, query: str, documents: list[str], top_k: int) -> list[dict]:
         """Cross-encoder rerank. Returns list of {index, score} sorted by score desc."""
         result = self._client.rerank(query, documents, model=VOYAGE_RERANK_MODEL, top_k=top_k)
+        try:
+            from db.repositories.usage_repository import log_voyage_rerank
+            # Voyage bills rerank per token processed (query + documents), not per query —
+            # log the real total_tokens the API reports rather than a document-count proxy.
+            log_voyage_rerank(getattr(result, "total_tokens", len(documents) * 200))
+        except Exception:
+            pass
         return [{"index": r.index, "score": r.relevance_score} for r in result.results]
 
     @staticmethod
