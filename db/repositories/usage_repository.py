@@ -1,7 +1,7 @@
 import json
 from datetime import datetime, timezone
 
-from config import MODEL_COSTS
+from config import MODEL_COSTS, DB_BACKEND
 from db.connection import get_connection
 
 
@@ -44,9 +44,11 @@ def log_voyage_rerank(total_tokens: int) -> None:
 def get_summary() -> dict:
     try:
         conn = get_connection()
+        today_clause = ("created_at::date = CURRENT_DATE" if DB_BACKEND == "postgres"
+                         else "date(created_at) = date('now')")
         today = conn.execute(
             "SELECT COALESCE(SUM(cost_usd),0), COALESCE(SUM(input_tokens+output_tokens),0) "
-            "FROM usage_log WHERE date(created_at) = date('now')"
+            f"FROM usage_log WHERE {today_clause}"
         ).fetchone()
         total = conn.execute(
             "SELECT COALESCE(SUM(cost_usd),0), COALESCE(SUM(input_tokens+output_tokens),0) "

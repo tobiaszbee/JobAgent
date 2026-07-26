@@ -1,5 +1,6 @@
 import hashlib
 import json
+from config import DB_BACKEND
 from db.connection import get_connection
 from db.types import JobRow, JobStats
 
@@ -401,7 +402,17 @@ def get_would_apply_stats() -> dict:
 
 def get_stats() -> JobStats:
     conn = get_connection()
-    row = conn.execute("""
+    # Postgres has no ROUND(double precision, integer) overload — AVG() over a REAL
+    # column returns double precision there, so it needs an explicit ::numeric cast
+    # first. SQLite's ROUND() is dynamically typed and doesn't understand "::" at all.
+    avg_score_sql = (
+        "ROUND(AVG(CASE WHEN score IS NOT NULL THEN score END)::numeric, 2) AS avg_score,"
+        "ROUND(AVG(CASE WHEN status = 'new' AND score IS NOT NULL THEN score END)::numeric, 2) AS avg_score_new"
+        if DB_BACKEND == "postgres" else
+        "ROUND(AVG(CASE WHEN score IS NOT NULL THEN score END), 2) AS avg_score,"
+        "ROUND(AVG(CASE WHEN status = 'new' AND score IS NOT NULL THEN score END), 2) AS avg_score_new"
+    )
+    row = conn.execute(f"""
         SELECT
             COUNT(*)                                              AS total,
             COUNT(CASE WHEN status = 'new'           THEN 1 END) AS new,
@@ -409,8 +420,7 @@ def get_stats() -> JobStats:
             COUNT(CASE WHEN status = 'applied'       THEN 1 END) AS applied,
             COUNT(CASE WHEN status = 'rejected'      THEN 1 END) AS rejected,
             COUNT(CASE WHEN status = 'auto_rejected' THEN 1 END) AS auto_rejected,
-            ROUND(AVG(CASE WHEN score IS NOT NULL THEN score END), 2) AS avg_score,
-            ROUND(AVG(CASE WHEN status = 'new' AND score IS NOT NULL THEN score END), 2) AS avg_score_new
+            {avg_score_sql}
         FROM jobs
     """).fetchone()
     last = conn.execute(
