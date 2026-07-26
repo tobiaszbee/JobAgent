@@ -129,7 +129,10 @@ STEALTH = {
     "distract_every_n_batches": 2,
 }
 
-if not ANTHROPIC_API_KEY:
-    raise ValueError("ANTHROPIC_API_KEY not found. Add it to .env.")
-if not VOYAGE_API_KEY:
-    raise ValueError("VOYAGE_API_KEY not found. Add it to .env. Get one at voyageai.com.")
+# JobAgentWeb ("web" mode) only ever registers jobs.bp + evaluation.bp — it never
+# calls Anthropic or Voyage, so it shouldn't need those keys just to start.
+if DEPLOYMENT_MODE != "web":
+    if not ANTHROPIC_API_KEY:
+        raise ValueError("ANTHROPIC_API_KEY not found. Add it to .env.")
+    if not VOYAGE_API_KEY:
+        raise ValueError("VOYAGE_API_KEY not found. Add it to .env. Get one at voyageai.com.")

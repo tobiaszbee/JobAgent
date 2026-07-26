@@ -20,8 +20,12 @@ apt-get upgrade -y
 echo "== base packages =="
 # python3/python3-venv track whatever the distro's current default is (Ubuntu
 # 26.04 ships 3.14) rather than pinning to 3.12 by exact package name, which
-# doesn't exist in every release's repos.
-apt-get install -y git curl ca-certificates gnupg python3 python3-venv postgresql wireguard
+# doesn't exist in every release's repos. build-essential/libpq-dev/python3-dev
+# are needed because psycopg2-binary doesn't yet ship a precompiled wheel for
+# every new Python version (e.g. 3.14 at the time of writing) and falls back to
+# compiling from source.
+apt-get install -y git curl ca-certificates gnupg python3 python3-venv python3-dev \
+    postgresql wireguard build-essential libpq-dev
 
 echo "== Caddy (official apt repo) =="
 # Verify these URLs still match https://caddyserver.com/docs/install#debian-ubuntu-raspbian
