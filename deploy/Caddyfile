@@ -4,7 +4,7 @@
 # 2. Generate the password hash: caddy hash-password
 #    Paste the result in place of REPLACE_WITH_HASH below.
 yourdomain.pl {
-    basicauth {
+    basic_auth {
         viewer REPLACE_WITH_HASH
     }
     reverse_proxy 127.0.0.1:8000
