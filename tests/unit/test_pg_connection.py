@@ -52,6 +52,17 @@ class TestPGConnectionExecute:
         mock_pg_conn.cursor.return_value = mock_cur
         return _PGConnection(mock_pg_conn), mock_cur
 
+    def test_uses_dictcursor_not_realdictcursor(self):
+        """A good deal of this codebase does positional access — row[0] — following
+        sqlite3.Row's actual behavior (it supports both). RealDictCursor only
+        supports string keys and raises KeyError: 0 on every one of those call
+        sites; psycopg2.extras.DictRow supports both, same as sqlite3.Row."""
+        from psycopg2.extras import DictCursor
+        mock_pg_conn = MagicMock()
+        _PGConnection(mock_pg_conn).execute("SELECT 1")
+        cursor_factory = mock_pg_conn.cursor.call_args.kwargs.get("cursor_factory")
+        assert cursor_factory is DictCursor
+
     def test_translates_question_mark_placeholders(self):
         conn, mock_cur = self._conn_with_mock_cursor()
         conn.execute("SELECT * FROM jobs WHERE id = ? AND status = ?", ("j1", "new"))

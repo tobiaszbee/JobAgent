@@ -57,12 +57,17 @@ class _PGConnection:
         self._conn = conn
 
     def execute(self, sql, params=()):
-        from psycopg2.extras import RealDictCursor
+        # DictCursor (not RealDictCursor) — DictRow supports BOTH row["col"] and
+        # row[0] positional access, matching sqlite3.Row's actual behavior. A good
+        # deal of this codebase was written against sqlite3.Row and does use
+        # positional indexing (e.g. `.fetchone()[0]` for a COUNT(*)); RealDictCursor
+        # only supports string keys and raised KeyError: 0 on every one of those.
+        from psycopg2.extras import DictCursor
         translated = sql.replace("?", "%s")
         is_insert = translated.strip().upper().startswith("INSERT") and "RETURNING" not in translated.upper()
         if is_insert:
             translated = translated.rstrip().rstrip(";") + " RETURNING id"
-        cur = self._conn.cursor(cursor_factory=RealDictCursor)
+        cur = self._conn.cursor(cursor_factory=DictCursor)
         cur.execute(translated, params)
         return _PGCursor(cur, is_insert)
 
