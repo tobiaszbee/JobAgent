@@ -1,10 +1,15 @@
+import uuid
+
 from db.repositories import job_repository, dismissed_item_repository
 
 
 def _insert_job(url="https://example.com/1", title="Backend Dev", company="AcmeCo"):
+    # job_postings is shared/global and never truncated between tests — a fixed
+    # literal url would collide with the same url from another test in this session.
+    unique_url = f"{url}?t={uuid.uuid4().hex}"
     return job_repository.insert(
         title=title, company=company, location="UK (Remote)",
-        url=url, source="linkedin", description="PHP role.",
+        url=unique_url, source="linkedin", description="PHP role.",
     )
 
 

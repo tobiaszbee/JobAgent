@@ -1,29 +1,12 @@
-import json
-from db.connection import get_connection
+import api_client
 
 
 def get_latest() -> dict | None:
-    conn = get_connection()
-    row = conn.execute(
-        "SELECT * FROM preference_profiles ORDER BY id DESC LIMIT 1"
-    ).fetchone()
-    conn.close()
-    if not row:
-        return None
-    result = dict(row)
-    if result.get("content_format") == "json":
-        result["signals"] = json.loads(result["content"])
-    else:
-        result["signals"] = []
-    return result
+    return api_client.get("/api/preference-profile").json()["profile"]
 
 
 def save(signals: list[dict], applied_count: int, rejected_count: int, dismissed_count: int = 0) -> None:
-    conn = get_connection()
-    conn.execute(
-        """INSERT INTO preference_profiles (content, content_format, applied_count, rejected_count, dismissed_count, updated_at)
-           VALUES (?, 'json', ?, ?, ?, CURRENT_TIMESTAMP)""",
-        (json.dumps(signals), applied_count, rejected_count, dismissed_count),
-    )
-    conn.commit()
-    conn.close()
+    api_client.post("/api/preference-profile", json={
+        "signals": signals, "applied_count": applied_count,
+        "rejected_count": rejected_count, "dismissed_count": dismissed_count,
+    })

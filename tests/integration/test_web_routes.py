@@ -1,12 +1,15 @@
 import json
+import uuid
 import pytest
 from db.repositories import candidate_preferences_repository, cv_repository, job_repository, criteria_repository
 
 
-def _add_job(flask_client=None, **kwargs):
-    """Insert a job directly via the repository (bypasses HTTP)."""
+def _add_job(**kwargs):
+    """Insert a job directly via the repository (bypasses HTTP). job_postings is
+    shared/global and never truncated between tests — every call gets its own
+    unique url so this test's job never collides with another test's."""
     defaults = dict(title="PHP Developer", company="Acme Corp",
-                    location="Poland", url="https://example.com/job/1",
+                    location="Poland", url=f"https://example.com/job/{uuid.uuid4().hex}",
                     source="linkedin")
     return job_repository.insert(**{**defaults, **kwargs})
 
@@ -25,8 +28,8 @@ class TestJobsEndpoints:
         assert resp.json[0]["title"] == "PHP Developer"
 
     def test_list_jobs_status_filter(self, flask_client):
-        id1 = _add_job(url="https://a.com/1")
-        _add_job(company="Beta", url="https://a.com/2")
+        id1 = _add_job()
+        _add_job(company="Beta")
         job_repository.update_status(id1, "reviewed")
         resp = flask_client.get("/api/jobs?status=reviewed")
         assert resp.status_code == 200
@@ -65,10 +68,7 @@ class TestJobsEndpoints:
 
     def test_update_status_all_valid_values_accepted(self, flask_client):
         for status in ("new", "reviewed", "applied", "rejected"):
-            job_id = _add_job(
-                title="Dev", company=f"Co-{status}",
-                url=f"https://a.com/{status}"
-            )
+            job_id = _add_job(title="Dev", company=f"Co-{status}")
             resp = flask_client.post(
                 f"/api/jobs/{job_id}/status",
                 data=json.dumps({"status": status}),
@@ -149,7 +149,7 @@ class TestDismissItemEndpoints:
 
 class TestJobsMiscEndpoints:
     def test_missing_descriptions_returns_count(self, flask_client):
-        job_repository.insert("Dev", "Co", "PL", "https://a.com/nd", "linkedin")
+        job_repository.insert("Dev", "Co", "PL", f"https://a.com/{uuid.uuid4().hex}", "linkedin")
         resp = flask_client.get("/api/jobs/missing-descriptions")
         assert resp.status_code == 200
         assert resp.json["count"] == 1

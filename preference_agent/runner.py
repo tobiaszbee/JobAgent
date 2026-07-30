@@ -7,7 +7,6 @@ import anthropic
 
 from config import ANTHROPIC_API_KEY, CLAUDE_DISTILL_MODEL
 from collector.utils import build_excerpt
-from db.migrations import init_db
 from db.repositories import job_repository, preference_repository, dismissed_item_repository
 from preference_agent.profile import _DISTILL_TOOL, render_signals
 
@@ -129,8 +128,6 @@ def _build_prompt(applied: list[dict], rejected: list[dict]) -> str:
 
 
 def run() -> dict:
-    init_db()
-
     applied, rejected = job_repository.get_all_feedback()
     dismissed_total = dismissed_item_repository.count_all()
     if not applied and not rejected and not dismissed_total:

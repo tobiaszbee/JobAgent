@@ -5,20 +5,11 @@ import logging
 sys.stdout.reconfigure(line_buffering=True)
 logging.basicConfig(level=logging.INFO, stream=sys.stdout, format="%(message)s")
 
-from db.connection import get_connection
-from db.migrations import init_db
+import api_client
 from collector.filters import apply_keyword_filter
 from evaluator.runner import run as evaluate
 
-init_db()
-
-conn = get_connection()
-n = conn.execute(
-    "UPDATE jobs SET status='new', score=NULL, score_reason=NULL WHERE status='auto_rejected'"
-    " AND description IS NOT NULL AND description != ''"
-).rowcount
-conn.commit()
-conn.close()
+n = api_client.post("/api/jobs/reset-auto-rejected").json()["reset"]
 
 if n == 0:
     print("No auto-rejected jobs with descriptions to reset.")

@@ -1,4 +1,9 @@
 import os
+import subprocess
+import time
+import uuid
+from pathlib import Path
+
 from dotenv import load_dotenv
 
 # Load real keys from .env / .env.test before setting the fake test default,
@@ -10,21 +15,96 @@ load_dotenv(".env", override=False)
 os.environ.setdefault("ANTHROPIC_API_KEY", "test-key-not-real")
 os.environ.setdefault("VOYAGE_API_KEY", "test-voyage-key-not-real")
 
+_TEST_PORT = 8511
+os.environ.setdefault("JOBAGENTWEB_BASE_URL", f"http://127.0.0.1:{_TEST_PORT}")
+
 import pytest
-import config
-from db.migrations import init_db
+import httpx
+
+import api_client
+
+# JobAgent has no database of its own — every db/repositories/*.py call is a real
+# HTTP call to JobAgentWeb (api_client.py). Rather than mock those calls, tests
+# run a real JobAgentWeb instance (its own repo/venv, sibling directory) against
+# the same isolated jobagentweb_test Postgres its own test suite uses — same
+# "hit a real backend, not mocks" philosophy already established there.
+_JOBAGENTWEB_REPO = Path(os.environ.get("JOBAGENTWEB_REPO_PATH", Path(__file__).resolve().parent.parent.parent / "JobAgentWeb"))
+_JOBAGENTWEB_PYTHON = _JOBAGENTWEB_REPO / ".venv" / "Scripts" / "python.exe"
+
+
+@pytest.fixture(scope="session", autouse=True)
+def jobagentweb_server():
+    if not _JOBAGENTWEB_PYTHON.exists():
+        pytest.exit(
+            f"JobAgentWeb venv not found at {_JOBAGENTWEB_PYTHON} — set JOBAGENTWEB_REPO_PATH "
+            "or check out JobAgentWeb as a sibling directory with its venv set up.",
+            returncode=1,
+        )
+
+    env = os.environ.copy()
+    env.update({
+        "POSTGRES_HOST": "10.66.0.1",
+        "POSTGRES_PORT": "5432",
+        "POSTGRES_DB": "jobagentweb_test",
+        "POSTGRES_USER": "jobagentweb_test",
+        "POSTGRES_PASSWORD": "test_only_pw_923nf",
+        "SESSION_HTTPS_ONLY": "false",
+    })
+    # A pipe that nobody drains fills up (uvicorn logs a line per request) and the
+    # child then blocks on its own stdout write() forever — the whole test run
+    # freezes mid-suite with no error, just an unresponsive server. Redirect to a
+    # real file instead; the OS handles that without the parent needing to read it.
+    log_path = Path(os.environ.get("TMPDIR", os.environ.get("TEMP", "."))) / f"jobagentweb_test_server_{_TEST_PORT}.log"
+    log_file = open(log_path, "w", encoding="utf-8")
+    proc = subprocess.Popen(
+        [str(_JOBAGENTWEB_PYTHON), "-m", "uvicorn", "main:app", "--port", str(_TEST_PORT)],
+        cwd=str(_JOBAGENTWEB_REPO), env=env,
+        stdout=log_file, stderr=subprocess.STDOUT,
+    )
+
+    healthy = False
+    for _ in range(75):
+        if proc.poll() is not None:
+            break
+        try:
+            if httpx.get(f"http://127.0.0.1:{_TEST_PORT}/healthz", timeout=1).status_code == 200:
+                healthy = True
+                break
+        except httpx.TransportError:
+            pass
+        time.sleep(0.2)
+
+    if not healthy:
+        proc.kill()
+        log_file.close()
+        output = log_path.read_text(encoding="utf-8", errors="replace")
+        pytest.exit(f"JobAgentWeb test server failed to start (log: {log_path}):\n{output[-4000:]}", returncode=1)
+
+    yield
+
+    proc.terminate()
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+    log_file.close()
 
 
 @pytest.fixture(autouse=True)
-def test_db(tmp_path, monkeypatch):
-    """Redirect DB to a temp file and initialise schema before every test."""
-    monkeypatch.setitem(config.AGENT, "db_path", str(tmp_path / "test.db"))
-    init_db()
+def _isolated_user(jobagentweb_server, tmp_path, monkeypatch):
+    """Every test gets its own freshly-registered JobAgentWeb user — perfect
+    isolation with no truncation step needed, since every table is scoped by
+    user_id (the shared job_postings/job_embeddings pool is the one exception,
+    but tests that touch it use unique-per-test URLs anyway)."""
+    monkeypatch.setattr(api_client, "_SESSION_FILE", tmp_path / "session.json")
+    username = f"test_{uuid.uuid4().hex[:16]}"
+    api_client.register(username, "test-password-not-real")
+    yield username
 
 
 @pytest.fixture
-def flask_client(test_db):
-    """Flask test client with a fresh DB already initialised."""
+def flask_client():
+    """Flask test client with an already-logged-in session (see _isolated_user)."""
     from web.app import app
     app.config["TESTING"] = True
     with app.test_client() as client:

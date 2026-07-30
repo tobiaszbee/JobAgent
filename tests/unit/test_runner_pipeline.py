@@ -1,8 +1,8 @@
 from datetime import datetime, timedelta
+from unittest.mock import patch
 
 import pytest
 
-from db.repositories import session_repository
 import web.routes.runner as runner_module
 from web.routes.runner import _post_collect_stages, _days_since_last_run, _is_run_active, _RunGuard
 
@@ -37,50 +37,31 @@ class TestPostCollectStages:
         assert stages["EXTRACTOR"].replace("\\", "/").endswith("scripts/extract_jobs.py")
 
 
-def _finish_session_at(dt: datetime) -> None:
-    from db.connection import get_connection
-    session_id = session_repository.start()
-    conn = get_connection()
-    conn.execute(
-        "UPDATE sessions SET finished_at = ?, status = 'done' WHERE id = ?",
-        (dt.strftime("%Y-%m-%d %H:%M:%S"), session_id),
-    )
-    conn.commit()
-    conn.close()
+def _last_finished(dt: datetime | None) -> str | None:
+    return dt.isoformat() if dt else None  # matches JobAgentWeb's actual wire format
 
 
 class TestDaysSinceLastRun:
+    # get_last_finished_at()'s own query semantics (most-recent "done", ignoring
+    # "cancelled") are covered in JobAgentWeb's test_sessions.py, not re-derived here.
     def test_no_prior_run_falls_back_to_default(self):
-        assert _days_since_last_run() == 7
+        with patch("web.routes.runner.session_repository.get_last_finished_at", return_value=None):
+            assert _days_since_last_run() == 7
 
     def test_ten_hours_ago_rounds_up_to_one_day(self):
-        _finish_session_at(datetime.utcnow() - timedelta(hours=10))
-        assert _days_since_last_run() == 1
+        finished = _last_finished(datetime.utcnow() - timedelta(hours=10))
+        with patch("web.routes.runner.session_repository.get_last_finished_at", return_value=finished):
+            assert _days_since_last_run() == 1
 
     def test_just_under_one_day_ago_stays_one_day(self):
-        _finish_session_at(datetime.utcnow() - timedelta(hours=23, minutes=50))
-        assert _days_since_last_run() == 1
+        finished = _last_finished(datetime.utcnow() - timedelta(hours=23, minutes=50))
+        with patch("web.routes.runner.session_repository.get_last_finished_at", return_value=finished):
+            assert _days_since_last_run() == 1
 
     def test_fifty_hours_ago_rounds_up_to_three_days(self):
-        _finish_session_at(datetime.utcnow() - timedelta(hours=50))
-        assert _days_since_last_run() == 3
-
-    def test_uses_most_recent_done_session(self):
-        _finish_session_at(datetime.utcnow() - timedelta(hours=100))
-        _finish_session_at(datetime.utcnow() - timedelta(hours=10))
-        assert _days_since_last_run() == 1
-
-    def test_ignores_cancelled_sessions(self):
-        from db.connection import get_connection
-        session_id = session_repository.start()
-        conn = get_connection()
-        conn.execute(
-            "UPDATE sessions SET finished_at = ?, status = 'cancelled' WHERE id = ?",
-            ((datetime.utcnow() - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S"), session_id),
-        )
-        conn.commit()
-        conn.close()
-        assert _days_since_last_run() == 7
+        finished = _last_finished(datetime.utcnow() - timedelta(hours=50))
+        with patch("web.routes.runner.session_repository.get_last_finished_at", return_value=finished):
+            assert _days_since_last_run() == 3
 
 
 class TestRunGuard:

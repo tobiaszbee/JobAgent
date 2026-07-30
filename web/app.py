@@ -1,6 +1,4 @@
 from flask import Flask, redirect, render_template
-from config import DEPLOYMENT_MODE
-from db.migrations import init_db
 from db.repositories import candidate_preferences_repository, cv_repository, session_repository
 from web.routes import (
     candidate_preferences, jobs, jobs_admin, criteria, runner, cv, sources, preferences,
@@ -10,26 +8,19 @@ from web.routes import (
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.config["TEMPLATES_AUTO_RELOAD"] = True
 
-# "web" (JobAgentWeb, public + password-gated): browse jobs, change status, view the
-# read-only Calibration report — nothing else. "local" (default): everything,
-# including RunAgent/collector/pipeline config. This is enforced here at the route
-# level (blueprints simply aren't registered in web mode, so those endpoints don't
-# exist and return 404), not just hidden in the UI.
 app.register_blueprint(jobs.bp)
 app.register_blueprint(evaluation.bp)
-
-if DEPLOYMENT_MODE != "web":
-    app.register_blueprint(jobs_admin.bp)
-    app.register_blueprint(criteria.bp)
-    app.register_blueprint(runner.bp)
-    app.register_blueprint(cv.bp)
-    app.register_blueprint(sources.bp)
-    app.register_blueprint(preferences.bp)
-    app.register_blueprint(candidate_preferences.bp)
-    app.register_blueprint(ranking.bp)
-    app.register_blueprint(query_expansion.bp)
-    app.register_blueprint(search_queries.bp)
-    runner.init_sock(app)
+app.register_blueprint(jobs_admin.bp)
+app.register_blueprint(criteria.bp)
+app.register_blueprint(runner.bp)
+app.register_blueprint(cv.bp)
+app.register_blueprint(sources.bp)
+app.register_blueprint(preferences.bp)
+app.register_blueprint(candidate_preferences.bp)
+app.register_blueprint(ranking.bp)
+app.register_blueprint(query_expansion.bp)
+app.register_blueprint(search_queries.bp)
+runner.init_sock(app)
 
 
 @app.get("/")
@@ -52,7 +43,6 @@ def how_it_works():
 
 
 if __name__ == "__main__":
-    init_db()
     session_repository.cancel_active()  # clear any stale running sessions from a previous crash
     print("Starting Job Agent Dashboard...")
     print("Open: http://localhost:5000")

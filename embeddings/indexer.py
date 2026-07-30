@@ -1,10 +1,9 @@
-import json
 import logging
 import time
 
 from config import VOYAGE_EMBED_MODEL
 from collector.utils import build_excerpt
-from db.connection import get_connection
+import api_client
 from embeddings.client import VoyageClient
 
 logger = logging.getLogger(__name__)
@@ -49,37 +48,32 @@ def _embed_with_retry(client: VoyageClient, texts: list[str], max_retries: int =
 
 
 def index_jobs(jobs: list[dict]) -> int:
-    """Embed jobs and store in job_embeddings. Returns count indexed."""
+    """Embed jobs and store in job_embeddings (shared across every user). Returns count indexed."""
     if not jobs:
         return 0
 
     client = _get_client()
     indexed = 0
-    conn = get_connection()
     n = len(jobs)
 
-    try:
-        for i in range(0, n, BATCH_SIZE):
-            batch = jobs[i:i + BATCH_SIZE]
-            texts = [_job_to_text(j) for j in batch]
-            embeddings = _embed_with_retry(client, texts)
+    for i in range(0, n, BATCH_SIZE):
+        batch = jobs[i:i + BATCH_SIZE]
+        texts = [_job_to_text(j) for j in batch]
+        embeddings = _embed_with_retry(client, texts)
 
-            for job, emb in zip(batch, embeddings):
-                conn.execute(
-                    "INSERT OR REPLACE INTO job_embeddings (job_id, embedding, model) VALUES (?, ?, ?)",
-                    (job["id"], json.dumps(emb), VOYAGE_EMBED_MODEL),
-                )
-                indexed += 1
+        api_client.post("/api/embeddings", json={
+            "items": [
+                {"job_id": job["id"], "embedding": emb, "model": VOYAGE_EMBED_MODEL}
+                for job, emb in zip(batch, embeddings)
+            ],
+        })
+        indexed += len(batch)
 
-            conn.commit()
-            done = min(i + BATCH_SIZE, n)
-            logger.info(f"  Indexed {done}/{n} jobs")
+        done = min(i + BATCH_SIZE, n)
+        logger.info(f"  Indexed {done}/{n} jobs")
 
-            if done < n:
-                time.sleep(BATCH_DELAY)
-
-    finally:
-        conn.close()
+        if done < n:
+            time.sleep(BATCH_DELAY)
 
     return indexed
 
@@ -92,47 +86,30 @@ def build_ideal_vector(candidate_profile: str | None = None) -> list[float] | No
     Falls back to embedding `candidate_profile` (the CV summary) as a query vector when
     there's no applied-job history yet. Without this fallback, a new candidate's semantic
     retrieval step is skipped entirely (this function returned None) and the top-N pool
-    reaching the paid rerank/listwise stages ends up ordered by scrape recency
-    (`get_jobs_for_ranking`'s `ORDER BY created_at DESC`), not by fit — i.e. every new
-    candidate's first run was scored on an essentially arbitrary slice of the pool.
-    Returns None only when there's truly nothing to build a vector from (no applied jobs
-    and no candidate profile).
+    reaching the paid rerank/listwise stages ends up ordered by scrape recency, not by
+    fit — i.e. every new candidate's first run was scored on an essentially arbitrary
+    slice of the pool. Returns None only when there's truly nothing to build a vector
+    from (no applied jobs and no candidate profile).
     """
-    conn = get_connection()
-    try:
-        applied_rows = conn.execute("""
-            SELECT je.embedding FROM job_embeddings je
-            JOIN jobs j ON j.id = je.job_id
-            WHERE j.status = 'applied'
-        """).fetchall()
+    vectors = api_client.get("/api/embeddings/decision-vectors").json()
+    applied_vecs = vectors["applied"]
 
-        if not applied_rows:
-            if not candidate_profile:
-                return None
-            client = _get_client()
-            [vec] = client.embed([candidate_profile], input_type="query")
-            return vec
+    if not applied_vecs:
+        if not candidate_profile:
+            return None
+        client = _get_client()
+        [vec] = client.embed([candidate_profile], input_type="query")
+        return vec
 
-        applied_vecs = [json.loads(r["embedding"]) for r in applied_rows]
-        dim = len(applied_vecs[0])
-        centroid_a = [sum(v[i] for v in applied_vecs) / len(applied_vecs) for i in range(dim)]
+    dim = len(applied_vecs[0])
+    centroid_a = [sum(v[i] for v in applied_vecs) / len(applied_vecs) for i in range(dim)]
 
-        rejected_rows = conn.execute("""
-            SELECT je.embedding FROM job_embeddings je
-            JOIN jobs j ON j.id = je.job_id
-            WHERE j.status = 'rejected'
-        """).fetchall()
+    rejected_vecs = vectors["rejected"]
+    if not rejected_vecs:
+        return centroid_a
 
-        if not rejected_rows:
-            return centroid_a
-
-        rejected_vecs = [json.loads(r["embedding"]) for r in rejected_rows]
-        centroid_r = [sum(v[i] for v in rejected_vecs) / len(rejected_vecs) for i in range(dim)]
-
-        return [centroid_a[i] - 0.3 * centroid_r[i] for i in range(dim)]
-
-    finally:
-        conn.close()
+    centroid_r = [sum(v[i] for v in rejected_vecs) / len(rejected_vecs) for i in range(dim)]
+    return [centroid_a[i] - 0.3 * centroid_r[i] for i in range(dim)]
 
 
 def score_by_similarity(job_ids: list[str], ideal: list[float]) -> dict[str, float]:
@@ -141,14 +118,5 @@ def score_by_similarity(job_ids: list[str], ideal: list[float]) -> dict[str, flo
         return {}
 
     client = _get_client()
-    conn = get_connection()
-    try:
-        placeholders = ",".join("?" * len(job_ids))
-        rows = conn.execute(
-            f"SELECT job_id, embedding FROM job_embeddings WHERE job_id IN ({placeholders})",
-            job_ids,
-        ).fetchall()
-    finally:
-        conn.close()
-
-    return {r["job_id"]: client.cosine_similarity(ideal, json.loads(r["embedding"])) for r in rows}
+    vectors = api_client.post("/api/embeddings/vectors", json={"job_ids": job_ids}).json()
+    return {job_id: client.cosine_similarity(ideal, vec) for job_id, vec in vectors.items()}

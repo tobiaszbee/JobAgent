@@ -1,7 +1,15 @@
+import uuid
 from contextlib import contextmanager
 from unittest.mock import patch
 from db.repositories import job_repository
 from evaluator.runner import run
+
+
+def _unique_url(url: str) -> str:
+    """job_postings is shared/global and never truncated between tests — reusing
+    a literal url across tests would silently reuse another test's stale posting
+    fields (title/company) instead of creating a fresh one."""
+    return f"{url}?t={uuid.uuid4().hex}"
 
 
 def _insert_scoreable(url="https://example.com/1", **kwargs):
@@ -9,7 +17,7 @@ def _insert_scoreable(url="https://example.com/1", **kwargs):
     defaults = dict(title="PHP Developer", company="Acme Corp",
                     location="Poland", source="linkedin",
                     description="Symfony expertise required.")
-    return job_repository.insert(**{**defaults, "url": url, **kwargs})
+    return job_repository.insert(**{**defaults, "url": _unique_url(url), **kwargs})
 
 
 def _good_score(**overrides):
@@ -36,7 +44,7 @@ class TestEvaluatorRunner:
         assert result == {"jobs_scored": 0}
 
     def test_job_without_description_is_skipped(self):
-        job_repository.insert("No desc", "Co", "PL", "https://a.com/1", "linkedin")
+        job_repository.insert("No desc", "Co", "PL", _unique_url("https://a.com/1"), "linkedin")
         with _patched_run() as mock_score:
             run()
         mock_score.assert_not_called()
@@ -48,13 +56,13 @@ class TestEvaluatorRunner:
         assert result == {"jobs_scored": 0}
 
     def test_normal_scoring_sets_score_keeps_new_status(self):
-        _insert_scoreable()
+        job_id = _insert_scoreable()
         with _patched_run():
             result = run()
         assert result["jobs_scored"] == 1
-        jobs = job_repository.search()
-        assert jobs[0]["score"] == 7.5
-        assert jobs[0]["status"] == "new"
+        job = next(j for j in job_repository.search(status="all") if j["id"] == job_id)
+        assert job["score"] == 7.5
+        assert job["status"] == "new"
 
     def test_build_system_prompt_called_once_for_entire_batch(self):
         _insert_scoreable(url="https://a.com/1")
@@ -73,10 +81,11 @@ class TestEvaluatorRunner:
         mock_score.assert_not_called()
 
     def test_score_reason_stored_in_db(self):
-        _insert_scoreable()
+        job_id = _insert_scoreable()
         with _patched_run(_good_score(score_reason="Symfony match, remote OK")):
             run()
-        assert "Symfony match" in job_repository.search()[0]["score_reason"]
+        job = next(j for j in job_repository.search(status="all") if j["id"] == job_id)
+        assert "Symfony match" in job["score_reason"]
 
     def test_multiple_jobs_all_scored(self):
         _insert_scoreable(url="https://a.com/1")
@@ -86,36 +95,37 @@ class TestEvaluatorRunner:
         assert result["jobs_scored"] == 2
 
     def test_scoring_failure_leaves_job_unscored_for_retry(self):
-        _insert_scoreable()
+        job_id = _insert_scoreable()
         error_result = {"score": None, "score_reason": "API error: timeout"}
         with _patched_run(side_effect=[error_result]):
             result = run()
         assert result["jobs_scored"] == 0
-        job = job_repository.search()[0]
+        job = next(j for j in job_repository.search(status="all") if j["id"] == job_id)
         assert job["score"] is None
 
     def test_low_score_auto_rejects_job(self):
-        _insert_scoreable()
+        job_id = _insert_scoreable()
         with _patched_run(_good_score(score=0.5, score_reason="No PHP, wrong field entirely")):
             result = run()
         assert result["jobs_scored"] == 1
         assert result["jobs_auto_rejected"] == 1
-        job = job_repository.search()[0]
-        assert job["status"] == "auto_rejected"
+        job = next(j for j in job_repository.get_by_status("auto_rejected") if j["id"] == job_id)
         assert job["score"] == 0.5
 
     def test_score_at_threshold_is_auto_rejected(self):
-        _insert_scoreable()
+        job_id = _insert_scoreable()
         with _patched_run(_good_score(score=1.0)):
             run()
-        assert job_repository.search()[0]["status"] == "auto_rejected"
+        job = next(j for j in job_repository.search(status="all") if j["id"] == job_id)
+        assert job["status"] == "auto_rejected"
 
     def test_score_just_above_threshold_stays_new(self):
-        _insert_scoreable()
+        job_id = _insert_scoreable()
         with _patched_run(_good_score(score=1.5)):
             result = run()
         assert result["jobs_auto_rejected"] == 0
-        assert job_repository.search()[0]["status"] == "new"
+        job = next(j for j in job_repository.search(status="all") if j["id"] == job_id)
+        assert job["status"] == "new"
 
     def test_divergence_cases_passed_to_build_system_prompt(self):
         _insert_scoreable()

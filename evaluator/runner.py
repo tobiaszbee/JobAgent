@@ -4,7 +4,6 @@ import logging
 logger = logging.getLogger(__name__)
 
 from config import SCORING
-from db.migrations import init_db
 from db.repositories import job_repository, criteria_repository, preference_repository
 from evaluation.harness import divergence_cases
 from evaluator.dealbreakers import apply_dealbreaker_filter
@@ -17,8 +16,6 @@ _CALIBRATION_LIMIT = 10
 
 
 def run(force_rescore: bool = False) -> dict:
-    init_db()
-
     if force_rescore:
         unscored_jobs = job_repository.get_new_with_descriptions()
         if unscored_jobs:

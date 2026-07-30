@@ -14,7 +14,7 @@ sys.stdout.reconfigure(line_buffering=True)
 logging.basicConfig(level=logging.INFO, stream=sys.stdout, format="%(message)s")
 logger = logging.getLogger(__name__)
 
-from db.migrations import init_db
+import api_client
 from db.repositories import job_repository, preference_repository
 from embeddings.indexer import build_ideal_vector, score_by_similarity, index_jobs
 from ranker.reranker import rerank_jobs
@@ -23,8 +23,6 @@ from ranker.debate import debate_rank
 from ranker.would_apply import compute_would_apply
 from evaluator.profile import load_active_profile
 from config import RANKING
-
-init_db()
 
 try:
     candidate_profile = load_active_profile()
@@ -46,11 +44,7 @@ if len(jobs) == RANKING_POOL_LIMIT:
 print(f"Processing {len(jobs)} active job(s)...")
 
 # Step 1: Index any missing embeddings
-unindexed = []
-from db.connection import get_connection
-conn = get_connection()
-existing_ids = {r["job_id"] for r in conn.execute("SELECT job_id FROM job_embeddings").fetchall()}
-conn.close()
+existing_ids = set(api_client.get("/api/embeddings/ids").json()["job_ids"])
 unindexed = [j for j in jobs if j["id"] not in existing_ids]
 if unindexed:
     print(f"\nIndexing {len(unindexed)} new embedding(s)...")

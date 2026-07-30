@@ -7,7 +7,6 @@ from datetime import datetime, timedelta
 logger = logging.getLogger(__name__)
 
 from config import STEALTH
-from db.migrations import init_db
 from db.repositories import job_repository, session_repository, criteria_repository, search_stats_repository, excluded_search_queries_repository
 from collector.filters import apply_keyword_filter, title_banned_reason
 from collector.language_filter import apply_language_filter
@@ -284,8 +283,6 @@ def run(
     search_queries_override: list[str] | None = None,
     source_ids: list[str] | None = None,
 ) -> dict:
-    init_db()
-
     criteria = criteria_repository.get_active_dict()
     if titles:
         criteria["titles"] = titles

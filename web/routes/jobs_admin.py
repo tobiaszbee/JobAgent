@@ -1,9 +1,7 @@
 from flask import Blueprint, jsonify, request
 from db.repositories import job_repository, dismissed_item_repository
 
-# Local-only routes: bulk delete, dismissing a score item, and internal counts used
-# by the pipeline. Never registered in "web" deployment mode — see web/app.py and
-# web/routes/jobs.py's module docstring for why this is split out.
+# Bulk delete, score-item dismissal, and internal counts — split from jobs.bp for organization.
 bp = Blueprint("jobs_admin", __name__)
 
 

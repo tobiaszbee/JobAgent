@@ -5,11 +5,8 @@ import logging
 sys.stdout.reconfigure(line_buffering=True)
 logging.basicConfig(level=logging.INFO, stream=sys.stdout, format="%(message)s")
 
-from db.migrations import init_db
 from db.repositories import job_repository
 from evaluator.runner import run as evaluate
-
-init_db()
 
 jobs = job_repository.get_new_with_descriptions()
 if not jobs:

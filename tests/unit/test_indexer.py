@@ -1,30 +1,28 @@
 import json
+import uuid
 import pytest
 from unittest.mock import MagicMock, patch
 
-from db.connection import get_connection
+import api_client
+from db.repositories import job_repository
 from embeddings.client import VoyageClient
 from embeddings.indexer import _embed_with_retry, _job_to_text, build_ideal_vector, index_jobs, score_by_similarity
 
 
-def _insert_job(job_id: str, status: str = "new") -> None:
-    conn = get_connection()
-    conn.execute(
-        "INSERT INTO jobs (id, title, company, location, url, description, source, status) VALUES (?,?,?,?,?,?,?,?)",
-        (job_id, "Dev", "Corp", "Remote", f"https://a.com/{job_id}", "desc", "linkedin", status),
+def _insert_job(status: str = "new") -> str:
+    job_id = job_repository.insert(
+        title="Dev", company="Corp", location="Remote",
+        url=f"https://a.com/{uuid.uuid4().hex}", source="linkedin", description="desc",
     )
-    conn.commit()
-    conn.close()
+    if status != "new":
+        job_repository.update_status(job_id, status)
+    return job_id
 
 
 def _insert_embedding(job_id: str, vec: list[float]) -> None:
-    conn = get_connection()
-    conn.execute(
-        "INSERT INTO job_embeddings (job_id, embedding, model) VALUES (?,?,?)",
-        (job_id, json.dumps(vec), "voyage-3-large"),
-    )
-    conn.commit()
-    conn.close()
+    api_client.post("/api/embeddings", json={
+        "items": [{"job_id": job_id, "embedding": vec, "model": "voyage-3-large"}],
+    })
 
 
 class TestJobToText:
@@ -75,8 +73,8 @@ class TestBuildIdealVector:
         assert build_ideal_vector() is None
 
     def test_returns_centroid_when_no_rejected_jobs(self):
-        _insert_job("j1", status="applied")
-        _insert_embedding("j1", [1.0, 0.0])
+        j1 = _insert_job(status="applied")
+        _insert_embedding(j1, [1.0, 0.0])
 
         result = build_ideal_vector()
         assert result is not None
@@ -84,10 +82,10 @@ class TestBuildIdealVector:
         assert abs(result[1] - 0.0) < 1e-9
 
     def test_centroid_of_two_applied_jobs(self):
-        _insert_job("j1", status="applied")
-        _insert_job("j2", status="applied")
-        _insert_embedding("j1", [2.0, 4.0])
-        _insert_embedding("j2", [4.0, 0.0])
+        j1 = _insert_job(status="applied")
+        j2 = _insert_job(status="applied")
+        _insert_embedding(j1, [2.0, 4.0])
+        _insert_embedding(j2, [4.0, 0.0])
 
         result = build_ideal_vector()
         assert result is not None
@@ -98,10 +96,10 @@ class TestBuildIdealVector:
         # applied centroid: [2.0, 0.0]
         # rejected centroid: [0.0, 1.0]
         # ideal: [2.0 - 0.3*0.0, 0.0 - 0.3*1.0] = [2.0, -0.3]
-        _insert_job("ja", status="applied")
-        _insert_embedding("ja", [2.0, 0.0])
-        _insert_job("jr", status="rejected")
-        _insert_embedding("jr", [0.0, 1.0])
+        ja = _insert_job(status="applied")
+        _insert_embedding(ja, [2.0, 0.0])
+        jr = _insert_job(status="rejected")
+        _insert_embedding(jr, [0.0, 1.0])
 
         result = build_ideal_vector()
         assert result is not None
@@ -109,8 +107,7 @@ class TestBuildIdealVector:
         assert abs(result[1] - (-0.3)) < 1e-9
 
     def test_ignores_jobs_without_embeddings(self):
-        _insert_job("j1", status="applied")  # no embedding → skipped
-        # query returns zero rows → no applied embeddings → None
+        _insert_job(status="applied")  # no embedding → skipped
         assert build_ideal_vector() is None
 
     def test_no_applied_jobs_no_profile_returns_none(self):
@@ -129,8 +126,8 @@ class TestBuildIdealVector:
         mock_client.embed.assert_called_once_with(["CANDIDATE:\n- Senior PHP Developer"], input_type="query")
 
     def test_applied_history_takes_priority_over_profile_fallback(self):
-        _insert_job("j1", status="applied")
-        _insert_embedding("j1", [1.0, 0.0])
+        j1 = _insert_job(status="applied")
+        _insert_embedding(j1, [1.0, 0.0])
 
         result = build_ideal_vector(candidate_profile="CANDIDATE:\n- Senior PHP Developer")
 
@@ -187,11 +184,11 @@ class TestIndexJobs:
         mock_client.embed.return_value = [[0.1, 0.2], [0.3, 0.4]]
         mock_get_client.return_value = mock_client
 
-        _insert_job("j1")
-        _insert_job("j2")
+        j1 = _insert_job()
+        j2 = _insert_job()
         jobs = [
-            {"id": "j1", "title": "Dev A", "company": "Corp", "location": None, "description": "Python"},
-            {"id": "j2", "title": "Dev B", "company": "Corp", "location": None, "description": "Java"},
+            {"id": j1, "title": "Dev A", "company": "Corp", "location": None, "description": "Python"},
+            {"id": j2, "title": "Dev B", "company": "Corp", "location": None, "description": "Java"},
         ]
 
         count = index_jobs(jobs)
@@ -204,15 +201,12 @@ class TestIndexJobs:
         mock_client.embed.return_value = [[0.9, 0.1]]
         mock_get_client.return_value = mock_client
 
-        _insert_job("j1")
-        jobs = [{"id": "j1", "title": "Dev", "company": "Corp", "location": None, "description": "desc"}]
+        j1 = _insert_job()
+        jobs = [{"id": j1, "title": "Dev", "company": "Corp", "location": None, "description": "desc"}]
         index_jobs(jobs)
 
-        conn = get_connection()
-        row = conn.execute("SELECT embedding FROM job_embeddings WHERE job_id = ?", ("j1",)).fetchone()
-        conn.close()
-        assert row is not None
-        assert json.loads(row["embedding"]) == [0.9, 0.1]
+        vectors = api_client.post("/api/embeddings/vectors", json={"job_ids": [j1]}).json()
+        assert vectors[j1] == [0.9, 0.1]
 
 
 class TestScoreBySimilarity:
@@ -223,8 +217,8 @@ class TestScoreBySimilarity:
         assert score_by_similarity(["j1"], []) == {}
 
     def test_computes_cosine_similarity(self):
-        _insert_job("j1")
-        _insert_embedding("j1", [1.0, 0.0])
+        j1 = _insert_job()
+        _insert_embedding(j1, [1.0, 0.0])
 
         ideal = [1.0, 0.0]
 
@@ -233,16 +227,16 @@ class TestScoreBySimilarity:
             mock_client.cosine_similarity = VoyageClient.cosine_similarity
             mock_get.return_value = mock_client
 
-            scores = score_by_similarity(["j1"], ideal)
+            scores = score_by_similarity([j1], ideal)
 
-        assert "j1" in scores
-        assert abs(scores["j1"] - 1.0) < 1e-9
+        assert j1 in scores
+        assert abs(scores[j1] - 1.0) < 1e-9
 
     def test_missing_embedding_not_in_result(self):
-        _insert_job("j1")  # no embedding in DB
+        j1 = _insert_job()  # no embedding
 
         with patch("embeddings.indexer._get_client") as mock_get:
             mock_get.return_value = MagicMock()
-            scores = score_by_similarity(["j1"], [1.0, 0.0])
+            scores = score_by_similarity([j1], [1.0, 0.0])
 
         assert scores == {}

@@ -1,13 +1,16 @@
+import uuid
+
 from db.repositories import criteria_repository, job_repository
 from collector.filters import apply_keyword_filter, title_banned_reason
 
 
 def _insert_job(title="PHP Developer", company="Acme", description="Symfony expertise required.", url=None):
+    # uuid suffix: job_postings is shared/never-truncated, and this title default repeats across tests.
     return job_repository.insert(
         title=title,
         company=company,
         location="Remote",
-        url=url or f"https://example.com/{title.lower().replace(' ', '-')}",
+        url=url or f"https://example.com/{title.lower().replace(' ', '-')}-{uuid.uuid4().hex}",
         source="linkedin",
         description=description,
     )

@@ -13,6 +13,8 @@ Test scenarios:
   E3-4: RemoteOK poor match (staffing agency, outstaffing model)   → score <= 4
 """
 import os
+import uuid
+
 import pytest
 
 from db.repositories import job_repository, criteria_repository, cv_repository
@@ -30,6 +32,9 @@ pytestmark = [
         reason="Requires real ANTHROPIC_API_KEY",
     ),
 ]
+
+# job_postings is shared and never truncated — keeps urls from colliding across runs.
+_RUN_ID = uuid.uuid4().hex
 
 
 # ---------------------------------------------------------------------------
@@ -62,7 +67,7 @@ _JOB_E2_NO_REQUIRED_KEYWORDS = dict(
     title="Python Django Backend Developer",
     company="DataSoft Ltd",
     location="Europe",
-    url="https://test.example/e2-no-required",
+    url=f"https://test.example/e2-no-required-{_RUN_ID}",
     source="linkedin",
     description="""\
 DataSoft builds data processing pipelines for fintech clients across Europe.
@@ -85,7 +90,7 @@ _JOB_E2_REJECTED_KEYWORD = dict(
     title="PHP Developer Intern",
     company="CodeLearn Academy",
     location="Remote (Europe)",
-    url="https://test.example/e2-rejected-keyword",
+    url=f"https://test.example/e2-rejected-keyword-{_RUN_ID}",
     source="remoteok",
     description="""\
 CodeLearn Academy offers a 3-month PHP internship program for students and fresh graduates.
@@ -104,7 +109,7 @@ _JOB_E3_LINKEDIN_GREAT = dict(
     title="Senior PHP/Symfony Backend Developer",
     company="TechFlow Software",
     location="Poland / Europe (fully remote)",
-    url="https://test.example/e3-linkedin-great",
+    url=f"https://test.example/e3-linkedin-great-{_RUN_ID}",
     source="linkedin",
     description="""\
 TechFlow is a Warsaw-based product company building a SaaS invoicing platform
@@ -134,7 +139,7 @@ _JOB_E3_LINKEDIN_POOR = dict(
     title="PHP Developer",
     company="DevAgency Warsaw",
     location="Warsaw, Poland (on-site)",
-    url="https://test.example/e3-linkedin-poor",
+    url=f"https://test.example/e3-linkedin-poor-{_RUN_ID}",
     source="linkedin",
     description="""\
 We are a busy web agency looking for a PHP developer to join our team.
@@ -159,7 +164,7 @@ _JOB_E3_REMOTEOK_GREAT = dict(
     title="Senior PHP Developer (Symfony, remote)",
     company="CloudBase GmbH",
     location="Worldwide Remote",
-    url="https://test.example/e3-remoteok-great",
+    url=f"https://test.example/e3-remoteok-great-{_RUN_ID}",
     source="remoteok",
     description="""\
 CloudBase is a German product company building cloud infrastructure tooling.
@@ -184,7 +189,7 @@ _JOB_E3_REMOTEOK_POOR = dict(
     title="PHP Developer - Remote",
     company="StaffingGroup International",
     location="Remote",
-    url="https://test.example/e3-remoteok-poor",
+    url=f"https://test.example/e3-remoteok-poor-{_RUN_ID}",
     source="remoteok",
     description="""\
 StaffingGroup is a global IT staffing and outstaffing provider.
@@ -209,7 +214,7 @@ Outstaffing model — you will work for our clients, not for us directly.
 # Fixtures
 # ---------------------------------------------------------------------------
 @pytest.fixture(autouse=True)
-def pipeline_fixtures(test_db):
+def pipeline_fixtures():
     cv_repository.insert("test_cv.pdf", "Senior PHP developer CV", _CV_PARSED)
     for criteria_type, values in _CRITERIA.items():
         for value in values:

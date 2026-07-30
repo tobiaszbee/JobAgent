@@ -12,11 +12,8 @@ sys.stdout.reconfigure(line_buffering=True)
 logging.basicConfig(level=logging.INFO, stream=sys.stdout, format="%(message)s")
 logger = logging.getLogger(__name__)
 
-from db.migrations import init_db
 from db.repositories import job_repository
 from config import SCORING
-
-init_db()
 
 threshold = SCORING["auto_reject_at_or_below"]
 jobs = job_repository.search(status="new")

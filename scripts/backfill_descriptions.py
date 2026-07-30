@@ -2,13 +2,11 @@
 for LinkedIn, direct for everything else)."""
 import sys
 
-from db.migrations import init_db
 from db.repositories import job_repository
 from collector.runner import _fetch_descriptions_stealthily, _fetch_descriptions_directly
 
 sys.stdout.reconfigure(line_buffering=True)
 
-init_db()
 missing = job_repository.get_missing_descriptions()
 total = len(missing)
 

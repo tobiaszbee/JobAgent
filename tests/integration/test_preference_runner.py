@@ -1,3 +1,4 @@
+import uuid
 from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
@@ -5,11 +6,18 @@ from db.repositories import job_repository, preference_repository, dismissed_ite
 from preference_agent.runner import run
 
 
+def _unique_url(url: str) -> str:
+    """job_postings is shared/global and never truncated between tests — reusing
+    a literal url would reuse another test's stale posting fields instead of
+    creating a fresh one for this test."""
+    return f"{url}?t={uuid.uuid4().hex}"
+
+
 def _insert_applied(url="https://example.com/applied/1", **kwargs):
     defaults = dict(title="Senior PHP Dev", company="ProductCo",
                     location="Remote", source="linkedin",
                     description="Product SaaS, B2B, async remote.")
-    job_id = job_repository.insert(**{**defaults, "url": url, **kwargs})
+    job_id = job_repository.insert(**{**defaults, "url": _unique_url(url), **kwargs})
     job_repository.update_status(job_id, "applied")
     return job_id
 
@@ -18,7 +26,7 @@ def _insert_rejected(url="https://example.com/rejected/1", rejection_reason="age
     defaults = dict(title="PHP Developer", company="AgencyCo",
                     location="Remote", source="linkedin",
                     description="Outsourcing agency.")
-    job_id = job_repository.insert(**{**defaults, "url": url, **kwargs})
+    job_id = job_repository.insert(**{**defaults, "url": _unique_url(url), **kwargs})
     job_repository.update_status(job_id, "rejected", rejection_reason=rejection_reason)
     return job_id
 
@@ -181,7 +189,7 @@ class TestPreferenceRunner:
         # still be enough to run distillation, not just apply/reject decisions.
         jid = job_repository.insert(
             title="Dev", company="Corp", location="Remote", source="linkedin",
-            url="https://example.com/dismiss/1", description="PHP role.",
+            url=_unique_url("https://example.com/dismiss/1"), description="PHP role.",
         )
         dismissed_item_repository.insert(jid, "con", "UK-based, timezone concern", "not an issue for me")
         with _patched_api() as (mock_client, _):
@@ -193,7 +201,7 @@ class TestPreferenceRunner:
         _insert_applied()
         job_id = job_repository.insert(
             title="Dev", company="Corp", location="Remote", source="linkedin",
-            url="https://example.com/dismiss/2", description="PHP role.",
+            url=_unique_url("https://example.com/dismiss/2"), description="PHP role.",
         )
         dismissed_item_repository.insert(job_id, "con", "UK-based, timezone concern", "not an issue for me")
         with _patched_api() as (mock_client, _):
@@ -209,7 +217,7 @@ class TestPreferenceRunner:
         preference_repository.save(_SIGNALS, applied_count=1, rejected_count=1, dismissed_count=0)
         job_id = job_repository.insert(
             title="Dev", company="Corp", location="Remote", source="linkedin",
-            url="https://example.com/dismiss/3", description="PHP role.",
+            url=_unique_url("https://example.com/dismiss/3"), description="PHP role.",
         )
         dismissed_item_repository.insert(job_id, "con", "New concern", "reason")
         with _patched_api() as (mock_client, _):
@@ -222,7 +230,7 @@ class TestPreferenceRunner:
         _insert_rejected()
         job_id = job_repository.insert(
             title="Dev", company="Corp", location="Remote", source="linkedin",
-            url="https://example.com/dismiss/4", description="PHP role.",
+            url=_unique_url("https://example.com/dismiss/4"), description="PHP role.",
         )
         dismissed_item_repository.insert(job_id, "con", "A concern", "reason")
         preference_repository.save(_SIGNALS, applied_count=1, rejected_count=1, dismissed_count=1)

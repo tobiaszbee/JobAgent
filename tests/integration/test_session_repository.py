@@ -1,5 +1,6 @@
 import time
 from db.repositories import session_repository
+from web.routes.runner import _days_since_last_run
 
 
 class TestStart:
@@ -78,3 +79,11 @@ class TestGetLatest:
         assert "id" in latest
         assert "status" in latest
         assert "started_at" in latest
+
+
+class TestDaysSinceLastRunAgainstRealApi:
+    # Regression guard: JobAgentWeb serializes finished_at as ISO, not SQLite's old space-separated format.
+    def test_freshly_finished_session_reports_one_day(self):
+        sid = session_repository.start()
+        session_repository.finish(sid, jobs_found=1, jobs_scored=1)
+        assert _days_since_last_run() == 1

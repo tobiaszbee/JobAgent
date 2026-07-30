@@ -88,11 +88,8 @@ def main() -> int:
 
         logger.info(f"\nCollector result: found={c_result['jobs_found']}  new={c_result['jobs_new']}")
 
-        # Extraction runs BEFORE evaluation: evaluator/dealbreakers.py's pre-LLM filter
-        # reads structured_data, and a job never re-enters the "unscored" pool once the
-        # evaluator scores it — so extraction has to happen first, or the dealbreaker
-        # filter always sees empty structured_data for freshly-collected jobs and never
-        # gets a second chance.
+        # Must precede EVALUATOR — dealbreakers.py reads structured_data, and a job
+        # never re-enters the unscored pool once scored.
         logger.info("\n=== EXTRACTOR ===")
         try:
             from db.repositories import job_repository as _jr

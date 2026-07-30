@@ -8,13 +8,10 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from db.migrations import init_db
 from collector.query_pruning import prune_queries
 
 logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stdout)
 logger = logging.getLogger(__name__)
-
-init_db()
 
 newly_excluded = prune_queries()
 if not newly_excluded:

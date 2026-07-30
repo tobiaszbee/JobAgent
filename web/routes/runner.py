@@ -43,7 +43,7 @@ def _days_since_last_run() -> int:
     if not last_finished:
         return _DEFAULT_DAYS_NO_PRIOR_RUN
     try:
-        last_dt = datetime.strptime(last_finished, "%Y-%m-%d %H:%M:%S")
+        last_dt = datetime.fromisoformat(last_finished)
     except ValueError:
         return _DEFAULT_DAYS_NO_PRIOR_RUN
     hours_elapsed = (datetime.utcnow() - last_dt).total_seconds() / 3600
@@ -60,16 +60,9 @@ def _is_run_active() -> bool:
 
 
 class _RunGuard:
-    """Marks a websocket-triggered run (agent/backfill/rescore/reevaluate/rank — they
-    all share the same _agent_process global) as active for the guard's *entire*
-    lifetime, not just until the first subprocess spawns. The old pattern only held
-    _lock around the initial _is_run_active() check, then released it before
-    ws.receive() (which can block indefinitely on a slow client) and before
-    _run_script() actually set _agent_process — so two near-simultaneous websocket
-    connections could both pass the check before either process existed. A multi-stage
-    run (agent_ws's collector → extractor → evaluator → ... sequence) had the same gap
-    between stages, however briefly, since _agent_process briefly points at an
-    already-exited Popen between _run_script() calls. Usage: `with _RunGuard() as
+    """Holds _run_active for the guard's entire lifetime (not just until the first
+    subprocess spawns), closing the race where two near-simultaneous websocket
+    connections could both pass the active-run check. Usage: `with _RunGuard() as
     acquired: if not acquired: ...bail out...`."""
 
     def __enter__(self) -> bool:
@@ -196,15 +189,9 @@ def _latest_log() -> str | None:
     return files[-1] if files else None
 
 
-# Stages run after a successful collection, in order: (header, script path, args).
-# Pulled out as a plain function (rather than inlined in agent_ws) so the sequence —
-# in particular that EXTRACTOR sits BEFORE EVALUATOR — is unit-testable without a
-# websocket. EXTRACTOR must run first: evaluator/dealbreakers.py's pre-LLM filter
-# reads structured_data, and jobs never re-enter the "unscored" pool once the
-# evaluator scores them — so if extraction ran after evaluation, freshly-collected
-# jobs would always hit the dealbreaker filter with no structured_data yet, and
-# never get a second chance. Running extraction first means listwise ranking also
-# always sees fresh structured_data tags, as a side benefit.
+# Stages run after a successful collection: (header, script path, args). EXTRACTOR must
+# precede EVALUATOR — dealbreakers.py reads structured_data, and a job never re-enters
+# the unscored pool once scored, so extracting later would miss it permanently.
 def _post_collect_stages() -> list[tuple[str, str, list[str]]]:
     return [
         ("DISTILL PREFERENCES", os.path.join(ROOT, "scripts", "distill_preferences.py"), []),

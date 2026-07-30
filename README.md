@@ -2,6 +2,8 @@
 
 An AI-powered job search assistant that collects remote job listings, ranks them with a multi-stage AI pipeline, and learns your preferences from your apply/reject decisions over time.
 
+JobAgent is a local, single-user client with **no database of its own** — every read and write goes through [JobAgentWeb](../JobAgentWeb), the Postgres-backed API service that owns all data. This split lets the scraped job pool be shared across users while each user's scoring/ranking/decisions stay private.
+
 ---
 
 ## Table of Contents
@@ -23,7 +25,7 @@ An AI-powered job search assistant that collects remote job listings, ranks them
 ┌─────────────────────────────────────────────────────────────────────────┐
 │  COLLECTION                                                             │
 │  LinkedIn + job boards → keyword/language filter → fetch descriptions  │
-│  → SQLite                                                               │
+│  → JobAgentWeb (Postgres, shared job pool)                              │
 └──────────────────────────────┬──────────────────────────────────────────┘
                                │ new jobs with descriptions
 ┌──────────────────────────────▼──────────────────────────────────────────┐
@@ -71,6 +73,7 @@ Each run makes the next one smarter: your decisions feed the preference distille
 - [Anthropic API key](https://console.anthropic.com/) — Claude Sonnet, Haiku, Opus
 - [Voyage AI API key](https://www.voyageai.com/) — embeddings + reranker
 - A LinkedIn account
+- A running [JobAgentWeb](../JobAgentWeb) instance, reachable from this machine (see below)
 
 ### Installation
 
@@ -94,7 +97,22 @@ Edit `.env`:
 ```
 ANTHROPIC_API_KEY=sk-ant-...
 VOYAGE_API_KEY=pa-...
+JOBAGENTWEB_BASE_URL=http://10.66.0.1:8000   # only if different from the default
 ```
+
+`ANTHROPIC_API_KEY` and `VOYAGE_API_KEY` are required at import time — `config.py` raises immediately if either is missing, so nothing (not even the dashboard) starts without both set.
+
+`JOBAGENTWEB_BASE_URL` defaults to a WireGuard-tunneled address, **not** a public HTTPS URL — if JobAgentWeb sits behind a reverse proxy with HTTP basic auth in front of it (as on the reference deployment), that auth blocks API traffic exactly like it blocks a browser, since there's no way for it to tell the two apart. Point this at whatever address reaches JobAgentWeb without hitting that wall — a private tunnel, an internal network address, or a version of the proxy that lets `/api/*` through unauthenticated in favor of JobAgentWeb's own session login.
+
+### Log in
+
+Before running anything, authenticate this installation against JobAgentWeb once:
+
+```bash
+python scripts/login.py
+```
+
+This prompts for a JobAgentWeb username/password and saves a session cookie to `~/.jobagent/session.json`, reused by every script and the local dashboard afterward. No account yet? Register at `<JOBAGENTWEB_BASE_URL>/register` first.
 
 ### Start the dashboard
 
@@ -114,15 +132,15 @@ On first visit you land on a landing page and are routed to `/questionnaire`. Up
 
 | Section | Feeds into |
 |---------|-----------|
-| Work mode & location | Remote countries / hybrid-onsite cities — drives the deterministic remote-only dealbreaker filter and the dashboard's Countries/Cities filters |
+| Work mode & location | Remote countries / hybrid-onsite cities — drives the deterministic remote-only dealbreaker filter, the collector's search locations, and the dashboard's Countries/Cities filters |
 | Compensation | Annual salary floor + currency — drives the deterministic salary-floor dealbreaker filter (job pay is normalized to annual before comparing, whatever period it's quoted in) |
-| Seniority & role | Soft scoring context |
+| Seniority & role | Soft scoring context; also feeds auto-derived search queries |
 | Company | Preferred company type/product-vs-outsourcing — soft scoring context |
-| Technologies (required / avoid) | Hard/soft keyword signal |
+| Technologies (required / avoid) | Auto-derived search titles + the rejected-keyword filter |
 | Languages | Auto-rejects postings whose detected language doesn't match any you listed |
 | Anything else | Free-text notes injected into the candidate profile |
 
-Every section is optional except the CV — leave one blank and it's simply not used as a filter or signal, never treated as a violation.
+Every section is optional except the CV — leave one blank and it's simply not used as a filter or signal, never treated as a violation. Saving the questionnaire also regenerates the collector's search criteria (titles derived by Claude from your tech/role/seniority, locations from work mode, rejected keywords from avoided tech) — there's no separate criteria-editing UI; it's fully driven by this form.
 
 ### Step 2 — First Run Agent
 
@@ -192,7 +210,7 @@ Everything below lives in the **Actions** modal (header, next to Run agent):
 | **Re-evaluate auto-rejected** | After changing keywords/preferences — re-runs the filters + scoring on all auto-rejected jobs |
 | **Fetch missing descriptions** | Retries jobs collected without a description; badge shows how many are pending |
 | **Change criteria** | Back to `/questionnaire` |
-| **Delete jobs** | Bulk-delete by status and date range |
+| **Delete jobs** | Bulk-delete by status and date range — removes them from *your* view only; a posting other users have found stays in the shared pool |
 
 ---
 
@@ -246,77 +264,13 @@ Below that, **"What the agent learned"** renders the distilled preference profil
 
 ## Technical deep-dive
 
-### Database schema
+### Data ownership
 
-All state lives in `data/agent.db` (SQLite). Key tables:
+JobAgent holds no database. Every `db/repositories/*.py` module is a thin wrapper over `api_client.py`, which makes authenticated HTTP calls to JobAgentWeb. The schema itself — `job_postings`/`job_embeddings` (shared across every user) plus `user_job_states` and everything else (per-user) — lives in [JobAgentWeb's `migrations.py`](../JobAgentWeb/migrations.py); see that repo's README for the full table layout.
 
-```sql
-jobs (
-    id               TEXT PRIMARY KEY,    -- hash of the url
-    url, title, company, location, source TEXT,
-    status           TEXT,                -- new|reviewed|applied|rejected|auto_rejected
-    score            REAL,                -- overall Sonnet score, 0-10
-    score_reason     TEXT,                -- one-sentence Sonnet summary (also holds the
-                                           -- dealbreaker-filter reason for auto-rejected jobs)
-    score_breakdown  TEXT,                -- JSON: {sub_scores, pros, cons} from the scorer
-    rejection_reason TEXT,                -- user-written reason (manual rejects only)
-    structured_data  TEXT,                -- JSON from Haiku extractor
-    embedding_score  REAL,                -- cosine similarity to ideal vector
-    rerank_score     REAL,                -- Voyage cross-encoder score
-    listwise_rank    INTEGER,             -- Opus rank (1 = best), post-debate
-    rank_reason      TEXT,                -- Opus per-job reasoning
-    debate_flag      TEXT,                -- dealbreaker_risk|overrated|underrated|NULL
-    debate_note      TEXT,                -- one-sentence second-opinion note
-    description      TEXT,
-    created_at, updated_at DATETIME
-)
-
-job_embeddings (
-    job_id     TEXT PRIMARY KEY,
-    embedding  TEXT,                     -- JSON float array, 1024-dim
-    model      TEXT
-)
-
-preference_profiles (
-    id              INTEGER PRIMARY KEY,
-    content         TEXT,                -- JSON list of ProfileSignal (or legacy plain text)
-    content_format  TEXT,                -- 'json' | 'text'
-    applied_count   INTEGER,
-    rejected_count  INTEGER,
-    updated_at      DATETIME
-)
-
-candidate_preferences (
-    id                       INTEGER PRIMARY KEY,
-    cv_profile_id            INTEGER REFERENCES cv_profiles(id),
-    work_mode                TEXT,        -- JSON array: ["remote","hybrid","onsite"]
-    remote_countries         TEXT,        -- JSON array
-    hybrid_cities            TEXT,        -- JSON array
-    salary_min, salary_max   INTEGER,     -- annual, gross
-    salary_currency          TEXT,
-    seniority_levels, role_types,
-    preferred_company_types, excluded_company_types,
-    preferred_industries, excluded_industries,
-    extra_tech, avoided_tech, languages  TEXT,  -- JSON arrays
-    open_notes               TEXT,
-    is_active                INTEGER,
-    created_at               DATETIME
-)                                        -- from the /questionnaire flow; every field optional
-
-criteria (
-    id, type, value, is_active, created_at  -- search_query|title|location|rejected|required|preferred
-)                                            -- collector search-dimension config — see note below
-
-usage_log (
-    model, module   TEXT,
-    input_tokens    INTEGER,
-    output_tokens   INTEGER,
-    cost_usd        REAL,
-    created_at      DATETIME
-)
-```
-
-> **Known gap:** `criteria` (search phrases, required/rejected keywords) still drives `collector/runner.py` and the keyword pre-filter, and its CRUD API (`/api/criteria`, `web/routes/criteria.py`) is still registered — but nothing in the current UI (`/questionnaire`, dashboard) writes to it anymore. It's only reachable by calling the API directly. Worth resolving as part of a business-logic pass.
+Two consequences worth knowing:
+- **"Delete jobs"** removes rows from *your* `user_job_states` only — the underlying shared posting stays untouched for other users who've found the same URL.
+- **Every script needs a valid session** (`python scripts/login.py`) — there is no local fallback if JobAgentWeb is unreachable.
 
 ### Pipeline stages in detail
 
@@ -324,8 +278,7 @@ usage_log (
 
 `collector/runner.py` orchestrates all sources. Each source implements `JobSource.search(title, location, days_back, max_results, known_urls)` and returns `RawJob` objects. After collection:
 
-- Jobs are deduplicated by URL (primary) and title+company hash (secondary)
-- Existing jobs are skipped; only new ones are inserted with `status='new'`
+- Jobs are deduplicated by URL only (JobAgentWeb's shared `job_postings` table enforces this) — existing postings are skipped; only new ones are inserted
 - New LinkedIn jobs are checked against `rejected` keywords **by title alone** before a description is fetched — a job that's already doomed never costs a page load (`collector/filters.py → title_banned_reason`)
 - LinkedIn descriptions are fetched with Playwright, with delays that scale to what's actually happening on the page instead of a flat random range
 
@@ -376,6 +329,7 @@ Because bare `"PHP"`/`"Python"` is a superset of `"PHP Developer"`, `"PHP Engine
 Inputs:
 - All `applied` jobs (title, company, location, description up to 1500 chars)
 - Up to 50 most recent `rejected` jobs with user-written rejection reasons
+- Dismissed score factors — specific pros/cons the candidate explicitly said don't apply to them
 - Up to 10 divergence cases: jobs ranked ≤ 5 by Opus but rejected by user, or ranked ≥ 16 but applied to (strongest learning signal)
 
 Output — a list of `ProfileSignal` objects:
@@ -388,7 +342,7 @@ NEUTRAL[contract_form; no_signal]
 
 Confidence levels: `ABSOLUTE > HIGH > MEDIUM > LOW`. `NEUTRAL` signals are stripped before being injected into the scorer.
 
-The distiller skips if `applied_count` and `rejected_count` are unchanged since the last saved profile.
+The distiller skips if `applied_count`, `rejected_count`, and `dismissed_count` are all unchanged since the last saved profile.
 
 Distillation is triggered as a pipeline step — not on every decision:
 - At the start of **Run Agent** (before scoring new jobs)
@@ -413,7 +367,7 @@ Extracts per-job JSON from the description (first 3000 chars):
 }
 ```
 
-Fields default to `null` when not explicitly stated — no inference. `salary_period` (hourly/monthly/yearly) exists specifically so a B2B hourly rate is never silently mistaken for an annual figure downstream. Stored in `jobs.structured_data` as JSON. Powers the clickable badge/filter dimensions in the dashboard.
+Fields default to `null` when not explicitly stated — no inference. `salary_period` (hourly/monthly/yearly) exists specifically so a B2B hourly rate is never silently mistaken for an annual figure downstream. Stored via JobAgentWeb as JSON on the shared posting (`job_postings.structured_data`) — extracted once, reused by every user who has the same job. Powers the clickable badge/filter dimensions in the dashboard.
 
 #### 4. Dealbreaker pre-filter
 
@@ -440,20 +394,20 @@ Output (`submit_score` tool):
   "score_reason": "Strong stack and seniority fit at a solid product company."
 }
 ```
-`overall_score` is the model's own holistic judgment — never a formula over `sub_scores`, since non-linear reasoning (dealbreaker penalties, MUST-HAVE logic) needs to stay possible. `sub_scores`/`pros`/`cons` are for dashboard transparency, stored as JSON in `jobs.score_breakdown`.
+`overall_score` is the model's own holistic judgment — never a formula over `sub_scores`, since non-linear reasoning (dealbreaker penalties, MUST-HAVE logic) needs to stay possible. `sub_scores`/`pros`/`cons` are for dashboard transparency, stored as JSON (`score_breakdown`).
 
 #### 6. Embeddings
 
 `embeddings/indexer.py` + `embeddings/client.py` — **Voyage voyage-3-large**, 1024-dim.
 
-Each job is embedded as: `"{title} at {company}\n{description[:2000]}"` with `input_type="document"`.
+Each job is embedded as: `"{title} at {company}\n{description[:2000]}"` with `input_type="document"`. Vectors are stored via JobAgentWeb's shared `job_embeddings` table — computed once per posting, reused by every user.
 
 The **ideal candidate vector** is computed from your feedback:
 ```
 ideal = centroid(applied_embeddings) − 0.3 × centroid(rejected_embeddings)
 ```
 
-The 0.3 weight on rejected embeddings pushes the ideal vector away from job types you've rejected without over-correcting. Each new job is scored by cosine similarity to this vector → stored as `embedding_score`.
+The 0.3 weight on rejected embeddings pushes the ideal vector away from job types you've rejected without over-correcting. Falls back to embedding the CV summary when there's no applied-job history yet, so a new candidate's first run still gets semantic ranking instead of arbitrary scrape-recency order. Each new job is scored by cosine similarity to this vector → stored as `embedding_score`.
 
 #### 7. Cross-encoder rerank
 
@@ -489,7 +443,11 @@ The critic sees the current order plus each job's `rank_reason` and `score_break
 - `dealbreaker_risk` — the primary ranking likely missed a real dealbreaker (e.g. stack similarity masking a seniority or company-type mismatch) → **demoted to the bottom** of the shortlist, `listwise_rank` renumbered accordingly
 - `overrated` / `underrated` — surfaced as a note on the card, doesn't reorder anything
 
-Most jobs get no flag at all — the prompt explicitly discourages flagging just to have something to say. Flag + note are stored in `jobs.debate_flag` / `jobs.debate_note` and shown as a "Second opinion" callout on the dashboard.
+Most jobs get no flag at all — the prompt explicitly discourages flagging just to have something to say. Flag + note are stored (`debate_flag` / `debate_note`) and shown as a "Second opinion" callout on the dashboard.
+
+#### 10. Would-apply flag
+
+`ranker/would_apply.py` — phase 1 of an eventual auto-apply feature. Flags jobs the agent would apply to, purely for the candidate to validate — **never sends anything**. Gate is an absolute score floor (`config.WOULD_APPLY["score_floor"]`, currently 7.0), not a relative top-N cut, so a weak ranking run yields zero flagged jobs instead of always flagging "the best of a bad batch." A `dealbreaker_risk` debate flag always suppresses the would-apply flag.
 
 #### Evaluation metrics
 
@@ -499,6 +457,7 @@ Most jobs get no flag at all — the prompt explicitly discourages flagging just
 - **Divergence cases** — jobs where ranking and user decision strongly disagree:
   - `rank ≤ 5` + `status = rejected` → false positive (Opus liked it, you didn't)
   - `rank ≥ 16` + `status = applied` → false negative (Opus missed a good one)
+- **Would-apply precision** — of jobs flagged would_apply, what fraction were actually applied to (vs rejected)?
 
 Divergence cases are fed back into the next distillation run as high-priority signals.
 
@@ -510,8 +469,8 @@ Divergence cases are fed back into the next distillation run as high-priority si
 | Extraction | Haiku 4.5 | ~$0.001/job |
 | Dealbreaker filter | — (deterministic) | free |
 | Scoring | Sonnet 4.6 | ~$0.007/job |
-| Embedding | Voyage voyage-3-large | $0.06/1M tokens |
-| Reranking | Voyage rerank-2 | $0.05/1K queries |
+| Embedding | Voyage voyage-3-large | $0.18/1M tokens |
+| Reranking | Voyage rerank-2 | $0.05/1M tokens |
 | Listwise rank | Opus 4.8 | ~$0.40/run (top-20 jobs) |
 | Debate / second opinion | Sonnet 4.6 | ~$0.02/run (top-20 jobs, single call) |
 
@@ -519,7 +478,7 @@ Divergence cases are fed back into the next distillation run as high-priority si
 
 ### Cost tracking
 
-Every API call logs to `usage_log`. The dashboard's Cost panel shows cost per 100 jobs, today's spend, and all-time spend. The `MODEL_COSTS` dict in `config.py` holds the rates — update it if pricing changes.
+Every API call logs usage through JobAgentWeb. The dashboard's Cost panel shows cost per 100 jobs, today's spend, and all-time spend. The `MODEL_COSTS` dict in `config.py` holds the rates — update it if pricing changes.
 
 ---
 
@@ -528,26 +487,28 @@ Every API call logs to `usage_log`. The dashboard's Cost panel shows cost per 10
 ```
 JobAgent/
 ├── config.py                       # API keys, models, stealth timings, ranking params
+├── api_client.py                   # HTTP client for JobAgentWeb — session cookie, retries, error translation
 ├── collector/
 │   ├── base.py                     # JobSource ABC + RawJob dataclass
 │   ├── filters.py                  # Title pre-filter (before fetch) + full rejected/required filter (after)
 │   ├── language_filter.py          # Detects posting language, auto-rejects against candidate's languages
 │   ├── location.py                 # Shared location-matching for API-based (non-LinkedIn) sources
+│   ├── query_pruning.py            # Auto-excludes reject-heavy or zero-yield search queries
 │   ├── utils.py                    # HTML→text excerpt builder shared by scorer/debate prompts
-│   ├── runner.py                   # Orchestrates sources → descriptions → DB
+│   ├── runner.py                   # Orchestrates sources → descriptions → JobAgentWeb
 │   └── sources/
 │       ├── linkedin.py             # Playwright + system Chrome, stealth delays
 │       ├── weworkremotely.py       # RSS feed
 │       ├── remotive.py             # JSON API
 │       ├── remoteok.py             # JSON API
 │       ├── workingnomads.py        # JSON API
-│       ├── justjoin.py             # justjoin.it — JSON API
-│       ├── theprotocol.py          # theprotocol.it — JSON API
-│       ├── itpracuj.py             # it.pracuj.pl — JSON API
-│       ├── nofluffjobs.py          # NoFluffJobs — JSON API
-│       └── solidjobs.py            # SOLID.Jobs — JSON API
+│       ├── justjoin.py             # justjoin.it — embedded JSON + Playwright for descriptions
+│       ├── theprotocol.py          # theprotocol.it — Playwright (Cloudflare-gated)
+│       ├── itpracuj.py             # it.pracuj.pl — Playwright (Cloudflare-gated)
+│       ├── nofluffjobs.py          # NoFluffJobs — plain HTTP, Angular TransferState JSON
+│       └── solidjobs.py            # SOLID.Jobs — plain HTTP, vendor Accept headers
 ├── evaluator/
-│   ├── profile.py                  # Load CV profile from DB
+│   ├── profile.py                  # Load CV profile via api_client
 │   ├── scorer.py                   # Sonnet prompt builder + tool-use scoring (sub-scores/pros/cons)
 │   ├── dealbreakers.py             # Deterministic pre-LLM salary-floor / remote-only filter
 │   └── runner.py                   # Extract → dealbreaker filter → score unscored jobs
@@ -559,48 +520,55 @@ JobAgent/
 ├── ranker/
 │   ├── reranker.py                 # Voyage cross-encoder rerank (top-50 → top-20)
 │   ├── listwise.py                 # Opus listwise ranking (top-20 → ordered list)
-│   └── debate.py                   # Sonnet second opinion over the top-20; demotes dealbreaker_risk
+│   ├── debate.py                   # Sonnet second opinion over the top-20; demotes dealbreaker_risk
+│   └── would_apply.py              # Absolute-floor auto-apply flag (validation only, never sends)
 ├── preference_agent/
 │   ├── profile.py                  # ProfileSignal schema + render_signals()
-│   └── runner.py                   # Distill apply/reject history → JSON profile
+│   └── runner.py                   # Distill apply/reject/dismissal history → JSON profile
 ├── evaluation/
-│   └── harness.py                  # Precision@K, divergence cases
+│   └── harness.py                  # Precision@K, divergence cases, would-apply precision
 ├── query_expansion/
 │   └── runner.py                   # Suggest new search queries from applied jobs
 ├── db/
-│   ├── connection.py               # SQLite connection factory
-│   ├── migrations.py               # Schema init + ALTER TABLE migrations
-│   ├── types.py                    # TypedDicts: JobRow, ScoreResult, ProfileSignal
-│   └── repositories/
-│       ├── job_repository.py       # jobs CRUD, search, feedback, ranking scores
-│       ├── criteria_repository.py  # collector search-dimension config (see "known gap" above)
+│   ├── types.py                    # TypedDicts: JobRow, ScoreResult, etc.
+│   └── repositories/                # Thin api_client.py wrappers — no local persistence anywhere here
+│       ├── job_repository.py
+│       ├── criteria_repository.py
 │       ├── candidate_preferences_repository.py  # /questionnaire preferences
 │       ├── cv_repository.py
 │       ├── preference_repository.py
+│       ├── dismissed_item_repository.py
+│       ├── excluded_search_queries_repository.py
 │       ├── search_stats_repository.py
 │       ├── session_repository.py
 │       └── usage_repository.py     # API cost tracking
 ├── scripts/
+│   ├── login.py                    # Authenticate against JobAgentWeb once; saves session cookie
 │   ├── run_all.py                  # CLI: full pipeline
 │   ├── rescore_new.py              # Re-score new jobs only
 │   ├── distill_preferences.py      # Run distillation once
 │   ├── rank_jobs.py                # Run embed + rerank + listwise + debate only
 │   ├── extract_jobs.py             # Backfill structured extraction for all jobs
 │   ├── index_embeddings.py         # Backfill embeddings for all jobs
+│   ├── reindex_embeddings.py       # Recompute embeddings for jobs that already have one
 │   ├── backfill_descriptions.py    # Retry jobs with missing descriptions
+│   ├── cleanup_low_score_new.py    # One-off: auto-reject already-scored 'new' jobs below threshold
+│   ├── prune_search_queries.py     # Evaluate + auto-exclude reject-heavy/zero-yield search queries
 │   └── reevaluate_rejected.py      # Re-run filter + scoring on auto-rejected jobs
 ├── web/
 │   ├── app.py                      # Flask app factory; landing → questionnaire → dashboard routing
 │   ├── routes/
 │   │   ├── jobs.py                 # /api/jobs, /api/stats, status updates
+│   │   ├── jobs_admin.py           # Bulk delete, score-item dismissal, internal counts
 │   │   ├── runner.py               # WebSocket streams for all pipeline actions
-│   │   ├── criteria.py             # /api/criteria (see "known gap" above — API-only, no UI)
-│   │   ├── candidate_preferences.py# /api/candidate-preferences — the questionnaire
+│   │   ├── criteria.py             # /api/criteria — CRUD used internally by candidate_preferences.py
+│   │   ├── candidate_preferences.py# /api/candidate-preferences — the questionnaire, syncs criteria
 │   │   ├── preferences.py          # /api/preferences — learned profile + distill trigger
 │   │   ├── cv.py
-│   │   ├── sources.py              # /api/sources — list of collector sources
+│   │   ├── sources.py              # /api/sources — this machine's list of collector sources
 │   │   ├── ranking.py
 │   │   ├── query_expansion.py
+│   │   ├── search_queries.py       # Excluded/pruned search query management
 │   │   └── evaluation.py
 │   ├── templates/
 │   │   ├── landing.html            # First-visit page when no preferences saved yet
@@ -615,10 +583,9 @@ JobAgent/
 │       └── explain.css             # how_it_works.html styling
 ├── tests/
 │   ├── unit/                       # Logic, prompt builders, parsers
-│   ├── integration/                # DB, Flask routes, evaluator runner
-│   └── e2e/                        # Real API calls
+│   ├── integration/                # Repository/route tests against a real JobAgentWeb instance
+│   └── e2e/                        # Real Anthropic API calls
 └── data/                           # gitignored
-    ├── agent.db
     ├── chrome_profile/
     └── logs/
 ```
@@ -628,30 +595,35 @@ JobAgent/
 ## Running tests
 
 ```bash
-pytest                  # unit + integration (no API keys needed, all mocked)
+pytest                  # unit + integration
 pytest tests/unit/
 pytest tests/integration/
-pytest -m e2e           # real API calls — requires ANTHROPIC_API_KEY
+pytest -m e2e           # real Anthropic API calls — requires funded ANTHROPIC_API_KEY
 ```
 
-Unit and integration tests use in-memory SQLite and mock all external API calls. ~690 tests, ~25 seconds.
+JobAgent has no local database, so `tests/conftest.py` spins up a **real** JobAgentWeb instance as a subprocess (from a sibling `../JobAgentWeb` checkout, its own venv) pointed at a dedicated `jobagentweb_test` Postgres database — the same one JobAgentWeb's own test suite uses. This means:
+
+- **The JobAgentWeb Postgres tunnel must be reachable** from wherever you run the suite (see JobAgentWeb's README for the connection details).
+- Every test gets a freshly-registered JobAgentWeb user for isolation — no mocks against a fake backend.
+- `job_postings`/`job_embeddings` are shared/global and never truncated between tests, so tests that insert jobs use unique URLs to avoid colliding with another test's data.
+
+~800 unit/integration tests, a few minutes total (dominated by starting the JobAgentWeb subprocess once per session). The e2e suite (~9 tests) makes real Claude calls and needs actual Anthropic credit balance — expect these to fail with a billing error, not a code bug, if the account isn't funded.
 
 ---
 
 ## Troubleshooting
 
-**Agent finds no jobs** — check that the `criteria` table has at least one `search_query`/`title` and one `location` set via `/api/criteria` (see the "known gap" note in [Database schema](#database-schema) — there's currently no dashboard UI for this).
+**Agent finds no jobs** — check that criteria (search queries/titles + locations) exist. These are normally auto-generated by saving the questionnaire (`/questionnaire`); if they look empty, resave it.
 
 **LinkedIn login required** — on first run, Chrome opens at the login page. Log in manually; your session is saved to `data/chrome_profile/`. If it expires, delete that directory and log in again.
 
 **Scraping breaks / wrong jobs** — LinkedIn occasionally changes its HTML. Update CSS selectors in `collector/sources/linkedin.py`.
 
+**`NotLoggedInError` / 401s from every script** — your session expired or was never created. Run `python scripts/login.py` again.
+
 **`overloaded` from Anthropic** — the evaluator retries automatically (3×, 30 s / 60 s). If it keeps failing, wait and retry.
 
-**Dashboard shows "Running" with nothing running** — a session was left in `status='running'` after a crash. Either wait 6 hours (auto-clears) or:
-```sql
-UPDATE sessions SET status='error' WHERE status='running';
-```
+**Dashboard shows "Running" with nothing running** — a session was left in `status='running'` after a crash. It auto-clears after 6 hours, or click **Actions → Stop** to cancel it immediately via JobAgentWeb's API.
 
 **Jobs missing descriptions** — open **Actions → Fetch missing descriptions**.
 
@@ -662,4 +634,4 @@ python scripts/extract_jobs.py
 
 **Voyage rate limit errors** — the free tier allows 3 RPM. Add a payment method on [dashboard.voyageai.com](https://dashboard.voyageai.com) to unlock 600 RPM. Then update `BATCH_SIZE=128` and `BATCH_DELAY=1` in `embeddings/indexer.py`.
 
-**Score not changing after re-score** — the distiller skips if `applied_count` and `rejected_count` haven't changed since the last run. Mark at least one job as applied or rejected first.
+**Score not changing after re-score** — the distiller skips if `applied_count`/`rejected_count`/`dismissed_count` haven't changed since the last run. Mark at least one job as applied or rejected first.

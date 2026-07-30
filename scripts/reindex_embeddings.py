@@ -6,23 +6,12 @@ old, stale vector until explicitly recomputed; index_jobs()'s normal call sites 
 embed jobs that don't have a row yet."""
 import sys
 
-from db.connection import get_connection
-from db.migrations import init_db
+import api_client
 from embeddings.indexer import index_jobs
 
 sys.stdout.reconfigure(line_buffering=True)
 
-init_db()
-
-conn = get_connection()
-rows = conn.execute("""
-    SELECT j.id, j.title, j.company, j.location, j.description, j.source
-    FROM jobs j
-    JOIN job_embeddings je ON je.job_id = j.id
-""").fetchall()
-conn.close()
-
-jobs = [dict(r) for r in rows]
+jobs = api_client.get("/api/embeddings/all-indexed").json()
 total = len(jobs)
 
 if not total:

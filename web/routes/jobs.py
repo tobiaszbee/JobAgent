@@ -1,12 +1,8 @@
 from flask import Blueprint, jsonify, request
 from db.repositories import job_repository, cv_repository, dismissed_item_repository
 
-# Public-safe routes only — browsing jobs and changing status. Registered in both
-# "local" and "web" deployment modes (see web/app.py). Anything that mutates beyond
-# a status change (bulk delete, dismissing a score item) or leaks internal counts
-# lives in jobs_admin.bp instead, which "web" mode never registers — this is a
-# route-level allowlist, not a blueprint-level toggle, so a public JobAgentWeb can
-# never reach them even by guessing the URL.
+# Browsing + status changes only. Bulk delete, score-item dismissal, and internal
+# counts live in jobs_admin.bp instead — see that module.
 bp = Blueprint("jobs", __name__)
 
 

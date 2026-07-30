@@ -1,51 +1,24 @@
-import json
-from db.connection import get_connection
+import api_client
 
 
 def insert(filename: str, raw_text: str, parsed: dict) -> int:
     """Insert a new CV profile, making it the active one. Returns the new row id."""
-    conn = get_connection()
-    conn.execute("UPDATE cv_profiles SET is_active = 0")
-    cursor = conn.execute(
-        "INSERT INTO cv_profiles (filename, raw_text, parsed, is_active) VALUES (?, ?, ?, 1)",
-        (filename, raw_text, json.dumps(parsed, ensure_ascii=False))
-    )
-    id_ = cursor.lastrowid
-    conn.commit()
-    conn.close()
-    return id_
+    resp = api_client.post("/api/cv-profiles", json={"filename": filename, "raw_text": raw_text, "parsed": parsed})
+    return resp.json()["id"]
 
 
 def get_active() -> dict | None:
-    conn = get_connection()
-    row = conn.execute(
-        "SELECT * FROM cv_profiles WHERE is_active = 1 ORDER BY created_at DESC LIMIT 1"
-    ).fetchone()
-    conn.close()
-    if not row:
-        return None
-    d = dict(row)
-    d["parsed"] = json.loads(d["parsed"]) if d["parsed"] else {}
-    return d
+    try:
+        return api_client.get("/api/cv-profiles/active").json()
+    except api_client.ApiError as e:
+        if e.status_code == 404:
+            return None
+        raise
 
 
 def list_all() -> list[dict]:
-    conn = get_connection()
-    rows = conn.execute(
-        "SELECT * FROM cv_profiles ORDER BY created_at DESC, id DESC"
-    ).fetchall()
-    conn.close()
-    result = []
-    for row in rows:
-        d = dict(row)
-        d["parsed"] = json.loads(d["parsed"]) if d["parsed"] else {}
-        result.append(d)
-    return result
+    return api_client.get("/api/cv-profiles").json()
 
 
 def set_active(id_: int) -> None:
-    conn = get_connection()
-    conn.execute("UPDATE cv_profiles SET is_active = 0")
-    conn.execute("UPDATE cv_profiles SET is_active = 1 WHERE id = ?", (id_,))
-    conn.commit()
-    conn.close()
+    api_client.post(f"/api/cv-profiles/{id_}/activate")

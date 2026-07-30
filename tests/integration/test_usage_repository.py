@@ -1,6 +1,5 @@
-import json
+import time
 
-from db.connection import get_connection
 from db.repositories import job_repository, usage_repository
 
 
@@ -45,10 +44,8 @@ class TestRecordRunSummary:
         usage_repository.log_usage("claude-haiku-4-5-20251001", "extractor", 2000, 0)
         usage_repository.record_run_summary("run_agent", started_at)
 
-        conn = get_connection()
-        row = conn.execute("SELECT * FROM cost_summaries").fetchone()
-        conn.close()
-        breakdown = json.loads(row["breakdown"])
+        row = usage_repository.get_history()[0]
+        breakdown = row["breakdown"]
         assert "claude-sonnet-4-6" in breakdown
         assert "claude-haiku-4-5-20251001" in breakdown
         assert breakdown["claude-sonnet-4-6"]["input_tokens"] == 1000
@@ -60,10 +57,7 @@ class TestRecordRunSummary:
         usage_repository.log_usage("claude-haiku-4-5-20251001", "extractor", 200, 0)
         usage_repository.record_run_summary("run_agent", started_at)
 
-        conn = get_connection()
-        row = conn.execute("SELECT jobs_evaluated FROM cost_summaries").fetchone()
-        conn.close()
-        assert row["jobs_evaluated"] == 2
+        assert usage_repository.get_history()[0]["jobs_evaluated"] == 2
 
     def test_cost_per_100_computed_for_the_run(self):
         started_at = usage_repository.now_iso()
@@ -71,45 +65,32 @@ class TestRecordRunSummary:
             usage_repository.log_usage("claude-sonnet-4-6", "scorer", 1_000_000, 0)  # $3 each
         usage_repository.record_run_summary("run_agent", started_at)
 
-        conn = get_connection()
-        row = conn.execute("SELECT cost_per_100_usd FROM cost_summaries").fetchone()
-        conn.close()
         # 10 jobs cost $30 total -> per 100 jobs = $300
-        assert row["cost_per_100_usd"] == 300.0
+        assert usage_repository.get_history()[0]["cost_per_100_usd"] == 300.0
 
     def test_zero_jobs_evaluated_leaves_cost_per_100_null(self):
         started_at = usage_repository.now_iso()
         usage_repository.log_usage("voyage-3-large", "embed", 1000, 0)
         usage_repository.record_run_summary("rank", started_at)
 
-        conn = get_connection()
-        row = conn.execute("SELECT jobs_evaluated, cost_per_100_usd FROM cost_summaries").fetchone()
-        conn.close()
+        row = usage_repository.get_history()[0]
         assert row["jobs_evaluated"] == 0
         assert row["cost_per_100_usd"] is None
 
     def test_no_usage_since_start_records_nothing(self):
         started_at = usage_repository.now_iso()
         usage_repository.record_run_summary("run_agent", started_at)
-        conn = get_connection()
-        count = conn.execute("SELECT COUNT(*) FROM cost_summaries").fetchone()[0]
-        conn.close()
-        assert count == 0
+        assert usage_repository.get_history() == []
 
     def test_usage_logged_before_started_at_is_excluded(self):
         usage_repository.log_usage("claude-sonnet-4-6", "scorer", 1_000_000, 0)  # before the run
-        conn = get_connection()
-        conn.execute("UPDATE usage_log SET created_at = '2020-01-01 00:00:00'")
-        conn.commit()
-        conn.close()
+        time.sleep(1.1)  # usage_log's created_at has second resolution
 
         started_at = usage_repository.now_iso()
         usage_repository.log_usage("claude-sonnet-4-6", "scorer", 500_000, 0)  # during the run
         usage_repository.record_run_summary("run_agent", started_at)
 
-        conn = get_connection()
-        row = conn.execute("SELECT jobs_evaluated, total_cost_usd FROM cost_summaries").fetchone()
-        conn.close()
+        row = usage_repository.get_history()[0]
         assert row["jobs_evaluated"] == 1
         assert row["total_cost_usd"] == 1.5  # only the $1.5 (500k tokens @ $3/1M) call counted
 
@@ -124,6 +105,7 @@ class TestGetCostPer100:
             usage_repository.log_usage("claude-sonnet-4-6", "scorer", 1_000_000, 0)  # $3 each, 5 jobs = $15
         usage_repository.record_run_summary("run_agent", started_at)
 
+        time.sleep(1.1)
         started_at2 = usage_repository.now_iso()
         for _ in range(5):
             usage_repository.log_usage("claude-sonnet-4-6", "scorer", 1_000_000, 0)  # another $15, 5 jobs
@@ -137,14 +119,7 @@ class TestGetCostPer100:
         usage_repository.log_usage("claude-sonnet-4-6", "scorer", 1_000_000, 0)
         usage_repository.record_run_summary("run_agent", started_at)  # 1 job, $3
 
-        # Backdate everything so far — usage_log has second resolution, and this test
-        # needs run 2's window to start strictly after run 1's, regardless of how fast
-        # these two calls execute in real time.
-        conn = get_connection()
-        conn.execute("UPDATE usage_log SET created_at = '2020-01-01 00:00:00'")
-        conn.commit()
-        conn.close()
-
+        time.sleep(1.1)  # keep run 2's window strictly after run 1's
         started_at2 = usage_repository.now_iso()
         usage_repository.log_usage("voyage-3-large", "embed", 1_000_000, 0)  # rank-only run, no scoring
         usage_repository.record_run_summary("rank", started_at2)
@@ -168,10 +143,7 @@ class TestGetCostPer100:
         before = usage_repository.get_cost_per_100()
         assert before == 300.0  # 2 jobs, $6 total -> $300/100
 
-        conn = get_connection()
-        conn.execute("DELETE FROM jobs WHERE id IN (?, ?)", (job_a, job_b))
-        conn.commit()
-        conn.close()
+        job_repository.delete_by_filter(["new"])
         assert job_repository.search(status="all") == []
 
         after = usage_repository.get_cost_per_100()

@@ -1,4 +1,4 @@
-from db.connection import get_connection
+import api_client
 from db.repositories import job_repository
 from config import WOULD_APPLY
 
@@ -8,16 +8,9 @@ def precision_at_k(k: int = 10) -> dict:
     Precision@K: among the top-K ranked jobs that the user has already decided on,
     what fraction were positive decisions (applied or reviewed)?
     """
-    conn = get_connection()
-    rows = conn.execute("""
-        SELECT id, title, company, status, listwise_rank
-        FROM jobs
-        WHERE listwise_rank IS NOT NULL
-          AND status IN ('applied', 'reviewed', 'rejected', 'auto_rejected')
-        ORDER BY listwise_rank ASC
-        LIMIT ?
-    """, (k,)).fetchall()
-    conn.close()
+    rows = api_client.get("/api/jobs/ranked", params={
+        "status": ["applied", "reviewed", "rejected", "auto_rejected"],
+    }).json()[:k]
 
     if not rows:
         return {"precision_at_k": None, "k": k, "n_evaluated": 0, "n_positive": 0}
@@ -38,27 +31,20 @@ def divergence_cases() -> list[dict]:
     - rank ≥ 16 + applied  → false negative (model underrated it)
     These are the highest-value training signals for preference distillation.
     """
-    conn = get_connection()
-    rows = conn.execute("""
-        SELECT id, title, company, status, listwise_rank, score_reason, rejection_reason
-        FROM jobs
-        WHERE listwise_rank IS NOT NULL AND status IN ('applied', 'rejected')
-        ORDER BY listwise_rank ASC
-    """).fetchall()
-    conn.close()
+    rows = api_client.get("/api/jobs/ranked", params={"status": ["applied", "rejected"]}).json()
 
     cases = []
     for row in rows:
         rank = row["listwise_rank"]
         if rank <= 5 and row["status"] == "rejected":
             cases.append({
-                **dict(row),
+                **row,
                 "divergence_type": "false_positive",
                 "label": f"Ranked #{rank} but rejected",
             })
         elif rank >= 16 and row["status"] == "applied":
             cases.append({
-                **dict(row),
+                **row,
                 "divergence_type": "false_negative",
                 "label": f"Applied despite rank #{rank}",
             })
@@ -67,10 +53,7 @@ def divergence_cases() -> list[dict]:
 
 
 def total_ranked() -> int:
-    conn = get_connection()
-    row = conn.execute("SELECT COUNT(*) FROM jobs WHERE listwise_rank IS NOT NULL").fetchone()
-    conn.close()
-    return row[0]
+    return api_client.get("/api/jobs/ranked-count").json()["count"]
 
 
 def eval_report() -> dict:

@@ -27,16 +27,5 @@ def test_get_latest_returns_most_recent():
     assert profile["applied_count"] == 3
 
 
-def test_legacy_text_format_returns_empty_signals():
-    """Rows written before G (content_format=text) get signals=[] so scorer skips them safely."""
-    from db.connection import get_connection
-    conn = get_connection()
-    conn.execute(
-        "INSERT INTO preference_profiles (content, content_format, applied_count, rejected_count) VALUES (?, 'text', ?, ?)",
-        ("ACCEPT[rate=explicit; conf=HIGH]", 1, 0),
-    )
-    conn.commit()
-    conn.close()
-    profile = preference_repository.get_latest()
-    assert profile["content_format"] == "text"
-    assert profile["signals"] == []
+# Legacy content_format='text' handling in get_latest() is covered in
+# JobAgentWeb's test_preference_profiles.py — unreachable from this client.
