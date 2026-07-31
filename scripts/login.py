@@ -5,6 +5,10 @@ api_client.py. Run:
     python scripts/login.py
 """
 import getpass
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import api_client
 from config import JOBAGENTWEB_BASE_URL
