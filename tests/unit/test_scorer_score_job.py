@@ -25,7 +25,7 @@ def _tool_response(**input_overrides):
 
     response = MagicMock()
     response.content = [block]
-    response.usage = MagicMock(input_tokens=100, output_tokens=50)
+    response.usage = MagicMock(input_tokens=100, output_tokens=50, cache_creation_input_tokens=0, cache_read_input_tokens=0)
     return response
 
 
@@ -54,7 +54,7 @@ class TestScoreJobStructuredResult:
     def test_missing_pros_cons_default_to_empty_list(self, mock_get_client):
         tool_input = {"sub_scores": {}, "overall_score": 5, "score_reason": "ok"}
         block = MagicMock(type="tool_use", input=tool_input)
-        response = MagicMock(content=[block], usage=MagicMock(input_tokens=10, output_tokens=10))
+        response = MagicMock(content=[block], usage=MagicMock(input_tokens=10, output_tokens=10, cache_creation_input_tokens=0, cache_read_input_tokens=0))
         mock_get_client.return_value.messages.create.return_value = response
         result = score_job(_job(), "system prompt")
         assert result["breakdown"]["pros"] == []

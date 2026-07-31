@@ -20,14 +20,14 @@ def _make_ranking_response(ranking: list[dict]):
     block.text = f"<ranking>\n{_json.dumps(ranking, indent=2)}\n</ranking>"
     response = MagicMock()
     response.content = [block]
-    response.usage = MagicMock(input_tokens=100, output_tokens=50)
+    response.usage = MagicMock(input_tokens=100, output_tokens=50, cache_creation_input_tokens=0, cache_read_input_tokens=0)
     return response
 
 
 def _make_empty_response():
     response = MagicMock()
     response.content = []
-    response.usage = MagicMock(input_tokens=0, output_tokens=0)
+    response.usage = MagicMock(input_tokens=0, output_tokens=0, cache_creation_input_tokens=0, cache_read_input_tokens=0)
     return response
 
 

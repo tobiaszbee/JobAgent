@@ -1,4 +1,5 @@
 import time
+from unittest.mock import MagicMock
 
 from db.repositories import job_repository, usage_repository
 
@@ -21,6 +22,35 @@ class TestLogUsage:
         usage_repository.log_usage("some-unknown-model", "scorer", 1000, 1000)
         summary = usage_repository.get_summary()
         assert summary["total_cost_usd"] == 0.0
+
+    def test_cache_tokens_priced_off_the_model_s_input_rate(self):
+        # sonnet input rate $3/1M; cache write 1.25x, cache read 0.1x (config.py).
+        usage_repository.log_usage(
+            "claude-sonnet-4-6", "scorer", 0, 0,
+            cache_creation_tokens=1_000_000, cache_read_tokens=1_000_000,
+        )
+        summary = usage_repository.get_summary()
+        assert summary["total_cost_usd"] == 3.0 * 1.25 + 3.0 * 0.1
+
+    def test_cache_tokens_folded_into_reported_input_tokens(self):
+        usage_repository.log_usage(
+            "claude-sonnet-4-6", "scorer", 100, 0,
+            cache_creation_tokens=10, cache_read_tokens=20,
+        )
+        summary = usage_repository.get_summary()
+        assert summary["total_tokens"] == 130
+
+    def test_log_anthropic_bills_prompt_cache_tokens(self):
+        # This is the exact reported bug: evaluator/scorer.py caches its system prompt,
+        # but response.usage.input_tokens alone excludes cache_creation/cache_read
+        # tokens, so those calls used to silently cost $0 in the tracked total.
+        response = MagicMock(usage=MagicMock(
+            input_tokens=0, output_tokens=0,
+            cache_creation_input_tokens=1_000_000, cache_read_input_tokens=0,
+        ))
+        usage_repository.log_anthropic(response, "scorer", "claude-sonnet-4-6")
+        summary = usage_repository.get_summary()
+        assert summary["total_cost_usd"] == 3.0 * 1.25
 
 
 class TestGetSummary:

@@ -19,7 +19,7 @@ def _debate_response(reviews: list[dict]):
     block.input = {"reviews": reviews}
     response = MagicMock()
     response.content = [block]
-    response.usage = MagicMock(input_tokens=100, output_tokens=50)
+    response.usage = MagicMock(input_tokens=100, output_tokens=50, cache_creation_input_tokens=0, cache_read_input_tokens=0)
     return response
 
 
@@ -106,7 +106,7 @@ class TestDebateRank:
     @patch("ranker.debate.anthropic.Anthropic")
     def test_no_tool_use_block_returns_original_ranking(self, mock_anthropic):
         text_block = MagicMock(type="text")
-        response = MagicMock(content=[text_block], usage=MagicMock(input_tokens=1, output_tokens=1))
+        response = MagicMock(content=[text_block], usage=MagicMock(input_tokens=1, output_tokens=1, cache_creation_input_tokens=0, cache_read_input_tokens=0))
         mock_anthropic.return_value.messages.create.return_value = response
         jobs = [_job("j1", rank=1)]
         result = debate_rank(jobs, "profile")

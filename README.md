@@ -104,23 +104,19 @@ JOBAGENTWEB_BASE_URL=http://10.66.0.1:8000   # only if different from the defaul
 
 `JOBAGENTWEB_BASE_URL` defaults to a WireGuard-tunneled address, **not** a public HTTPS URL — if JobAgentWeb sits behind a reverse proxy with HTTP basic auth in front of it (as on the reference deployment), that auth blocks API traffic exactly like it blocks a browser, since there's no way for it to tell the two apart. Point this at whatever address reaches JobAgentWeb without hitting that wall — a private tunnel, an internal network address, or a version of the proxy that lets `/api/*` through unauthenticated in favor of JobAgentWeb's own session login.
 
-### Log in
-
-Before running anything, authenticate this installation against JobAgentWeb once:
-
-```bash
-python scripts/login.py
-```
-
-This prompts for a JobAgentWeb username/password and saves a session cookie to `~/.jobagent/session.json`, reused by every script and the local dashboard afterward. No account yet? Register at `<JOBAGENTWEB_BASE_URL>/register` first.
-
-### Start the dashboard
+### Start the dashboard and log in
 
 ```bash
 python web/app.py
 ```
 
-Open `http://localhost:5000`. On first visit (no saved preferences yet) you land on a landing page that routes you into the questionnaire; the dashboard itself only appears once a preference profile exists.
+Open `http://localhost:5000` — with no saved session yet, this lands on `/login`. Log in with your JobAgentWeb username/password (no account yet? Register at `<JOBAGENTWEB_BASE_URL>/register` first); the session cookie is saved to `~/.jobagent/session.json` and reused by every script and the dashboard afterward. On first visit after logging in (no saved preferences yet) you land on a landing page that routes you into the questionnaire; the dashboard itself only appears once a preference profile exists.
+
+Headless/server installs with no browser access to port 5000 can authenticate the same way from a terminal instead:
+
+```bash
+python scripts/login.py
+```
 
 ---
 
@@ -270,7 +266,7 @@ JobAgent holds no database. Every `db/repositories/*.py` module is a thin wrappe
 
 Two consequences worth knowing:
 - **"Delete jobs"** removes rows from *your* `user_job_states` only — the underlying shared posting stays untouched for other users who've found the same URL.
-- **Every script needs a valid session** (`python scripts/login.py`) — there is no local fallback if JobAgentWeb is unreachable.
+- **Every script needs a valid session** (log in via the dashboard's `/login` page, or `python scripts/login.py` for headless installs) — there is no local fallback if JobAgentWeb is unreachable.
 
 ### Pipeline stages in detail
 
@@ -453,7 +449,7 @@ Most jobs get no flag at all — the prompt explicitly discourages flagging just
 
 `GET /api/eval/report` returns:
 
-- **Precision@5** and **Precision@10** — of the top-K ranked jobs, what fraction did the user apply to or mark as reviewed? Higher = better ranking.
+- **Precision@5** and **Precision@10** — of the top-K ranked, already-decided jobs (`applied`/`rejected`/`auto_rejected` — `reviewed` doesn't count, it's read-but-undecided), what fraction did the user apply to? Higher = better ranking.
 - **Divergence cases** — jobs where ranking and user decision strongly disagree:
   - `rank ≤ 5` + `status = rejected` → false positive (Opus liked it, you didn't)
   - `rank ≥ 16` + `status = applied` → false negative (Opus missed a good one)
@@ -619,7 +615,7 @@ JobAgent has no local database, so `tests/conftest.py` spins up a **real** JobAg
 
 **Scraping breaks / wrong jobs** — LinkedIn occasionally changes its HTML. Update CSS selectors in `collector/sources/linkedin.py`.
 
-**`NotLoggedInError` / 401s from every script** — your session expired or was never created. Run `python scripts/login.py` again.
+**`NotLoggedInError` / 401s from every script** — your session expired or was never created. Open the dashboard (it redirects to `/login` automatically) or run `python scripts/login.py` again.
 
 **`overloaded` from Anthropic** — the evaluator retries automatically (3×, 30 s / 60 s). If it keeps failing, wait and retry.
 

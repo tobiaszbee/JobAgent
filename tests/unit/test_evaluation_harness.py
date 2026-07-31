@@ -55,10 +55,19 @@ class TestPrecisionAtK:
         result = precision_at_k(10)
         assert result["n_evaluated"] == 0
 
-    def test_reviewed_counts_as_positive(self):
+    def test_reviewed_is_not_a_decision_and_is_excluded(self):
+        # "reviewed" means read-but-undecided (see dashboard tab meaning) — it isn't
+        # a positive or negative call, so it must not even enter the K pool.
         _insert_ranked("Reviewed job", "reviewed", 1)
         result = precision_at_k(1)
-        assert result["n_positive"] == 1
+        assert result["n_evaluated"] == 0
+        assert result["precision_at_k"] is None
+
+    def test_auto_rejected_counts_as_negative(self):
+        _insert_ranked("Auto rejected job", "auto_rejected", 1)
+        result = precision_at_k(1)
+        assert result["n_evaluated"] == 1
+        assert result["n_positive"] == 0
 
 
 class TestDivergenceCases:

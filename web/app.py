@@ -1,4 +1,7 @@
-from flask import Flask, redirect, render_template
+from flask import Flask, jsonify, redirect, render_template, request
+
+import api_client
+from config import JOBAGENTWEB_BASE_URL
 from db.repositories import candidate_preferences_repository, cv_repository, session_repository
 from web.routes import (
     candidate_preferences, jobs, jobs_admin, criteria, runner, cv, sources, preferences,
@@ -23,6 +26,39 @@ app.register_blueprint(search_queries.bp)
 runner.init_sock(app)
 
 
+@app.before_request
+def require_login():
+    if request.path == "/login" or request.path.startswith("/static/"):
+        return
+    if not api_client.logged_in():
+        return redirect("/login")
+
+
+@app.errorhandler(api_client.NotLoggedInError)
+def handle_session_expired(e):
+    """Session existed but JobAgentWeb rejected it (expired/invalid) — send the
+    user back to /login instead of a raw 500, distinguishing JSON callers (the
+    dashboard's own fetch()) from full-page navigations."""
+    if request.path.startswith("/api/"):
+        return jsonify({"error": str(e)}), 401
+    return redirect("/login")
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    error = None
+    if request.method == "POST":
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "")
+        try:
+            api_client.login(username, password)
+        except api_client.NotLoggedInError as e:
+            error = str(e)
+        else:
+            return redirect("/")
+    return render_template("login.html", error=error, jobagentweb_base_url=JOBAGENTWEB_BASE_URL)
+
+
 @app.get("/")
 def dashboard():
     if not candidate_preferences_repository.get_active():
@@ -43,7 +79,8 @@ def how_it_works():
 
 
 if __name__ == "__main__":
-    session_repository.cancel_active()  # clear any stale running sessions from a previous crash
+    if api_client.logged_in():
+        session_repository.cancel_active()  # clear any stale running sessions from a previous crash
     print("Starting Job Agent Dashboard...")
     print("Open: http://localhost:5000")
     app.run(debug=False, port=5000)

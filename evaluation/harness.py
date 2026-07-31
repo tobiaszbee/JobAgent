@@ -6,16 +6,20 @@ from config import WOULD_APPLY
 def precision_at_k(k: int = 10) -> dict:
     """
     Precision@K: among the top-K ranked jobs that the user has already decided on,
-    what fraction were positive decisions (applied or reviewed)?
+    what fraction were positive decisions (applied)?
+
+    "reviewed" is deliberately excluded — per the dashboard's own status meaning
+    (jobs read but not decided on), it isn't a decision at all, so counting it as a
+    positive would credit the ranking for jobs the user never actually validated.
     """
     rows = api_client.get("/api/jobs/ranked", params={
-        "status": ["applied", "reviewed", "rejected", "auto_rejected"],
+        "status": ["applied", "rejected", "auto_rejected"],
     }).json()[:k]
 
     if not rows:
         return {"precision_at_k": None, "k": k, "n_evaluated": 0, "n_positive": 0}
 
-    positive = sum(1 for r in rows if r["status"] in ("applied", "reviewed"))
+    positive = sum(1 for r in rows if r["status"] == "applied")
     return {
         "precision_at_k": round(positive / len(rows), 3),
         "k": k,

@@ -43,6 +43,7 @@ def jobagentweb_server():
 
     env = os.environ.copy()
     env.update({
+        "INVITE_CODE": "test-invite-code",  # JobAgentWeb closes registration without one — matches its own conftest.py default
         "POSTGRES_HOST": "10.66.0.1",
         "POSTGRES_PORT": "5432",
         "POSTGRES_DB": "jobagentweb_test",
@@ -98,7 +99,7 @@ def _isolated_user(jobagentweb_server, tmp_path, monkeypatch):
     but tests that touch it use unique-per-test URLs anyway)."""
     monkeypatch.setattr(api_client, "_SESSION_FILE", tmp_path / "session.json")
     username = f"test_{uuid.uuid4().hex[:16]}"
-    api_client.register(username, "test-password-not-real")
+    api_client.register(username, "test-password-not-real", invite_code="test-invite-code")
     yield username
 
 

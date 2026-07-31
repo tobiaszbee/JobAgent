@@ -1,19 +1,35 @@
 from datetime import datetime, timezone
 
 import api_client
-from config import MODEL_COSTS
+from config import MODEL_COSTS, CACHE_WRITE_MULTIPLIER, CACHE_READ_MULTIPLIER
 
 
-def _calc_cost(model: str, input_tokens: int, output_tokens: int = 0) -> float:
-    rates = MODEL_COSTS.get(model, (0.0, 0.0))
-    return (input_tokens * rates[0] + output_tokens * rates[1]) / 1_000_000
+def _calc_cost(
+    model: str, input_tokens: int, output_tokens: int = 0,
+    cache_creation_tokens: int = 0, cache_read_tokens: int = 0,
+) -> float:
+    input_rate, output_rate = MODEL_COSTS.get(model, (0.0, 0.0))
+    cost = (
+        input_tokens * input_rate
+        + output_tokens * output_rate
+        + cache_creation_tokens * input_rate * CACHE_WRITE_MULTIPLIER
+        + cache_read_tokens * input_rate * CACHE_READ_MULTIPLIER
+    )
+    return cost / 1_000_000
 
 
-def log_usage(model: str, module: str, input_tokens: int, output_tokens: int = 0) -> None:
-    cost = _calc_cost(model, input_tokens, output_tokens)
+def log_usage(
+    model: str, module: str, input_tokens: int, output_tokens: int = 0,
+    cache_creation_tokens: int = 0, cache_read_tokens: int = 0,
+) -> None:
+    cost = _calc_cost(model, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens)
     try:
         api_client.post("/api/usage", json={
-            "model": model, "module": module, "input_tokens": input_tokens,
+            "model": model, "module": module,
+            # Cache tokens folded into input_tokens here — JobAgentWeb's usage_log has
+            # no separate column for them, and this keeps the reported token totals
+            # matching real API throughput instead of undercounting cached requests.
+            "input_tokens": input_tokens + cache_creation_tokens + cache_read_tokens,
             "output_tokens": output_tokens, "cost_usd": cost,
         })
     except Exception:
@@ -21,9 +37,15 @@ def log_usage(model: str, module: str, input_tokens: int, output_tokens: int = 0
 
 
 def log_anthropic(response, module: str, model: str) -> None:
-    """Log usage from an Anthropic messages.create() response."""
+    """Log usage from an Anthropic messages.create() response, including prompt-cache
+    read/write tokens — response.usage.input_tokens alone excludes those, which used
+    to silently undercount every cached (evaluator/scorer.py) call."""
     try:
-        log_usage(model, module, response.usage.input_tokens, response.usage.output_tokens)
+        log_usage(
+            model, module, response.usage.input_tokens, response.usage.output_tokens,
+            cache_creation_tokens=response.usage.cache_creation_input_tokens or 0,
+            cache_read_tokens=response.usage.cache_read_input_tokens or 0,
+        )
     except Exception:
         pass
 

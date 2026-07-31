@@ -267,7 +267,7 @@ label.field-label { display: block; font-size: 0.8rem; color: var(--ink-soft); m
 .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
 @media (max-width: 720px) { .two-col { grid-template-columns: 1fr; } .quiz { grid-template-columns: 1fr; } .quiz__rail { display: none; } }
 
-input[type="text"], input[type="number"], select, textarea {
+input[type="text"], input[type="number"], input[type="password"], select, textarea {
   font-family: inherit; font-size: 0.9rem; color: var(--ink);
   background: var(--paper); border: 1px solid var(--line); border-radius: 9px;
   padding: 9px 12px; width: 100%;

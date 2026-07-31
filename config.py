@@ -47,6 +47,13 @@ MODEL_COSTS: dict[str, tuple[float, float]] = {
     "rerank-2":                   (0.05,   0.00),   # per 1M tokens (rerank billing is now token-based, not per-query)
 }
 
+# Prompt-cache pricing is a fixed multiplier of a model's base input rate, same across
+# every Claude model (docs.anthropic.com). Only the default 5-minute ephemeral TTL is
+# used anywhere in this codebase (evaluator/scorer.py's cache_control), so there's no
+# 1-hour-TTL rate to track.
+CACHE_WRITE_MULTIPLIER = 1.25
+CACHE_READ_MULTIPLIER  = 0.1
+
 _ROOT = os.path.dirname(os.path.abspath(__file__))
 
 LINKEDIN = {

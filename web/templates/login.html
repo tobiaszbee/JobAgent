@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JobAgent — Log in</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='onboarding.css') }}">
+</head>
+<body>
+
+<div class="topbar">
+  <div class="wordmark">Job<span class="dot">·</span>Agent</div>
+</div>
+
+<section class="hero">
+  <h1>Log in</h1>
+  <p class="lede">
+    This JobAgent installation authenticates against your JobAgentWeb account.
+    Log in once — the session is saved and reused by the dashboard and every script.
+  </p>
+
+  <form method="post" action="/login" class="card" style="max-width: 420px;">
+    <div class="field-row">
+      <div style="flex: 1;">
+        <label class="field-label" for="username">Username</label>
+        <input type="text" id="username" name="username" autocomplete="username" required autofocus>
+      </div>
+    </div>
+    <div class="field-row">
+      <div style="flex: 1;">
+        <label class="field-label" for="password">Password</label>
+        <input type="password" id="password" name="password" autocomplete="current-password" required>
+      </div>
+    </div>
+    {% if error %}
+    <p class="hero-error is-visible">{{ error }}</p>
+    {% endif %}
+    <div class="quiz__footer" style="margin-top: 18px; padding-top: 0;">
+      <button type="submit" class="btn-primary">Log in</button>
+    </div>
+  </form>
+
+  <p class="hero-foot">
+    No account yet? <a href="{{ jobagentweb_base_url }}/register" target="_blank" rel="noopener">Register on JobAgentWeb</a> first.
+  </p>
+</section>
+
+{% include "_footer.html" %}
+
+</body>
+</html>

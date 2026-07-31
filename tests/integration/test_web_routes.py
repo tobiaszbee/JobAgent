@@ -1,6 +1,7 @@
 import json
 import uuid
 import pytest
+import api_client
 from db.repositories import candidate_preferences_repository, cv_repository, job_repository, criteria_repository
 
 
@@ -307,3 +308,31 @@ class TestQuestionnaireRouting:
         resp = flask_client.get("/questionnaire")
         assert resp.status_code == 200
         assert b"A few questions to match more precisely" in resp.data
+
+
+class TestLoginRouting:
+    def test_login_page_renders_when_logged_out(self, flask_client):
+        api_client._SESSION_FILE.unlink()
+        resp = flask_client.get("/login")
+        assert resp.status_code == 200
+        assert b"Log in" in resp.data
+
+    def test_protected_route_redirects_to_login_when_logged_out(self, flask_client):
+        api_client._SESSION_FILE.unlink()
+        resp = flask_client.get("/")
+        assert resp.status_code == 302
+        assert resp.headers["Location"] == "/login"
+
+    def test_login_post_invalid_credentials_shows_error(self, flask_client):
+        api_client._SESSION_FILE.unlink()
+        resp = flask_client.post("/login", data={"username": "nope-does-not-exist", "password": "wrong"})
+        assert resp.status_code == 200
+        assert b"Login failed" in resp.data
+
+    def test_login_post_valid_credentials_redirects_and_restores_session(self, flask_client, _isolated_user):
+        username = _isolated_user
+        api_client._SESSION_FILE.unlink()
+        resp = flask_client.post("/login", data={"username": username, "password": "test-password-not-real"})
+        assert resp.status_code == 302
+        assert resp.headers["Location"] == "/"
+        assert api_client.logged_in()

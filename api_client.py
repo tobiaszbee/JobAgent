@@ -55,12 +55,13 @@ def login(username: str, password: str) -> None:
     _save_cookie(cookie)
 
 
-def register(username: str, password: str) -> None:
+def register(username: str, password: str, invite_code: str = "") -> None:
     """Registers a new account on JobAgentWeb and persists its session cookie,
-    same as login(). Mirrors JobAgentWeb's POST /register form contract."""
+    same as login(). Mirrors JobAgentWeb's POST /register form contract, which
+    requires a valid invite_code whenever JobAgentWeb has one configured."""
     resp = httpx.post(
         f"{JOBAGENTWEB_BASE_URL}/register",
-        data={"username": username, "password": password, "password_confirm": password},
+        data={"username": username, "password": password, "password_confirm": password, "invite_code": invite_code},
         follow_redirects=False,
     )
     cookie = resp.cookies.get("session")

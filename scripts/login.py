@@ -1,6 +1,10 @@
 """Authenticate this JobAgent installation against JobAgentWeb, once. Every
 script and the local dashboard reuse the saved session afterward — see
-api_client.py. Run:
+api_client.py.
+
+The dashboard's own /login page (web/app.py) covers this interactively now;
+use this script instead for headless/server installs with no browser access
+to the dashboard's port. Run:
 
     python scripts/login.py
 """
