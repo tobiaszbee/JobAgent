@@ -1,4 +1,6 @@
 import json
+import stat
+import sys
 import uuid
 import pytest
 import api_client
@@ -336,3 +338,12 @@ class TestLoginRouting:
         assert resp.status_code == 302
         assert resp.headers["Location"] == "/"
         assert api_client.logged_in()
+
+    def test_session_file_is_owner_only_on_posix(self, flask_client, _isolated_user):
+        # session.json is a live, unattended login for this JobAgentWeb account —
+        # on a shared machine, default permissions would hand it to anyone else
+        # on the box. No-op on Windows (POSIX mode bits don't map to NTFS ACLs).
+        if sys.platform == "win32":
+            pytest.skip("chmod is a no-op on Windows — nothing to assert here")
+        mode = stat.S_IMODE(api_client._SESSION_FILE.stat().st_mode)
+        assert mode == 0o600

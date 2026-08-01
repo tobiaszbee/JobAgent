@@ -124,8 +124,11 @@ class TestGetUnscored:
         assert job_id not in ids
 
     def test_excludes_job_with_empty_description(self):
-        job_id = _insert()
-        job_repository.update_description(job_id, "")
+        # update_description() is write-once now (JobAgentWeb no longer lets a
+        # second write clear/overwrite an already-populated description — see
+        # jobs_repo.update_description), so this constructs the empty-description
+        # state directly at insert time instead of via a follow-up update.
+        job_id = _insert(description="")
         ids = [j["id"] for j in job_repository.get_unscored()]
         assert job_id not in ids
 

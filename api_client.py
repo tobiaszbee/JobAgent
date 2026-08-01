@@ -5,6 +5,7 @@ this JobAgent installation acts as one already-authenticated identity, not a
 per-caller login.
 """
 import json
+import os
 import time
 from pathlib import Path
 
@@ -39,6 +40,11 @@ def _load_cookie() -> str | None:
 def _save_cookie(cookie_value: str) -> None:
     _SESSION_FILE.parent.mkdir(parents=True, exist_ok=True)
     _SESSION_FILE.write_text(json.dumps({"session_cookie": cookie_value}))
+    # Owner-only — this file is a live, unattended login for this JobAgentWeb
+    # account; on a shared machine, default permissions would hand it to anyone
+    # else on the box. No-op on Windows (POSIX mode bits don't map to NTFS ACLs),
+    # but real protection on macOS/Linux, which this same code path also runs on.
+    os.chmod(_SESSION_FILE, 0o600)
 
 
 def login(username: str, password: str) -> None:

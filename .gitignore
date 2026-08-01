@@ -1,6 +1,8 @@
 # Environment
 .env
 .env.test
+.env.*
+!.env.*.example
 
 # Dependencies
 .venv/

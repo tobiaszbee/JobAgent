@@ -44,6 +44,8 @@ def jobagentweb_server():
     env = os.environ.copy()
     env.update({
         "INVITE_CODE": "test-invite-code",  # JobAgentWeb closes registration without one — matches its own conftest.py default
+        "SECRET_KEY": "test-only-secret-key-not-real-923nf",  # JobAgentWeb now hard-fails at import without one
+        "DISABLE_RATE_LIMIT": "true",  # this suite registers a fresh user per test — far more than a real client
         "POSTGRES_HOST": "10.66.0.1",
         "POSTGRES_PORT": "5432",
         "POSTGRES_DB": "jobagentweb_test",
