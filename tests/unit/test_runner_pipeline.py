@@ -1,9 +1,11 @@
+import json
 from datetime import datetime, timedelta
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 import web.routes.runner as runner_module
+from db.repositories import session_repository
 from web.routes.runner import _post_collect_stages, _days_since_last_run, _is_run_active, _RunGuard
 
 
@@ -100,3 +102,39 @@ class TestRunGuard:
             pass
         with _RunGuard() as acquired:
             assert acquired is True
+
+
+class TestSessionSpansWholeHandler:
+    """Regression: session_repository.start()/finish() used to live only inside
+    collector/runner.py, scoped to collection alone — so has_active_run() went
+    false the moment collection finished, even though distill/extract/evaluate/
+    rank were still running, letting a separately launched process race with
+    the dashboard's own run undetected (this happened in production once)."""
+
+    def test_rank_ws_session_is_done_after_a_clean_run(self):
+        with patch("web.routes.runner._run_script", return_value=0):
+            runner_module._rank_run(MagicMock())
+        assert session_repository.get_latest()["status"] == "done"
+
+    def test_rank_ws_session_is_error_if_a_stage_raises(self):
+        with patch("web.routes.runner._run_script", side_effect=RuntimeError("boom")):
+            with pytest.raises(RuntimeError):
+                runner_module._rank_run(MagicMock())
+        assert session_repository.get_latest()["status"] == "error"
+
+    def test_agent_ws_session_stays_active_across_every_post_collect_stage(self):
+        mock_ws = MagicMock()
+        mock_ws.receive.return_value = json.dumps({"days": 1})
+        seen_active = []
+
+        def _fake_run_script(*args, **kwargs):
+            seen_active.append(session_repository.has_active_run())
+            return 0
+
+        with patch("web.routes.runner._run_script", side_effect=_fake_run_script):
+            runner_module._agent_run(mock_ws)
+
+        assert len(seen_active) == 6  # collector + 5 post-collect stages
+        assert all(seen_active), "session must stay active through every stage, not just the first"
+        assert session_repository.has_active_run() is False  # released once the handler returns
+        assert session_repository.get_latest()["status"] == "done"

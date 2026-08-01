@@ -204,6 +204,15 @@ def _post_collect_stages() -> list[tuple[str, str, list[str]]]:
 
 @sock.route("/ws/agent")
 def agent_ws(ws):
+    _agent_run(ws)
+
+
+def _agent_run(ws):
+    """The actual handler body, factored out of agent_ws so it's callable
+    directly in tests — flask_sock's @sock.route decorator discards the
+    original function and replaces it with a wrapper that requires a real
+    request context, so agent_ws itself can't be invoked outside a live
+    WebSocket connection."""
     global _agent_process
 
     with _RunGuard() as acquired:
@@ -228,31 +237,48 @@ def agent_ws(ws):
 
         collector_args = ["--days", str(days)]
         started_at = usage_repository.now_iso()
+        # Spans every stage below, not just collection — has_active_run() used to go
+        # false the moment the collector's own internal session finished, even though
+        # distill/extract/evaluate/rank were still running, letting a separately
+        # launched process race with this one undetected (see collector/runner.py's
+        # own start()/finish(), scoped only to collection).
+        session_id = session_repository.start()
+        status = "done"
 
-        with _open_log() as log_file:
-            header = f"=== COLLECTOR (days={days}) ===\n"
-            log_file.write(header)
-            _safe_send(ws, header)
-            exit_code = _run_script(ws, os.path.join(ROOT, "collector", "runner.py"), collector_args, log_file=log_file)
+        try:
+            with _open_log() as log_file:
+                header = f"=== COLLECTOR (days={days}) ===\n"
+                log_file.write(header)
+                _safe_send(ws, header)
+                exit_code = _run_script(ws, os.path.join(ROOT, "collector", "runner.py"), collector_args, log_file=log_file)
 
-            if exit_code != 0:
-                msg = f"\nCollector failed (exit code {exit_code}). Skipping evaluator.\n"
-                log_file.write(msg)
-                _safe_send(ws, msg)
-            else:
-                for label, script_path, args in _post_collect_stages():
-                    msg = f"\n=== {label} ===\n"
+                if exit_code != 0:
+                    msg = f"\nCollector failed (exit code {exit_code}). Skipping evaluator.\n"
                     log_file.write(msg)
                     _safe_send(ws, msg)
-                    _run_script(ws, script_path, args, log_file=log_file)
-
-        usage_repository.record_run_summary("run_agent", started_at)
-        _agent_process = None
-        _safe_send(ws, "\n__DONE__\n")
+                else:
+                    for label, script_path, args in _post_collect_stages():
+                        msg = f"\n=== {label} ===\n"
+                        log_file.write(msg)
+                        _safe_send(ws, msg)
+                        _run_script(ws, script_path, args, log_file=log_file)
+        except Exception:
+            status = "error"
+            raise
+        finally:
+            session_repository.finish(session_id, jobs_found=0, jobs_scored=0, status=status)
+            usage_repository.record_run_summary("run_agent", started_at)
+            _agent_process = None
+            _safe_send(ws, "\n__DONE__\n")
 
 
 @sock.route("/ws/backfill")
 def backfill_ws(ws):
+    _backfill_run(ws)
+
+
+def _backfill_run(ws):
+    """See _agent_run's docstring for why this is factored out of backfill_ws."""
     global _agent_process
 
     with _RunGuard() as acquired:
@@ -262,26 +288,38 @@ def backfill_ws(ws):
 
         script = os.path.join(ROOT, "scripts", "backfill_descriptions.py")
         started_at = usage_repository.now_iso()
+        session_id = session_repository.start()  # see _agent_run for why this spans the whole handler
+        status = "done"
 
-        with _open_log() as log_file:
-            header = "=== BACKFILL DESCRIPTIONS ===\n"
-            log_file.write(header)
-            _safe_send(ws, header)
-            exit_code = _run_script(ws, script, log_file=log_file)
+        try:
+            with _open_log() as log_file:
+                header = "=== BACKFILL DESCRIPTIONS ===\n"
+                log_file.write(header)
+                _safe_send(ws, header)
+                exit_code = _run_script(ws, script, log_file=log_file)
 
-            if exit_code == 0:
-                msg = "\n=== EVALUATOR ===\n"
-                log_file.write(msg)
-                _safe_send(ws, msg)
-                _run_script(ws, os.path.join(ROOT, "evaluator", "runner.py"), log_file=log_file)
-
-        usage_repository.record_run_summary("backfill", started_at)
-        _agent_process = None
-        _safe_send(ws, "\n__DONE__\n")
+                if exit_code == 0:
+                    msg = "\n=== EVALUATOR ===\n"
+                    log_file.write(msg)
+                    _safe_send(ws, msg)
+                    _run_script(ws, os.path.join(ROOT, "evaluator", "runner.py"), log_file=log_file)
+        except Exception:
+            status = "error"
+            raise
+        finally:
+            session_repository.finish(session_id, jobs_found=0, jobs_scored=0, status=status)
+            usage_repository.record_run_summary("backfill", started_at)
+            _agent_process = None
+            _safe_send(ws, "\n__DONE__\n")
 
 
 @sock.route("/ws/reevaluate-rejected")
 def reevaluate_rejected_ws(ws):
+    _reevaluate_rejected_run(ws)
+
+
+def _reevaluate_rejected_run(ws):
+    """See _agent_run's docstring for why this is factored out of reevaluate_rejected_ws."""
     global _agent_process
 
     with _RunGuard() as acquired:
@@ -291,20 +329,32 @@ def reevaluate_rejected_ws(ws):
 
         script = os.path.join(ROOT, "scripts", "reevaluate_rejected.py")
         started_at = usage_repository.now_iso()
+        session_id = session_repository.start()  # see _agent_run for why this spans the whole handler
+        status = "done"
 
-        with _open_log() as log_file:
-            header = "=== RE-EVALUATE AUTO-REJECTED ===\n"
-            log_file.write(header)
-            _safe_send(ws, header)
-            _run_script(ws, script, log_file=log_file)
-
-        usage_repository.record_run_summary("reevaluate_rejected", started_at)
-        _agent_process = None
-        _safe_send(ws, "\n__DONE__\n")
+        try:
+            with _open_log() as log_file:
+                header = "=== RE-EVALUATE AUTO-REJECTED ===\n"
+                log_file.write(header)
+                _safe_send(ws, header)
+                _run_script(ws, script, log_file=log_file)
+        except Exception:
+            status = "error"
+            raise
+        finally:
+            session_repository.finish(session_id, jobs_found=0, jobs_scored=0, status=status)
+            usage_repository.record_run_summary("reevaluate_rejected", started_at)
+            _agent_process = None
+            _safe_send(ws, "\n__DONE__\n")
 
 
 @sock.route("/ws/rescore-new")
 def rescore_new_ws(ws):
+    _rescore_new_run(ws)
+
+
+def _rescore_new_run(ws):
+    """See _agent_run's docstring for why this is factored out of rescore_new_ws."""
     global _agent_process
 
     with _RunGuard() as acquired:
@@ -313,29 +363,41 @@ def rescore_new_ws(ws):
             return
 
         started_at = usage_repository.now_iso()
+        session_id = session_repository.start()  # see _agent_run for why this spans the whole handler
+        status = "done"
 
-        with _open_log() as log_file:
-            header = "=== RE-SCORE NEW JOBS ===\n"
-            log_file.write(header)
-            _safe_send(ws, header)
+        try:
+            with _open_log() as log_file:
+                header = "=== RE-SCORE NEW JOBS ===\n"
+                log_file.write(header)
+                _safe_send(ws, header)
 
-            msg = "--- Distilling preferences...\n"
-            log_file.write(msg)
-            _safe_send(ws, msg)
-            _run_script(ws, os.path.join(ROOT, "scripts", "distill_preferences.py"), log_file=log_file)
+                msg = "--- Distilling preferences...\n"
+                log_file.write(msg)
+                _safe_send(ws, msg)
+                _run_script(ws, os.path.join(ROOT, "scripts", "distill_preferences.py"), log_file=log_file)
 
-            msg = "--- Scoring...\n"
-            log_file.write(msg)
-            _safe_send(ws, msg)
-            _run_script(ws, os.path.join(ROOT, "scripts", "rescore_new.py"), log_file=log_file)
-
-        usage_repository.record_run_summary("rescore_new", started_at)
-        _agent_process = None
-        _safe_send(ws, "\n__DONE__\n")
+                msg = "--- Scoring...\n"
+                log_file.write(msg)
+                _safe_send(ws, msg)
+                _run_script(ws, os.path.join(ROOT, "scripts", "rescore_new.py"), log_file=log_file)
+        except Exception:
+            status = "error"
+            raise
+        finally:
+            session_repository.finish(session_id, jobs_found=0, jobs_scored=0, status=status)
+            usage_repository.record_run_summary("rescore_new", started_at)
+            _agent_process = None
+            _safe_send(ws, "\n__DONE__\n")
 
 
 @sock.route("/ws/rank")
 def rank_ws(ws):
+    _rank_run(ws)
+
+
+def _rank_run(ws):
+    """See _agent_run's docstring for why this is factored out of rank_ws."""
     global _agent_process
 
     with _RunGuard() as acquired:
@@ -344,13 +406,20 @@ def rank_ws(ws):
             return
 
         started_at = usage_repository.now_iso()
+        session_id = session_repository.start()  # see _agent_run for why this spans the whole handler
+        status = "done"
 
-        with _open_log() as log_file:
-            header = "=== AI RANKING (Voyage + Claude Opus) ===\n"
-            log_file.write(header)
-            _safe_send(ws, header)
-            _run_script(ws, os.path.join(ROOT, "scripts", "rank_jobs.py"), log_file=log_file)
-
-        usage_repository.record_run_summary("rank", started_at)
-        _agent_process = None
-        _safe_send(ws, "\n__DONE__\n")
+        try:
+            with _open_log() as log_file:
+                header = "=== AI RANKING (Voyage + Claude Opus) ===\n"
+                log_file.write(header)
+                _safe_send(ws, header)
+                _run_script(ws, os.path.join(ROOT, "scripts", "rank_jobs.py"), log_file=log_file)
+        except Exception:
+            status = "error"
+            raise
+        finally:
+            session_repository.finish(session_id, jobs_found=0, jobs_scored=0, status=status)
+            usage_repository.record_run_summary("rank", started_at)
+            _agent_process = None
+            _safe_send(ws, "\n__DONE__\n")
