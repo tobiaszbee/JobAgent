@@ -153,9 +153,9 @@ def _safe_send(ws, msg: str) -> None:
         pass
 
 
-def _run_script(ws, script_path: str, args: list[str] = [], log_file=None) -> int:
+def _run_script(ws, script_path: str, args: list[str] | None = None, log_file=None) -> int:
     global _agent_process
-    cmd = [PYTHON, "-u", script_path] + args
+    cmd = [PYTHON, "-u", script_path] + (args or [])
     env = os.environ.copy()
     env["PYTHONPATH"] = ROOT
     env["PYTHONIOENCODING"] = "utf-8"
