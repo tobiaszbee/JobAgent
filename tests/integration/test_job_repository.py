@@ -248,6 +248,20 @@ class TestSearch:
         result = job_repository.search(status="all", query=unique)
         assert [r["id"] for r in result] == [id1]
 
+    def test_limit_and_offset(self):
+        id1 = _insert(url="https://a.com/1")
+        id2 = _insert(company="Beta", url="https://a.com/2")
+        id3 = _insert(company="Gamma", url="https://a.com/3")
+        job_repository.update_score(id1, 9.0, "great")
+        job_repository.update_score(id2, 8.0, "good")
+        job_repository.update_score(id3, 7.0, "ok")
+
+        result = job_repository.search(status="all", limit=2)
+        assert [r["id"] for r in result] == [id1, id2]
+
+        result = job_repository.search(status="all", limit=2, offset=2)
+        assert [r["id"] for r in result] == [id3]
+
 
 class TestGetMissingDescriptions:
     def test_returns_job_without_description(self):

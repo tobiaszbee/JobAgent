@@ -95,6 +95,8 @@ def search(
     min_score: float | None = None,
     query: str | None = None,
     source: str | None = None,
+    limit: int | None = None,
+    offset: int | None = None,
 ) -> list[dict]:
     params = {}
     if status is not None:
@@ -105,6 +107,10 @@ def search(
         params["query"] = query
     if source is not None:
         params["source"] = source
+    if limit is not None:
+        params["limit"] = limit
+    if offset is not None:
+        params["offset"] = offset
     return api_client.get("/api/jobs", params=params).json()
 
 
