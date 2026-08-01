@@ -48,6 +48,15 @@ class TestEvalReport:
         assert report["would_apply"]["flagged_total"] == 1
         assert report["would_apply"]["precision"] == 1.0
 
+    def test_score_floor_reflects_local_config_not_jobagentweb_mirror(self, monkeypatch):
+        # JobAgentWeb keeps its own copy of this value for its own display
+        # convenience — JobAgent must never trust it over its own config, since
+        # JobAgent is the one that actually enforces the floor.
+        import evaluation.harness as harness
+        monkeypatch.setitem(harness.WOULD_APPLY, "score_floor", 9.5)
+        report = eval_report()
+        assert report["would_apply_score_floor"] == 9.5
+
 
 class TestDivergenceCases:
     def test_no_ranked_jobs_returns_empty(self):
