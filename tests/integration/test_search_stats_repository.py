@@ -29,6 +29,7 @@ class TestGetQuerySummary:
         session_id = session_repository.start()
         search_stats_repository.record(session_id, "linkedin", "PHP Developer", "Austria", cards_found=0, new_found=0)
         search_stats_repository.record(session_id, "linkedin", "PHP Developer", "Belgium", cards_found=0, new_found=0)
+        session_repository.finish(session_id, jobs_found=0, jobs_scored=0)
         session_id_2 = session_repository.start()
         search_stats_repository.record(session_id_2, "linkedin", "PHP Developer", "Austria", cards_found=5, new_found=1)
 

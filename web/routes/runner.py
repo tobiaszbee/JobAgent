@@ -9,6 +9,7 @@ from datetime import datetime
 from flask import Blueprint
 from flask_sock import Sock
 
+import api_client
 from db.repositories import session_repository, usage_repository
 
 bp = Blueprint("runner", __name__)
@@ -76,6 +77,21 @@ class _RunGuard:
     def __exit__(self, *_exc):
         global _run_active
         _run_active = False
+
+
+def _start_session_or_none(ws) -> int | None:
+    """session_repository.start() now fails server-side (409) if this account
+    already has a running session — the real guard against two concurrent runs,
+    since _RunGuard is only an in-process flag and does nothing for a run
+    launched directly from a terminal (e.g. `python collector/runner.py`)
+    racing a dashboard-started one, which is exactly what happened in
+    production. Sends a friendly message and returns None instead of letting
+    the ApiError propagate uncaught out of the websocket handler."""
+    try:
+        return session_repository.start()
+    except api_client.ApiError as e:
+        ws.send(f"ERROR: {e.detail}\n")
+        return None
 
 
 @bp.get("/api/agent/status")
@@ -242,7 +258,9 @@ def _agent_run(ws):
         # distill/extract/evaluate/rank were still running, letting a separately
         # launched process race with this one undetected (see collector/runner.py's
         # own start()/finish(), scoped only to collection).
-        session_id = session_repository.start()
+        session_id = _start_session_or_none(ws)
+        if session_id is None:
+            return
         status = "done"
 
         try:
@@ -288,7 +306,9 @@ def _backfill_run(ws):
 
         script = os.path.join(ROOT, "scripts", "backfill_descriptions.py")
         started_at = usage_repository.now_iso()
-        session_id = session_repository.start()  # see _agent_run for why this spans the whole handler
+        session_id = _start_session_or_none(ws)  # see _agent_run for why this spans the whole handler
+        if session_id is None:
+            return
         status = "done"
 
         try:
@@ -329,7 +349,9 @@ def _reevaluate_rejected_run(ws):
 
         script = os.path.join(ROOT, "scripts", "reevaluate_rejected.py")
         started_at = usage_repository.now_iso()
-        session_id = session_repository.start()  # see _agent_run for why this spans the whole handler
+        session_id = _start_session_or_none(ws)  # see _agent_run for why this spans the whole handler
+        if session_id is None:
+            return
         status = "done"
 
         try:
@@ -363,7 +385,9 @@ def _rescore_new_run(ws):
             return
 
         started_at = usage_repository.now_iso()
-        session_id = session_repository.start()  # see _agent_run for why this spans the whole handler
+        session_id = _start_session_or_none(ws)  # see _agent_run for why this spans the whole handler
+        if session_id is None:
+            return
         status = "done"
 
         try:
@@ -406,7 +430,9 @@ def _rank_run(ws):
             return
 
         started_at = usage_repository.now_iso()
-        session_id = session_repository.start()  # see _agent_run for why this spans the whole handler
+        session_id = _start_session_or_none(ws)  # see _agent_run for why this spans the whole handler
+        if session_id is None:
+            return
         status = "done"
 
         try:

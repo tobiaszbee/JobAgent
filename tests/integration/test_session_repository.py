@@ -1,4 +1,8 @@
 import time
+
+import pytest
+
+import api_client
 from db.repositories import session_repository
 from web.routes.runner import _days_since_last_run
 
@@ -11,8 +15,19 @@ class TestStart:
 
     def test_each_call_returns_unique_id(self):
         id1 = session_repository.start()
+        session_repository.finish(id1, jobs_found=0, jobs_scored=0)
         id2 = session_repository.start()
         assert id1 != id2
+
+    def test_second_start_while_one_is_running_raises(self):
+        # A run launched directly from a terminal used to have no guard at all
+        # against a second concurrent run — only the dashboard's in-process
+        # _RunGuard did, which a terminal invocation bypasses entirely. This is
+        # now enforced server-side, so it holds regardless of which client starts it.
+        session_repository.start()
+        with pytest.raises(api_client.ApiError) as exc_info:
+            session_repository.start()
+        assert exc_info.value.status_code == 409
 
 
 class TestFinish:
