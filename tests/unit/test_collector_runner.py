@@ -1,10 +1,12 @@
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from config import STEALTH
 from collector.base import RawJob
 from collector.runner import (
     _search_pause_seconds, _fetch_one, _fetch_descriptions_directly, _fetch_descriptions_in_batches,
-    _locations_for_source, _collect_job_cards,
+    _locations_for_source, _collect_job_cards, run as collector_run,
 )
 
 
@@ -229,3 +231,72 @@ class TestCollectJobCardsSearchQueryAttribution:
         )
 
         assert mock_jobs.insert.call_args.kwargs["search_query"] == "Senior PHP Developer"
+
+
+def _mock_run_deps(mock_criteria, mock_jobs, mock_collect, mock_lang, mock_kw):
+    mock_criteria.get_active_dict.return_value = {
+        "titles": ["PHP"], "locations": ["Poland"], "search_queries": [], "rejected": [],
+    }
+    mock_jobs.get_all_urls.return_value = set()
+    mock_collect.return_value = (0, 0, [])
+    mock_lang.return_value = {"checked": 0, "auto_rejected": 0}
+    mock_kw.return_value = {"checked": 0, "auto_rejected": 0}
+
+
+class TestRunSessionOwnership:
+    """Regression coverage for the dashboard's 'Run Agent' pipeline: the outer
+    websocket handler already has an active session spanning the whole run, so
+    the COLLECTOR stage must reuse it instead of starting its own — starting a
+    second one gets rejected by JobAgentWeb's concurrent-session guard."""
+
+    @patch("collector.runner.apply_keyword_filter")
+    @patch("collector.runner.apply_language_filter")
+    @patch("collector.runner._collect_job_cards")
+    @patch("collector.runner.job_repository")
+    @patch("collector.runner.session_repository")
+    @patch("collector.runner.criteria_repository")
+    def test_starts_and_finishes_its_own_session_when_none_given(
+        self, mock_criteria, mock_session, mock_jobs, mock_collect, mock_lang, mock_kw,
+    ):
+        _mock_run_deps(mock_criteria, mock_jobs, mock_collect, mock_lang, mock_kw)
+        mock_session.start.return_value = 99
+
+        collector_run(days_back=1)
+
+        mock_session.start.assert_called_once()
+        mock_session.finish.assert_called_once_with(99, jobs_found=0, jobs_scored=0)
+
+    @patch("collector.runner.apply_keyword_filter")
+    @patch("collector.runner.apply_language_filter")
+    @patch("collector.runner._collect_job_cards")
+    @patch("collector.runner.job_repository")
+    @patch("collector.runner.session_repository")
+    @patch("collector.runner.criteria_repository")
+    def test_reuses_given_session_and_never_starts_or_finishes_its_own(
+        self, mock_criteria, mock_session, mock_jobs, mock_collect, mock_lang, mock_kw,
+    ):
+        _mock_run_deps(mock_criteria, mock_jobs, mock_collect, mock_lang, mock_kw)
+
+        collector_run(days_back=1, session_id=42)
+
+        mock_session.start.assert_not_called()
+        mock_session.finish.assert_not_called()
+        assert mock_collect.call_args.args[-1] == 42
+
+    @patch("collector.runner.apply_keyword_filter")
+    @patch("collector.runner.apply_language_filter")
+    @patch("collector.runner._collect_job_cards")
+    @patch("collector.runner.job_repository")
+    @patch("collector.runner.session_repository")
+    @patch("collector.runner.criteria_repository")
+    def test_reused_session_is_not_finished_on_failure_either(
+        self, mock_criteria, mock_session, mock_jobs, mock_collect, mock_lang, mock_kw,
+    ):
+        _mock_run_deps(mock_criteria, mock_jobs, mock_collect, mock_lang, mock_kw)
+        mock_jobs.get_all_urls.side_effect = RuntimeError("boom")
+
+        with pytest.raises(RuntimeError):
+            collector_run(days_back=1, session_id=42)
+
+        mock_session.start.assert_not_called()
+        mock_session.finish.assert_not_called()

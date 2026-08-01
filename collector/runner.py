@@ -282,6 +282,7 @@ def run(
     locations: list[str] | None = None,
     search_queries_override: list[str] | None = None,
     source_ids: list[str] | None = None,
+    session_id: int | None = None,
 ) -> dict:
     criteria = criteria_repository.get_active_dict()
     if titles:
@@ -297,7 +298,14 @@ def run(
 
     selected_sources = source_ids or [s["id"] for s in available_sources()]
 
-    session_id = session_repository.start()
+    # A caller running us as part of a larger pipeline (the dashboard's "Run
+    # Agent") already has an active session spanning the whole run — starting
+    # a second one here would be rejected by JobAgentWeb's concurrent-session
+    # guard, since the outer session is still 'running'. Only start/finish our
+    # own session when nobody handed us one to reuse.
+    owns_session = session_id is None
+    if owns_session:
+        session_id = session_repository.start()
     jobs_found = 0
     jobs_new = 0
 
@@ -338,7 +346,8 @@ def run(
         else:
             logger.info("No criteria configured — all jobs passed through")
 
-        session_repository.finish(session_id, jobs_found=jobs_found, jobs_scored=0)
+        if owns_session:
+            session_repository.finish(session_id, jobs_found=jobs_found, jobs_scored=0)
 
         logger.info("\n" + "=" * 50)
         logger.info(f"Done. Found: {jobs_found}  New: {jobs_new}")
@@ -346,7 +355,8 @@ def run(
         return {"jobs_found": jobs_found, "jobs_new": jobs_new}
 
     except Exception as e:
-        session_repository.finish(session_id, jobs_found=jobs_found, jobs_scored=0, status="error")
+        if owns_session:
+            session_repository.finish(session_id, jobs_found=jobs_found, jobs_scored=0, status="error")
         logger.error(str(e))
         raise
 
@@ -364,6 +374,7 @@ if __name__ == "__main__":
     parser.add_argument("--locations",      nargs="*", default=None, help="Override search locations")
     parser.add_argument("--search-queries", nargs="*", default=None, help="Override search queries")
     parser.add_argument("--sources",        nargs="*", default=None, help="Sources to use (default: all)")
+    parser.add_argument("--session-id",     type=int,  default=None, help="Reuse an existing session (set by the dashboard when this runs as one stage of a larger pipeline) instead of starting a new one")
     args = parser.parse_args()
 
     run(
@@ -373,4 +384,5 @@ if __name__ == "__main__":
         locations=args.locations,
         search_queries_override=args.search_queries,
         source_ids=args.sources,
+        session_id=args.session_id,
     )

@@ -139,6 +139,31 @@ class TestSessionSpansWholeHandler:
         assert session_repository.has_active_run() is False  # released once the handler returns
         assert session_repository.get_latest()["status"] == "done"
 
+    def test_agent_ws_passes_the_real_session_id_to_the_collector_stage(self):
+        # Regression guard: the outer handler already holds an active session for
+        # the whole run before the collector subprocess is spawned. If the
+        # collector subprocess called session_repository.start() itself (as it
+        # used to), JobAgentWeb's concurrent-session guard rejects it — the
+        # collector stage would fail every single "Run Agent" click. Confirms
+        # the placeholder in the collector's args is replaced with the real id,
+        # not left as the literal placeholder string.
+        mock_ws = MagicMock()
+        mock_ws.receive.return_value = json.dumps({"days": 1})
+        collector_args = []
+
+        def _fake_run_script(ws, script_path, args=None, log_file=None):
+            if "collector" in script_path:
+                collector_args.append(args)
+            return 0
+
+        with patch("web.routes.runner._run_script", side_effect=_fake_run_script):
+            runner_module._agent_run(mock_ws)
+
+        assert len(collector_args) == 1
+        assert "--session-id" in collector_args[0]
+        session_id_arg = collector_args[0][collector_args[0].index("--session-id") + 1]
+        assert session_id_arg == str(session_repository.get_latest()["id"])
+
     def test_agent_ws_skips_post_collect_stages_when_collector_fails(self):
         # Regression guard for _run_pipeline_ws's stop_if_fails: nothing new was
         # collected, so distill/extract/evaluate/prune/rank have nothing to do —

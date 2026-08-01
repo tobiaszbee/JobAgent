@@ -34,6 +34,12 @@ def init_sock(app):
 
 _DEFAULT_DAYS_NO_PRIOR_RUN = 7
 
+# Sentinel substituted with the real session id once _run_pipeline_ws has one —
+# build_stages() runs before the session exists (see its call site below), but
+# the COLLECTOR stage needs to reuse the same session id rather than starting
+# its own, or JobAgentWeb's concurrent-session guard rejects the second start().
+_SESSION_ID_PLACEHOLDER = "__SESSION_ID__"
+
 
 def _days_since_last_run() -> int:
     """Collector sources filter by whole days, not exact timestamps — so "since last
@@ -248,6 +254,11 @@ def _run_pipeline_ws(ws, run_label: str, build_stages) -> None:
             return
         status = "done"
 
+        stages = [
+            (label, path, [str(session_id) if a == _SESSION_ID_PLACEHOLDER else a for a in args], stop_if_fails)
+            for label, path, args, stop_if_fails in stages
+        ]
+
         try:
             with _open_log() as log_file:
                 for i, (label, script_path, args, stop_if_fails) in enumerate(stages):
@@ -298,7 +309,7 @@ def _agent_run(ws):
                 ws.send("ERROR: Invalid parameter 'days' — must be an integer.\n")
                 return None
 
-        collector_args = ["--days", str(days)]
+        collector_args = ["--days", str(days), "--session-id", _SESSION_ID_PLACEHOLDER]
         stages = [(f"COLLECTOR (days={days})", os.path.join(ROOT, "collector", "runner.py"), collector_args, True)]
         stages += _post_collect_stages()
         return stages
