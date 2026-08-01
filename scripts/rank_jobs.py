@@ -20,6 +20,7 @@ from embeddings.indexer import build_ideal_vector, score_by_similarity, index_jo
 from ranker.reranker import rerank_jobs
 from ranker.listwise import listwise_rank
 from ranker.debate import debate_rank
+from ranker.rank_cache import reuse_if_unchanged
 from ranker.would_apply import compute_would_apply
 from evaluator.profile import load_active_profile
 from config import RANKING
@@ -89,20 +90,23 @@ else:
     for j in rerank_pool:
         j["rerank_score"] = j.get("_embedding_score")
 
-# Step 4: Listwise Opus ranking (top-N)
+# Step 4: Listwise Opus ranking + debate review (top-N) — skipped when the
+# candidate set is identical to what was ranked last run, since re-running
+# Opus/debate against the exact same jobs would just reproduce the same
+# reasoning at full cost (the one real repeated waste flagged by the audit).
 listwise_pool = rerank_pool[:RANKING["top_n_listwise"]]
-if listwise_pool:
+reused = reuse_if_unchanged(listwise_pool, jobs)
+if reused is not None:
+    if reused:
+        print(f"\nTop-{len(reused)} candidate set unchanged since last run — reusing previous listwise + debate results")
+    ranked = reused
+else:
     print(f"\nListwise ranking {len(listwise_pool)} job(s) with Claude Opus + extended thinking...")
     ranked = listwise_rank(listwise_pool, candidate_profile, preferences)
-else:
-    ranked = []
-
-# Step 4b: Debate — second-opinion critique of the shortlist only (not the full pool)
-if ranked:
     print(f"\nDebate review of top-{len(ranked)} with a second model...")
     ranked = debate_rank(ranked, candidate_profile)
 
-# Step 4c: Would-apply flag — phase 1 of the auto-apply plan (flag-and-validate
+# Step 4b: Would-apply flag — phase 1 of the auto-apply plan (flag-and-validate
 # only, never sends anything). See ranker/would_apply.py for the gate logic.
 would_apply_items = []
 would_apply_count = 0
