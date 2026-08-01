@@ -1,7 +1,10 @@
+import logging
 from datetime import datetime, timezone
 
 import api_client
 from config import MODEL_COSTS, CACHE_WRITE_MULTIPLIER, CACHE_READ_MULTIPLIER
+
+logger = logging.getLogger(__name__)
 
 
 def _calc_cost(
@@ -33,7 +36,7 @@ def log_usage(
             "output_tokens": output_tokens, "cost_usd": cost,
         })
     except Exception:
-        pass  # Never block the main flow
+        logger.warning(f"Failed to log usage ({module}/{model})", exc_info=True)  # never block the main flow
 
 
 def log_anthropic(response, module: str, model: str) -> None:
@@ -47,7 +50,7 @@ def log_anthropic(response, module: str, model: str) -> None:
             cache_read_tokens=response.usage.cache_read_input_tokens or 0,
         )
     except Exception:
-        pass
+        logger.warning(f"Failed to log Anthropic usage ({module}/{model})", exc_info=True)
 
 
 def log_voyage_embed(total_tokens: int) -> None:
@@ -63,6 +66,7 @@ def get_summary() -> dict:
     try:
         return api_client.get("/api/usage/summary").json()
     except Exception:
+        logger.warning("Failed to fetch usage summary, returning zeroed fallback", exc_info=True)
         return {"today_cost_usd": 0, "today_tokens": 0, "total_cost_usd": 0, "total_tokens": 0, "cost_per_100_usd": None}
 
 
