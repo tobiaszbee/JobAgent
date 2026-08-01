@@ -33,7 +33,7 @@ RANKING = {
 }
 
 WOULD_APPLY = {
-    # Phase 1 of auto-apply: flag-and-validate only. Absolute floor (2026-07-26: 4/222 active jobs cleared it).
+    # Phase 1 of auto-apply: flag-and-validate only, not a live auto-apply threshold yet.
     "score_floor": 7.0,
 }
 
