@@ -68,6 +68,7 @@ Submit your analysis using the submit_profile tool.\
 
 
 _DESC_LIMIT = 1500
+_MAX_APPLIED = 50
 _MAX_REJECTED = 50
 
 
@@ -103,10 +104,16 @@ def _build_dismissed_section(items: list[dict]) -> str:
     return "\n\n" + "\n".join(lines)
 
 
-def _build_prompt(applied: list[dict], rejected: list[dict]) -> str:
+def _build_prompt(applied: list[dict], rejected: list[dict], applied_total: int, rejected_total: int) -> str:
+    """`applied`/`rejected` arrive already capped to at most _MAX_APPLIED/_MAX_REJECTED
+    (most-recent-first) and description-truncated server-side — see
+    job_repository.get_all_feedback(). `applied_total`/`rejected_total` are the true,
+    uncapped counts, only for the "N older omitted" messaging below."""
     sections = []
     if applied:
-        lines = [f"APPLIED ({len(applied)} jobs):"]
+        omitted = applied_total - len(applied)
+        header = f"APPLIED ({applied_total} jobs, showing {len(applied)} most recent" + (f", {omitted} older omitted" if omitted else "") + "):"
+        lines = [header]
         for job in applied:
             lines.append(f"  {_job_line(job)}")
         sections.append("\n".join(lines))
@@ -114,11 +121,10 @@ def _build_prompt(applied: list[dict], rejected: list[dict]) -> str:
         sections.append("APPLIED (0 jobs): none yet")
 
     if rejected:
-        recent = rejected[:_MAX_REJECTED]
-        omitted = len(rejected) - len(recent)
-        header = f"REJECTED ({len(rejected)} jobs, showing {len(recent)} most recent" + (f", {omitted} older omitted" if omitted else "") + "):"
+        omitted = rejected_total - len(rejected)
+        header = f"REJECTED ({rejected_total} jobs, showing {len(rejected)} most recent" + (f", {omitted} older omitted" if omitted else "") + "):"
         lines = [header]
-        for job in recent:
+        for job in rejected:
             lines.append(f"  {_job_line(job, include_reason=True)}")
         sections.append("\n".join(lines))
     else:
@@ -128,16 +134,24 @@ def _build_prompt(applied: list[dict], rejected: list[dict]) -> str:
 
 
 def run() -> dict:
-    applied, rejected = job_repository.get_all_feedback()
+    # applied/rejected are capped samples (most-recent-first, description-truncated
+    # server-side); applied_total/rejected_total are the true counts, needed for
+    # detecting "did anything change since last distillation" — the capped sample's
+    # own length stays pinned at the cap forever once a candidate has more than
+    # _MAX_APPLIED/_MAX_REJECTED decisions, which would silently break that check.
+    applied, rejected = job_repository.get_all_feedback(limit_applied=_MAX_APPLIED, limit_rejected=_MAX_REJECTED)
+    stats = job_repository.get_stats()
+    applied_total = stats["applied"]
+    rejected_total = stats["rejected"]
     dismissed_total = dismissed_item_repository.count_all()
-    if not applied and not rejected and not dismissed_total:
+    if not applied_total and not rejected_total and not dismissed_total:
         logger.info("No feedback data yet — apply, reject, or dismiss a score factor first.")
         return {"ok": False, "reason": "no_data"}
 
     previous_profile = preference_repository.get_latest()
     if previous_profile:
-        if (len(applied) == previous_profile["applied_count"] and
-                len(rejected) == previous_profile["rejected_count"] and
+        if (applied_total == previous_profile["applied_count"] and
+                rejected_total == previous_profile["rejected_count"] and
                 dismissed_total == (previous_profile.get("dismissed_count") or 0)):
             logger.info("No new feedback since last distillation — profile is up to date.")
             signals = previous_profile.get("signals", [])
@@ -149,10 +163,10 @@ def run() -> dict:
             }
 
     logger.info(
-        f"Distilling from {len(applied)} applied + {len(rejected)} rejected "
+        f"Distilling from {applied_total} applied + {rejected_total} rejected "
         f"+ {dismissed_total} dismissed score factor(s)..."
     )
-    prompt = _build_prompt(applied, rejected)
+    prompt = _build_prompt(applied, rejected, applied_total, rejected_total)
     prompt += _build_dismissed_section(dismissed_item_repository.get_recent(50))
 
     from evaluation.harness import divergence_cases
@@ -199,7 +213,7 @@ def run() -> dict:
             return {"ok": False, "reason": "invalid_signal", "signal": sig}
 
     rendered = render_signals(signals)
-    preference_repository.save(signals, len(applied), len(rejected), dismissed_total)
+    preference_repository.save(signals, applied_total, rejected_total, dismissed_total)
     logger.info(f"Preference profile updated ({len(signals)} signals).")
     logger.info(f"Profile:\n{rendered}")
 
@@ -207,8 +221,8 @@ def run() -> dict:
         "ok": True,
         "signals": signals,
         "content": rendered,
-        "applied_count": len(applied),
-        "rejected_count": len(rejected),
+        "applied_count": applied_total,
+        "rejected_count": rejected_total,
     }
 
 

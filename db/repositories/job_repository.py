@@ -75,8 +75,13 @@ def get_examples(limit_positive: int = 25, limit_negative: int = 25) -> tuple[li
     return data["positive"], data["negative"]
 
 
-def get_all_feedback() -> tuple[list[dict], list[dict]]:
-    data = api_client.get("/api/jobs/feedback").json()
+def get_all_feedback(limit_applied: int | None = None, limit_rejected: int | None = None) -> tuple[list[dict], list[dict]]:
+    params = {}
+    if limit_applied is not None:
+        params["limit_applied"] = limit_applied
+    if limit_rejected is not None:
+        params["limit_rejected"] = limit_rejected
+    data = api_client.get("/api/jobs/feedback", params=params).json()
     return data["applied"], data["rejected"]
 
 

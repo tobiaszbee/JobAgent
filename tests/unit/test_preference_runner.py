@@ -40,27 +40,27 @@ def test_job_line_falls_back_to_score_reason():
 
 def test_build_prompt_applied_section():
     applied = [_job("SWE", "BigCo", "USA (Remote)")]
-    prompt = _build_prompt(applied, [])
-    assert "APPLIED (1 jobs)" in prompt
+    prompt = _build_prompt(applied, [], 1, 0)
+    assert "APPLIED (1 jobs, showing 1 most recent)" in prompt
     assert "SWE" in prompt
     assert "BigCo" in prompt
 
 
 def test_build_prompt_rejected_section():
     rejected = [_job("Junior Dev", "AgencyCo", rejection_reason="stawka za niska")]
-    prompt = _build_prompt([], rejected)
+    prompt = _build_prompt([], rejected, 0, 1)
     assert "REJECTED (1 jobs" in prompt
     assert "Junior Dev" in prompt
     assert "stawka za niska" in prompt
 
 
 def test_build_prompt_applied_empty():
-    prompt = _build_prompt([], [_job("X", "Y")])
+    prompt = _build_prompt([], [_job("X", "Y")], 0, 1)
     assert "APPLIED (0 jobs)" in prompt
 
 
 def test_build_prompt_rejected_empty():
-    prompt = _build_prompt([_job("X", "Y")], [])
+    prompt = _build_prompt([_job("X", "Y")], [], 1, 0)
     assert "REJECTED (0 jobs)" in prompt
 
 
@@ -75,19 +75,34 @@ def test_job_line_strips_linkedin_junk():
 
 def test_build_prompt_description_not_truncated():
     long_desc = "PHP " * 200  # 800 chars
-    prompt = _build_prompt([_job(description=long_desc)], [])
+    prompt = _build_prompt([_job(description=long_desc)], [], 1, 0)
     assert long_desc.strip() in prompt
 
 
-def test_build_prompt_caps_rejected_at_max_and_shows_most_recent():
-    from preference_agent.runner import _MAX_REJECTED
-    # Feed _MAX_REJECTED + 5 jobs; first ones in the list are most recent (DESC order from DB)
-    rejected = [_job(title=f"Job {i}") for i in range(_MAX_REJECTED + 5)]
-    prompt = _build_prompt([], rejected)
-    # Most recent (first in list) must appear; oldest (beyond cap) must be omitted
+def test_build_prompt_shows_older_omitted_count_when_total_exceeds_sample():
+    # Capping now happens upstream (job_repository.get_all_feedback's limit_*
+    # params, enforced server-side) — _build_prompt just renders whatever sample
+    # it's given plus the true total, so the "N older omitted" messaging is a
+    # function of (total - len(sample)), not of any cap _build_prompt applies itself.
+    rejected = [_job(title=f"Job {i}") for i in range(50)]
+    prompt = _build_prompt([], rejected, 0, rejected_total=55)
     assert "Job 0" in prompt
-    assert f"Job {_MAX_REJECTED}" not in prompt
-    assert "older omitted" in prompt
+    assert "showing 50 most recent" in prompt
+    assert "5 older omitted" in prompt
+
+
+def test_build_prompt_no_omitted_message_when_sample_covers_everything():
+    rejected = [_job(title="Job 0")]
+    prompt = _build_prompt([], rejected, 0, rejected_total=1)
+    assert "older omitted" not in prompt
+
+
+def test_build_prompt_applied_also_shows_older_omitted():
+    # Regression: only REJECTED used to get the "showing N most recent, M older
+    # omitted" treatment — APPLIED had no cap at all before this fix.
+    applied = [_job(title=f"Job {i}") for i in range(50)]
+    prompt = _build_prompt(applied, [], applied_total=53, rejected_total=0)
+    assert "APPLIED (53 jobs, showing 50 most recent, 3 older omitted)" in prompt
 
 
 def test_build_dismissed_section_empty_returns_empty_string():
