@@ -10,8 +10,8 @@
 set -euo pipefail
 
 APP_USER="jobagent"
-APP_DIR="/opt/jobagent"
-REPO_URL="https://github.com/tobiaszbee/JobAgent.git"
+APP_DIR="/opt/jobagentweb"
+REPO_URL="https://github.com/tobiaszbee/JobAgentWeb.git"
 
 echo "== apt update/upgrade =="
 apt-get update -y
@@ -63,8 +63,9 @@ cat <<'EOF'
      then: systemctl enable --now wg-quick@wg0
   3. Point Postgres at the WireGuard interface only (see chat for the exact
      listen_addresses / pg_hba.conf lines — depends on your Postgres version's config path)
-  4. cp deploy/env.web.example /opt/jobagent/.env.web   and fill in the real Postgres password
+  4. cp deploy/env.example /opt/jobagentweb/.env   and fill in the real Postgres password,
+     SECRET_KEY and INVITE_CODE
   5. cp deploy/jobagentweb.service /etc/systemd/system/ && systemctl enable --now jobagentweb
-  6. caddy hash-password   (paste the result into deploy/Caddyfile, fill in your real domain)
+  6. Fill in your real domain in deploy/Caddyfile, then:
      cp deploy/Caddyfile /etc/caddy/Caddyfile && systemctl reload caddy
 EOF

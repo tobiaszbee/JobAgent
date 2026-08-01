@@ -1,11 +1,19 @@
 # /etc/caddy/Caddyfile on the VPS.
-# 1. Replace yourdomain.pl with the real domain (A record must already point at
-#    this VPS's IP for Caddy's automatic Let's Encrypt TLS to succeed).
-# 2. Generate the password hash: caddy hash-password
-#    Paste the result in place of REPLACE_WITH_HASH below.
+# Replace yourdomain.pl with the real domain (A record must already point at
+# this VPS's IP for Caddy's automatic Let's Encrypt TLS to succeed).
+#
+# No basic_auth here — JobAgentWeb has its own per-user login (see routers/auth.py,
+# session_epoch), so Caddy only needs to reverse-proxy and keep the site out of
+# search indexes.
 yourdomain.pl {
-    basic_auth {
-        viewer REPLACE_WITH_HASH
+    header X-Robots-Tag "noindex, nofollow, noarchive"
+
+    handle /robots.txt {
+        header Content-Type "text/plain"
+        respond `User-agent: *
+Disallow: /
+`
     }
+
     reverse_proxy 127.0.0.1:8000
 }
