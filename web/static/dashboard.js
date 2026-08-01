@@ -1354,7 +1354,22 @@ function _runGeneric(wsPath, title) {
   };
 }
 
-function reevaluateRejected() { _runGeneric('/ws/reevaluate-rejected', 'Re-evaluating auto-rejected jobs'); }
+async function reevaluateRejected() {
+  let count = 0, costPer100 = null;
+  try {
+    const r = await fetch('/api/stats');
+    const s = await r.json();
+    count = s.auto_rejected || 0;
+    costPer100 = s.usage && s.usage.cost_per_100_usd;
+  } catch {}
+
+  if (count === 0) { alert('No auto-rejected jobs to re-evaluate.'); return; }
+
+  const estCost = costPer100 != null ? ` (est. $${(count / 100 * costPer100).toFixed(2)})` : '';
+  if (!confirm(`Re-evaluate ${count} auto-rejected job(s)? This re-runs the keyword filter and AI scoring on each one${estCost}.`)) return;
+
+  _runGeneric('/ws/reevaluate-rejected', 'Re-evaluating auto-rejected jobs');
+}
 function rescoreNew()         { _runGeneric('/ws/rescore-new', 'Re-scoring new jobs'); }
 function rankJobs()           { _runGeneric('/ws/rank', 'Ranking jobs (AI)'); }
 
