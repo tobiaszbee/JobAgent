@@ -113,10 +113,14 @@ def build_ideal_vector(candidate_profile: str | None = None) -> list[float] | No
 
 
 def score_by_similarity(job_ids: list[str], ideal: list[float]) -> dict[str, float]:
-    """Return cosine similarity for each job_id against the ideal vector."""
+    """Return cosine similarity for each job_id against the ideal vector.
+
+    Computed server-side (JobAgentWeb has the vectors already) instead of
+    fetching every raw vector over HTTP just to reduce each one to a single
+    float locally: a 1024-dim vector is ~22 KB of JSON, so the old approach
+    shipped tens of MB for a pool of a couple thousand jobs — and retried the
+    whole transfer on any timeout, since api_client treats those as retryable."""
     if not job_ids or not ideal:
         return {}
 
-    client = _get_client()
-    vectors = api_client.post("/api/embeddings/vectors", json={"job_ids": job_ids}).json()
-    return {job_id: client.cosine_similarity(ideal, vec) for job_id, vec in vectors.items()}
+    return api_client.post("/api/embeddings/similarity", json={"ideal": ideal, "job_ids": job_ids}).json()

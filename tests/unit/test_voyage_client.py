@@ -3,26 +3,6 @@ from unittest.mock import MagicMock, patch
 from embeddings.client import VoyageClient
 
 
-class TestCosineSimilarity:
-    def test_orthogonal_vectors_return_zero(self):
-        assert VoyageClient.cosine_similarity([1.0, 0.0], [0.0, 1.0]) == 0.0
-
-    def test_identical_vectors_return_one(self):
-        v = [1.0, 2.0, 3.0]
-        assert abs(VoyageClient.cosine_similarity(v, v) - 1.0) < 1e-9
-
-    def test_opposite_vectors_return_minus_one(self):
-        assert abs(VoyageClient.cosine_similarity([1.0, 0.0], [-1.0, 0.0]) - (-1.0)) < 1e-9
-
-    def test_zero_vector_returns_zero(self):
-        assert VoyageClient.cosine_similarity([0.0, 0.0], [1.0, 2.0]) == 0.0
-
-    def test_known_values(self):
-        # [1,1] vs [1,0]: dot=1, |a|=sqrt(2), |b|=1 → 1/sqrt(2) ≈ 0.707
-        result = VoyageClient.cosine_similarity([1.0, 1.0], [1.0, 0.0])
-        assert abs(result - (1.0 / 2**0.5)) < 1e-9
-
-
 class TestEmbed:
     @patch("embeddings.client.VoyageClient.__init__", return_value=None)
     def test_returns_embeddings_from_voyageai(self, _mock_init):

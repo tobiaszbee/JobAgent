@@ -1,4 +1,3 @@
-import math
 import logging
 
 from config import VOYAGE_API_KEY, VOYAGE_EMBED_MODEL, VOYAGE_RERANK_MODEL
@@ -42,12 +41,3 @@ class VoyageClient:
         except Exception:
             pass
         return [{"index": r.index, "score": r.relevance_score} for r in result.results]
-
-    @staticmethod
-    def cosine_similarity(a: list[float], b: list[float]) -> float:
-        dot = sum(x * y for x, y in zip(a, b))
-        norm_a = math.sqrt(sum(x * x for x in a))
-        norm_b = math.sqrt(sum(x * x for x in b))
-        if norm_a == 0 or norm_b == 0:
-            return 0.0
-        return dot / (norm_a * norm_b)

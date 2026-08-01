@@ -5,7 +5,6 @@ from unittest.mock import MagicMock, patch
 
 import api_client
 from db.repositories import job_repository
-from embeddings.client import VoyageClient
 from embeddings.indexer import _embed_with_retry, _job_to_text, build_ideal_vector, index_jobs, score_by_similarity
 
 
@@ -217,26 +216,17 @@ class TestScoreBySimilarity:
         assert score_by_similarity(["j1"], []) == {}
 
     def test_computes_cosine_similarity(self):
+        # Computed server-side now (JobAgentWeb's /api/embeddings/similarity) rather
+        # than fetched-then-scored locally — no VoyageClient involved at all here.
         j1 = _insert_job()
         _insert_embedding(j1, [1.0, 0.0])
 
-        ideal = [1.0, 0.0]
-
-        with patch("embeddings.indexer._get_client") as mock_get:
-            mock_client = MagicMock()
-            mock_client.cosine_similarity = VoyageClient.cosine_similarity
-            mock_get.return_value = mock_client
-
-            scores = score_by_similarity([j1], ideal)
+        scores = score_by_similarity([j1], [1.0, 0.0])
 
         assert j1 in scores
         assert abs(scores[j1] - 1.0) < 1e-9
 
     def test_missing_embedding_not_in_result(self):
         j1 = _insert_job()  # no embedding
-
-        with patch("embeddings.indexer._get_client") as mock_get:
-            mock_get.return_value = MagicMock()
-            scores = score_by_similarity([j1], [1.0, 0.0])
-
+        scores = score_by_similarity([j1], [1.0, 0.0])
         assert scores == {}
