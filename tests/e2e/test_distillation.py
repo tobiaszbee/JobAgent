@@ -149,7 +149,8 @@ class TestDistillation:
         from config import ANTHROPIC_API_KEY, CLAUDE_MODEL
 
         applied, rejected = job_repository.get_all_feedback()
-        prompt = _build_prompt(applied, rejected)
+        stats = job_repository.get_stats()
+        prompt = _build_prompt(applied, rejected, stats["applied"], stats["rejected"])
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
         response = client.messages.create(
             model=CLAUDE_MODEL,
