@@ -21,21 +21,21 @@ class TestPostCollectStages:
         # evaluator/dealbreakers.py's pre-LLM filter reads structured_data, and jobs
         # never re-enter the "unscored" pool once evaluated — so extraction must
         # happen before evaluation, or the dealbreaker filter never has data to act on.
-        labels = [label for label, _, _ in _post_collect_stages()]
+        labels = [label for label, _, _, _ in _post_collect_stages()]
         assert labels.index("EXTRACTOR") < labels.index("EVALUATOR") < labels.index("AI RANKING")
 
     def test_all_expected_stages_present_in_order(self):
-        labels = [label for label, _, _ in _post_collect_stages()]
+        labels = [label for label, _, _, _ in _post_collect_stages()]
         assert labels == ["DISTILL PREFERENCES", "EXTRACTOR", "EVALUATOR", "PRUNE QUERIES", "AI RANKING"]
 
     def test_prune_queries_runs_after_evaluator(self):
         # Query pruning reads job status (rejected/auto_rejected/applied), which is
         # only final once the evaluator has run.
-        labels = [label for label, _, _ in _post_collect_stages()]
+        labels = [label for label, _, _, _ in _post_collect_stages()]
         assert labels.index("EVALUATOR") < labels.index("PRUNE QUERIES")
 
     def test_extractor_stage_points_at_extract_jobs_script(self):
-        stages = {label: path for label, path, _ in _post_collect_stages()}
+        stages = {label: path for label, path, _, _ in _post_collect_stages()}
         assert stages["EXTRACTOR"].replace("\\", "/").endswith("scripts/extract_jobs.py")
 
 
@@ -138,3 +138,21 @@ class TestSessionSpansWholeHandler:
         assert all(seen_active), "session must stay active through every stage, not just the first"
         assert session_repository.has_active_run() is False  # released once the handler returns
         assert session_repository.get_latest()["status"] == "done"
+
+    def test_agent_ws_skips_post_collect_stages_when_collector_fails(self):
+        # Regression guard for _run_pipeline_ws's stop_if_fails: nothing new was
+        # collected, so distill/extract/evaluate/prune/rank have nothing to do —
+        # running them anyway would just waste an API-cost cycle on stale data.
+        mock_ws = MagicMock()
+        mock_ws.receive.return_value = json.dumps({"days": 1})
+        calls = []
+
+        def _fake_run_script(ws, script_path, args=None, log_file=None):
+            calls.append(script_path)
+            return 1  # collector "fails"
+
+        with patch("web.routes.runner._run_script", side_effect=_fake_run_script):
+            runner_module._agent_run(mock_ws)
+
+        assert len(calls) == 1  # only the collector ran, every post-collect stage skipped
+        assert session_repository.get_latest()["status"] == "done"  # a handled failure, not an exception
