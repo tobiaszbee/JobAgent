@@ -15,6 +15,15 @@ from config import JOBAGENTWEB_BASE_URL
 
 _SESSION_FILE = Path.home() / ".jobagent" / "session.json"
 
+# Reused across every call instead of opening a fresh TCP/TLS connection per
+# request — every db/repositories/*.py function goes through request() below,
+# so a full pipeline run used to pay a new handshake hundreds of times over,
+# on top of the WireGuard tunnel's own latency. Never explicitly closed: this
+# module is used both by short-lived scripts (the process exit cleans up the
+# socket) and the long-running dashboard (where staying open all run is the
+# point).
+_client = httpx.Client(base_url=JOBAGENTWEB_BASE_URL, timeout=30.0)
+
 
 class NotLoggedInError(Exception):
     pass
@@ -91,11 +100,22 @@ def request(method: str, path: str, **kwargs):
             f"at {JOBAGENTWEB_BASE_URL}/register first."
         )
 
+    # Cleared and re-set on every call, not just set once: httpx.Client auto-
+    # captures Set-Cookie from every response into its own jar by default, and
+    # Starlette's SessionMiddleware re-signs and re-sends the session cookie on
+    # every response — the auto-captured entry and this explicit .set() can
+    # coexist as separate (domain, path) entries in the jar instead of one
+    # replacing the other, so a request can end up sending two "session"
+    # cookies at once, with the server's cookie parser picking whichever it
+    # sees first (observed in practice: a stale cookie from a previous login
+    # sharing this same process, e.g. two isolated test users in one session).
+    _client.cookies.clear()
+    _client.cookies.set("session", cookie)
+
     last_error = None
     for attempt in range(3):
         try:
-            with httpx.Client(base_url=JOBAGENTWEB_BASE_URL, cookies={"session": cookie}, timeout=30.0) as client:
-                resp = client.request(method, path, **kwargs)
+            resp = _client.request(method, path, **kwargs)
             break
         except httpx.TransportError as e:
             last_error = e

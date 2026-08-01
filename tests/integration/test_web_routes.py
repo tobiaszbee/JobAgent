@@ -347,3 +347,22 @@ class TestLoginRouting:
             pytest.skip("chmod is a no-op on Windows — nothing to assert here")
         mode = stat.S_IMODE(api_client._SESSION_FILE.stat().st_mode)
         assert mode == 0o600
+
+
+class TestApiClientReusedConnection:
+    def test_switching_active_user_does_not_leak_previous_users_jobs(self, flask_client, _isolated_user):
+        # Regression: api_client reuses one httpx.Client across every call instead
+        # of opening a fresh connection per request. httpx auto-captures Set-Cookie
+        # from every response into that client's own persistent jar by default, and
+        # JobAgentWeb's SessionMiddleware re-signs the session cookie on every
+        # response — so the auto-captured cookie and api_client's own explicit
+        # cookie-set could coexist as two separate entries in the jar instead of
+        # one replacing the other, and a later request could end up sending the
+        # stale one. Reproduced directly: registering a second user in the same
+        # process without clearing the jar first leaked the first user's jobs.
+        _add_job()
+        assert len(api_client.get("/api/jobs").json()) == 1
+
+        other_username = f"switchtest_{uuid.uuid4().hex[:12]}"
+        api_client.register(other_username, "test-password-not-real", invite_code="test-invite-code")
+        assert api_client.get("/api/jobs").json() == []
