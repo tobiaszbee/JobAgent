@@ -5,6 +5,7 @@ import anthropic
 from config import ANTHROPIC_API_KEY, CLAUDE_EXTRACT_MODEL
 from collector.utils import build_excerpt
 from db.repositories import job_repository
+from db.repositories.usage_repository import log_anthropic
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +86,6 @@ def extract_job(description: str, source: str | None = None) -> dict:
         )
         tool_block = next((b for b in response.content if b.type == "tool_use"), None)
         if tool_block:
-            from db.repositories.usage_repository import log_anthropic
             log_anthropic(response, "extractor", CLAUDE_EXTRACT_MODEL)
             return dict(tool_block.input)
     except Exception as e:

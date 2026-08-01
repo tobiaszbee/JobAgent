@@ -5,6 +5,7 @@ import anthropic
 
 from config import ANTHROPIC_API_KEY, CLAUDE_RANK_MODEL
 from collector.utils import build_excerpt
+from db.repositories.usage_repository import log_anthropic
 
 logger = logging.getLogger(__name__)
 
@@ -135,7 +136,6 @@ Include ALL {len(jobs)} jobs. No text after the closing </ranking> tag."""
         logger.error(f"Listwise ranking failed: {e}")
         return [{**job, "listwise_rank": i + 1, "rank_reason": ""} for i, job in enumerate(jobs)]
 
-    from db.repositories.usage_repository import log_anthropic
     log_anthropic(response, "ranker", CLAUDE_RANK_MODEL)
 
     text_block = next((b for b in response.content if b.type == "text"), None)

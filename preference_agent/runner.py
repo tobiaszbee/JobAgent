@@ -8,6 +8,7 @@ import anthropic
 from config import ANTHROPIC_API_KEY, CLAUDE_DISTILL_MODEL
 from collector.utils import build_excerpt
 from db.repositories import job_repository, preference_repository, dismissed_item_repository
+from db.repositories.usage_repository import log_anthropic
 from preference_agent.profile import _DISTILL_TOOL, render_signals
 
 _SYSTEM = """\
@@ -200,7 +201,6 @@ def run() -> dict:
         logger.error(f"API error: {e}")
         return {"ok": False, "reason": str(e)}
 
-    from db.repositories.usage_repository import log_anthropic
     log_anthropic(response, "distiller", CLAUDE_DISTILL_MODEL)
 
     if response.stop_reason == "max_tokens":

@@ -4,6 +4,7 @@ import anthropic
 
 from config import ANTHROPIC_API_KEY, CLAUDE_MODEL
 from collector.utils import build_excerpt
+from db.repositories.usage_repository import log_anthropic
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +117,6 @@ Use the submit_debate_review tool to report your findings."""
         logger.error(f"Debate review failed: {e}")
         return ranked_jobs
 
-    from db.repositories.usage_repository import log_anthropic
     log_anthropic(response, "debate", CLAUDE_MODEL)
 
     tool_block = next((b for b in response.content if b.type == "tool_use"), None)

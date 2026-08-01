@@ -4,6 +4,7 @@ import anthropic
 
 from config import ANTHROPIC_API_KEY, CLAUDE_MODEL
 from collector.utils import build_excerpt
+from db.repositories.usage_repository import log_anthropic
 from db.types import ScoreResult
 from preference_agent.profile import render_signals
 
@@ -216,7 +217,6 @@ def score_job(job: dict, system_prompt: str) -> ScoreResult:
     if not response or not response.content:
         return {**_ERROR_RESULT, "score_reason": "Empty response from API"}
 
-    from db.repositories.usage_repository import log_anthropic
     log_anthropic(response, "scorer", CLAUDE_MODEL)
 
     tool_block = next((b for b in response.content if b.type == "tool_use"), None)
