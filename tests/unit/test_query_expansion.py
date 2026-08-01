@@ -1,4 +1,7 @@
+import logging
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 
 def _applied_jobs(n: int) -> list[dict]:
@@ -100,3 +103,21 @@ def test_suggest_queries_includes_existing_queries_in_prompt(mock_get_client, mo
 
     assert len(prompts_sent) == 1
     assert "python developer" in prompts_sent[0]
+
+
+class TestApplyRoute:
+    def test_failed_insert_is_logged_and_excluded_from_added_count(self, flask_client, caplog):
+        # Regression guard: this used to be a bare `except Exception: pass` — a
+        # real failure (JobAgentWeb down, session expired) looked identical to
+        # a silently-skipped duplicate, with zero signal anywhere it happened.
+        def fake_insert(type_, value):
+            if value == "bad query":
+                raise RuntimeError("boom")
+
+        with patch("db.repositories.criteria_repository.insert", side_effect=fake_insert):
+            with caplog.at_level(logging.WARNING):
+                resp = flask_client.post("/api/query-expansion/apply", json={"queries": ["good query", "bad query"]})
+
+        assert resp.status_code == 200
+        assert resp.get_json()["added"] == 1
+        assert "bad query" in caplog.text

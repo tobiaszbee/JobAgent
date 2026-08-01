@@ -1,7 +1,11 @@
+import logging
+
 from flask import Blueprint, jsonify, request
 
 from db.repositories import criteria_repository
 from query_expansion.runner import suggest_queries
+
+logger = logging.getLogger(__name__)
 
 bp = Blueprint("query_expansion", __name__)
 
@@ -27,6 +31,6 @@ def apply():
                 criteria_repository.insert("search_query", q)
                 added += 1
             except Exception:
-                pass
+                logger.warning(f"Failed to add suggested search query {q!r}", exc_info=True)
 
     return jsonify({"ok": True, "added": added})

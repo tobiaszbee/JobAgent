@@ -67,9 +67,10 @@ AGENT = {
     "chrome_profile": "data/chrome_profile",
 }
 
-# WireGuard tunnel address, not the public HTTPS URL — Caddy's basic_auth in front of
-# the public site blocks API traffic the same as browser traffic. Requires the tunnel;
-# a real multi-user setup needs Caddy to let /api/* through instead (not needed yet).
+# WireGuard tunnel address, not the public HTTPS URL — JobAgentWeb's own per-user
+# session login is the access control (Caddy just reverse-proxies), but routing API
+# traffic over a private tunnel instead of the public domain is a deliberate choice,
+# not a requirement. See ../JobAgentWeb/README.md#deployment.
 JOBAGENTWEB_BASE_URL = os.getenv("JOBAGENTWEB_BASE_URL", "http://10.66.0.1:8000")
 
 STEALTH = {
