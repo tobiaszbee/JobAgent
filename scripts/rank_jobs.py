@@ -104,36 +104,46 @@ if ranked:
 
 # Step 4c: Would-apply flag — phase 1 of the auto-apply plan (flag-and-validate
 # only, never sends anything). See ranker/would_apply.py for the gate logic.
+would_apply_items = []
 would_apply_count = 0
 for job in ranked:
     flagged, reason = compute_would_apply(job.get("score"), job.get("debate_flag"))
     would_apply_count += flagged
-    job_repository.update_would_apply(job["id"], flagged, reason)
+    would_apply_items.append({"job_id": job["id"], "would_apply": flagged, "reason": reason})
+if would_apply_items:
+    job_repository.update_would_apply_batch(would_apply_items)
 if would_apply_count:
     print(f"\nWould-apply: flagged {would_apply_count}/{len(ranked)} job(s) for validation")
 
-# Step 5: Save ranking results
-for job in ranked:
-    job_repository.update_ranking_scores(
-        job["id"],
-        embedding_score=job.get("_embedding_score"),
-        rerank_score=job.get("rerank_score"),
-        listwise_rank=job.get("listwise_rank"),
-        rank_reason=job.get("rank_reason"),
-        debate_flag=job.get("debate_flag"),
-        debate_note=job.get("debate_note"),
-    )
+# Step 5: Save ranking results — one batched request for the whole pool (ranked
+# jobs plus everything outside the listwise pool) instead of one PATCH per job.
+ranking_items = [
+    {
+        "job_id": job["id"],
+        "embedding_score": job.get("_embedding_score"),
+        "rerank_score": job.get("rerank_score"),
+        "listwise_rank": job.get("listwise_rank"),
+        "rank_reason": job.get("rank_reason"),
+        "debate_flag": job.get("debate_flag"),
+        "debate_note": job.get("debate_note"),
+    }
+    for job in ranked
+]
 
-# Save embedding scores for jobs outside the listwise pool
 ranked_ids = {j["id"] for j in ranked}
-for job in jobs_by_sim:
-    if job["id"] not in ranked_ids:
-        job_repository.update_ranking_scores(
-            job["id"],
-            embedding_score=job.get("_embedding_score"),
-            rerank_score=job.get("rerank_score"),
-            listwise_rank=None,
-        )
+ranking_items += [
+    {
+        "job_id": job["id"],
+        "embedding_score": job.get("_embedding_score"),
+        "rerank_score": job.get("rerank_score"),
+        "listwise_rank": None,
+    }
+    for job in jobs_by_sim
+    if job["id"] not in ranked_ids
+]
+
+if ranking_items:
+    job_repository.update_ranking_scores_batch(ranking_items)
 
 print(f"\nDone. Listwise ranked: {len(ranked)} | Embedding-scored only: {len(jobs) - len(ranked)}")
 if ranked:

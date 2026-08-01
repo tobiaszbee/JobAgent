@@ -146,6 +146,14 @@ def update_ranking_scores(
     })
 
 
+def update_ranking_scores_batch(items: list[dict]) -> int:
+    """One request for the whole batch instead of one PATCH per job. Each item:
+    {job_id, embedding_score, rerank_score, listwise_rank, rank_reason?, debate_flag?, debate_note?}."""
+    if not items:
+        return 0
+    return api_client.patch("/api/jobs/ranking", json={"items": items}).json()["updated"]
+
+
 def get_jobs_for_ranking(limit: int = 2000) -> list[dict]:
     """All 'new' jobs with descriptions — the whole active pool is re-ranked together every
     run (not just newly-arrived jobs) so listwise_rank stays comparable across the full list."""
@@ -172,6 +180,13 @@ def get_query_outcome_stats(source: str) -> list[dict]:
 
 def update_would_apply(job_id: str, would_apply: bool, reason: str) -> None:
     api_client.patch(f"/api/jobs/{job_id}/would-apply", json={"would_apply": would_apply, "reason": reason})
+
+
+def update_would_apply_batch(items: list[dict]) -> int:
+    """Each item: {job_id, would_apply, reason}."""
+    if not items:
+        return 0
+    return api_client.patch("/api/jobs/would-apply", json={"items": items}).json()["updated"]
 
 
 def get_would_apply_stats() -> dict:
