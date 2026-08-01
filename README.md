@@ -66,6 +66,8 @@ Each run makes the next one smarter: your decisions feed the preference distille
 
 ## Setup
 
+This is a two-repo, self-hosted setup — JobAgent (this repo, the local client) plus [JobAgentWeb](../JobAgentWeb) (a separate FastAPI + Postgres backend you also deploy yourself), not a single pip-install tool. Budget for standing up both before you have a working system.
+
 ### Prerequisites
 
 - Python 3.10+
@@ -110,7 +112,7 @@ JOBAGENTWEB_BASE_URL=http://10.66.0.1:8000   # only if different from the defaul
 python web/app.py
 ```
 
-Open `http://localhost:5000` — with no saved session yet, this lands on `/login`. Log in with your JobAgentWeb username/password (no account yet? Register at `<JOBAGENTWEB_BASE_URL>/register` first); the session cookie is saved to `~/.jobagent/session.json` and reused by every script and the dashboard afterward. On first visit after logging in (no saved preferences yet) you land on a landing page that routes you into the questionnaire; the dashboard itself only appears once a preference profile exists.
+Open `http://localhost:5000` — with no saved session yet, this lands on `/login`. Log in with your JobAgentWeb username/password (no account yet? Register at `<JOBAGENTWEB_BASE_URL>/register` first — registration requires an invite code, so get one from the operator of that JobAgentWeb instance before you start); the session cookie is saved to `~/.jobagent/session.json` and reused by every script and the dashboard afterward. On first visit after logging in (no saved preferences yet) you land on a landing page that routes you into the questionnaire; the dashboard itself only appears once a preference profile exists.
 
 Headless/server installs with no browser access to port 5000 can authenticate the same way from a terminal instead:
 
