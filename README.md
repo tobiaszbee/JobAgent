@@ -104,7 +104,7 @@ JOBAGENTWEB_BASE_URL=http://10.66.0.1:8000   # only if different from the defaul
 
 `ANTHROPIC_API_KEY` and `VOYAGE_API_KEY` are required at import time — `config.py` raises immediately if either is missing, so nothing (not even the dashboard) starts without both set.
 
-`JOBAGENTWEB_BASE_URL` defaults to a WireGuard-tunneled address, **not** a public HTTPS URL — if JobAgentWeb sits behind a reverse proxy with HTTP basic auth in front of it (as on the reference deployment), that auth blocks API traffic exactly like it blocks a browser, since there's no way for it to tell the two apart. Point this at whatever address reaches JobAgentWeb without hitting that wall — a private tunnel, an internal network address, or a version of the proxy that lets `/api/*` through unauthenticated in favor of JobAgentWeb's own session login.
+`JOBAGENTWEB_BASE_URL` defaults to a WireGuard-tunneled address, **not** the public HTTPS domain — the reference deployment's Caddy config only reverse-proxies and doesn't gate access with its own auth layer (JobAgentWeb has its own per-user session login for that), but if you put a reverse-proxy auth layer of your own in front of it, that would block API traffic exactly like it blocks a browser, since there's no way for it to tell the two apart. Point this at whatever address reaches JobAgentWeb without hitting that wall.
 
 ### Start the dashboard and log in
 
@@ -474,6 +474,8 @@ Divergence cases are fed back into the next distillation run as high-priority si
 
 **Distillation runs once per Run Agent / Re-score, not on every decision.** This is the most expensive step; the budget is fixed (~50 jobs in context) regardless of total job count. The dealbreaker filter catches some jobs before scoring ever runs, reducing Sonnet spend for a candidate with a firm salary floor or remote-only requirement.
 
+**Listwise ranking + debate are skipped entirely when the top-20 candidate set is identical to what was already ranked last run** (`ranker/rank_cache.py`) — a `Rank jobs (AI)` re-run with nothing new since the last one costs nothing for those two stages, since re-running them against the same 20 jobs would just reproduce the same reasoning.
+
 ### Cost tracking
 
 Every API call logs usage through JobAgentWeb. The dashboard's Cost panel shows cost per 100 jobs, today's spend, and all-time spend. The `MODEL_COSTS` dict in `config.py` holds the rates — update it if pricing changes.
@@ -519,7 +521,8 @@ JobAgent/
 │   ├── reranker.py                 # Voyage cross-encoder rerank (top-50 → top-20)
 │   ├── listwise.py                 # Opus listwise ranking (top-20 → ordered list)
 │   ├── debate.py                   # Sonnet second opinion over the top-20; demotes dealbreaker_risk
-│   └── would_apply.py              # Absolute-floor auto-apply flag (validation only, never sends)
+│   ├── would_apply.py              # Absolute-floor auto-apply flag (validation only, never sends)
+│   └── rank_cache.py               # Skips listwise+debate when the top-20 set is unchanged since last run
 ├── preference_agent/
 │   ├── profile.py                  # ProfileSignal schema + render_signals()
 │   └── runner.py                   # Distill apply/reject/dismissal history → JSON profile
