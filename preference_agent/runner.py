@@ -104,6 +104,17 @@ def _build_dismissed_section(items: list[dict]) -> str:
     return "\n\n" + "\n".join(lines)
 
 
+def _divergence_line(case: dict) -> str:
+    """JobAgentWeb's /api/eval/report divergence cases carry divergence_type +
+    listwise_rank, not a pre-formatted label — same presentation the calibration
+    section in evaluator/scorer.py builds independently from the same raw fields."""
+    if case["divergence_type"] == "false_positive":
+        label = f"Ranked #{case['listwise_rank']} but rejected"
+    else:
+        label = f"Applied despite rank #{case['listwise_rank']}"
+    return f"  {label}: {case['title']} @ {case['company']}"
+
+
 def _build_prompt(applied: list[dict], rejected: list[dict], applied_total: int, rejected_total: int) -> str:
     """`applied`/`rejected` arrive already capped to at most _MAX_APPLIED/_MAX_REJECTED
     (most-recent-first) and description-truncated server-side — see
@@ -172,7 +183,7 @@ def run() -> dict:
     from evaluation.harness import divergence_cases
     divergences = divergence_cases()
     if divergences:
-        div_lines = [f"  {d['label']}: {d['title']} @ {d['company']}" for d in divergences[:10]]
+        div_lines = [_divergence_line(d) for d in divergences[:10]]
         prompt += f"\n\nRANKING DIVERGENCE (high-value signals — model ranking vs user decision):\n" + "\n".join(div_lines)
 
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)

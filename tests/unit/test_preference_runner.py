@@ -1,4 +1,4 @@
-from preference_agent.runner import _build_prompt, _job_line, _build_dismissed_section
+from preference_agent.runner import _build_prompt, _job_line, _build_dismissed_section, _divergence_line
 
 
 def _job(title="Dev", company="Corp", location="Remote", description="PHP Symfony", rejection_reason=None, score_reason=None, source=None):
@@ -125,3 +125,13 @@ def test_build_dismissed_section_formats_pro():
               "title": "Dev", "company": "Corp"}]
     section = _build_dismissed_section(items)
     assert "PRO" in section
+
+
+def test_divergence_line_false_positive():
+    case = {"divergence_type": "false_positive", "listwise_rank": 2, "title": "Overrated Job", "company": "AcmeCo"}
+    assert _divergence_line(case) == "  Ranked #2 but rejected: Overrated Job @ AcmeCo"
+
+
+def test_divergence_line_false_negative():
+    case = {"divergence_type": "false_negative", "listwise_rank": 18, "title": "Hidden Gem", "company": "Corp"}
+    assert _divergence_line(case) == "  Applied despite rank #18: Hidden Gem @ Corp"
