@@ -30,3 +30,7 @@ def toggle(id_: int, is_active: bool) -> None:
 
 def delete(id_: int) -> None:
     api_client.delete(f"/api/criteria/{id_}")
+
+
+def delete_by_type(type_: str) -> int:
+    return api_client.delete(f"/api/criteria/by-type/{type_}").json()["deleted"]

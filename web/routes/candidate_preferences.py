@@ -55,9 +55,7 @@ def _replace_criteria(type_: str, values: list[str]) -> None:
     """Fully replace the active set of a given criteria type — these types are now
     system-managed from the questionnaire, not hand-curated, so stale entries from a
     previous save shouldn't linger."""
-    for c in criteria_repository.get_all():
-        if c["type"] == type_:
-            criteria_repository.delete(c["id"])
+    criteria_repository.delete_by_type(type_)
     for v in values:
         criteria_repository.insert(type_, v)
 

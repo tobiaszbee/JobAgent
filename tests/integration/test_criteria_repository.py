@@ -88,3 +88,19 @@ class TestDelete:
         item = next(c for c in criteria_repository.get_all() if c["type"] == "title" and c["value"] == "PHP Dev")
         criteria_repository.delete(item["id"])
         assert "PHP Dev" not in criteria_repository.get_active("title")
+
+
+class TestDeleteByType:
+    def test_removes_only_the_given_type(self):
+        criteria_repository.insert("title", "PHP Dev")
+        criteria_repository.insert("title", "Java Dev")
+        criteria_repository.insert("location", "Poland")
+
+        deleted = criteria_repository.delete_by_type("title")
+
+        assert deleted == 2
+        assert criteria_repository.get_active("title") == []
+        assert criteria_repository.get_active("location") == ["Poland"]
+
+    def test_no_matches_returns_zero(self):
+        assert criteria_repository.delete_by_type("title") == 0
