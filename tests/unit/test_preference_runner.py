@@ -1,4 +1,4 @@
-from preference_agent.runner import _build_prompt, _job_line, _build_dismissed_section, _divergence_line
+from preference_agent.runner import _REASON_LIMIT, _build_prompt, _job_line, _build_dismissed_section, _divergence_line
 
 
 def _job(title="Dev", company="Corp", location="Remote", description="PHP Symfony", rejection_reason=None, score_reason=None, source=None):
@@ -36,6 +36,24 @@ def test_job_line_falls_back_to_score_reason():
     j = _job(rejection_reason=None, score_reason="too junior")
     line = _job_line(j, include_reason=True)
     assert "too junior" in line
+
+
+def test_job_line_reason_not_truncated_below_400_chars():
+    # Regression: the rejection reason — the candidate's own direct, human-written
+    # explanation, the richest signal in the whole corpus — used to be cut to 120
+    # chars, more aggressively than the job description it explains (1500 chars).
+    long_reason = "x" * 300
+    j = _job(rejection_reason=long_reason)
+    line = _job_line(j, include_reason=True)
+    assert long_reason in line
+
+
+def test_job_line_reason_still_truncated_at_reason_limit():
+    long_reason = "x" * (_REASON_LIMIT + 100)
+    j = _job(rejection_reason=long_reason)
+    line = _job_line(j, include_reason=True)
+    assert "x" * _REASON_LIMIT in line
+    assert "x" * (_REASON_LIMIT + 1) not in line
 
 
 def test_build_prompt_applied_section():

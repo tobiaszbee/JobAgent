@@ -82,6 +82,11 @@ Submit your analysis using the submit_profile tool.\
 
 
 _DESC_LIMIT = 1500
+# The rejection reason is the candidate's own direct, human-written explanation for
+# a decision — the richest, most unambiguous signal in the whole corpus, yet it was
+# truncated more aggressively than the job description it explains (1500 chars) or
+# any other text fed to the distiller. Raised well past a single sentence's worth.
+_REASON_LIMIT = 400
 _MAX_APPLIED = 50
 _MAX_REJECTED = 50
 
@@ -99,7 +104,7 @@ def _job_line(job: dict, include_reason: bool = False) -> str:
     if include_reason:
         reason = (job.get("rejection_reason") or job.get("score_reason") or "").strip()
         if reason:
-            job_parts.append(f"| reason: {reason[:120]}")
+            job_parts.append(f"| reason: {reason[:_REASON_LIMIT]}")
     return " ".join(job_parts)
 
 
