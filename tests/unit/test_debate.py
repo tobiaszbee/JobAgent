@@ -13,12 +13,13 @@ def _job(job_id="j1", title="Dev", rank=1, rank_reason="Good fit", breakdown=Non
     return job
 
 
-def _debate_response(reviews: list[dict]):
+def _debate_response(reviews: list[dict], stop_reason="tool_use"):
     block = MagicMock()
     block.type = "tool_use"
     block.input = {"reviews": reviews}
     response = MagicMock()
     response.content = [block]
+    response.stop_reason = stop_reason
     response.usage = MagicMock(input_tokens=100, output_tokens=50, cache_creation_input_tokens=0, cache_read_input_tokens=0)
     return response
 
@@ -106,8 +107,24 @@ class TestDebateRank:
     @patch("ranker.debate.anthropic.Anthropic")
     def test_no_tool_use_block_returns_original_ranking(self, mock_anthropic):
         text_block = MagicMock(type="text")
-        response = MagicMock(content=[text_block], usage=MagicMock(input_tokens=1, output_tokens=1, cache_creation_input_tokens=0, cache_read_input_tokens=0))
+        response = MagicMock(
+            content=[text_block], stop_reason="end_turn",
+            usage=MagicMock(input_tokens=1, output_tokens=1, cache_creation_input_tokens=0, cache_read_input_tokens=0),
+        )
         mock_anthropic.return_value.messages.create.return_value = response
         jobs = [_job("j1", rank=1)]
         result = debate_rank(jobs, "profile")
         assert result == jobs
+
+    @patch("ranker.debate.anthropic.Anthropic")
+    def test_truncated_response_returns_original_ranking_unchanged(self, mock_anthropic):
+        # Regression: a truncated reviews array can still parse as valid-but-
+        # partial JSON — without an explicit stop_reason check, a partial
+        # critique could apply flags based on an incomplete review.
+        jobs = [_job("j1", rank=1), _job("j2", rank=2)]
+        mock_anthropic.return_value.messages.create.return_value = _debate_response(
+            [{"job_id": "j1", "flag": "dealbreaker_risk", "note": "x"}], stop_reason="max_tokens"
+        )
+        result = debate_rank(jobs, "profile")
+        assert result == jobs
+        assert "debate_flag" not in result[0]

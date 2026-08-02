@@ -84,9 +84,20 @@ def extract_job(description: str, source: str | None = None) -> dict:
             tools=[_EXTRACT_TOOL],
             tool_choice={"type": "tool", "name": "submit_structured_data"},
         )
+        log_anthropic(response, "extractor", CLAUDE_EXTRACT_MODEL)
+
+        if response.stop_reason == "max_tokens":
+            # A truncated tool_use block can still parse as valid-but-partial
+            # JSON — without this check a partial dict would be written as if
+            # it were the complete, final extraction, permanently leaving the
+            # missing fields null instead of retrying the job next run (see
+            # run_extraction()'s `if data:` write-guard, which only protects
+            # against a *falsy* return, not a truthy-but-incomplete one).
+            logger.warning("Extraction response truncated (max_tokens) — will retry next run.")
+            return {}
+
         tool_block = next((b for b in response.content if b.type == "tool_use"), None)
         if tool_block:
-            log_anthropic(response, "extractor", CLAUDE_EXTRACT_MODEL)
             return dict(tool_block.input)
     except Exception as e:
         logger.warning(f"Extraction failed: {e}")

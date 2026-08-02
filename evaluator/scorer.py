@@ -219,6 +219,14 @@ def score_job(job: dict, system_prompt: str) -> ScoreResult:
 
     log_anthropic(response, "scorer", CLAUDE_MODEL)
 
+    if response.stop_reason == "max_tokens":
+        # A truncated tool_use block can still parse as valid-but-incomplete
+        # JSON (missing a trailing field like overall_score) — without this
+        # check, result.get("overall_score", 0) below would silently default
+        # to a real-looking 0.0, permanently auto-rejecting the job instead of
+        # leaving it unscored for evaluator/runner.py to retry next run.
+        return {**_ERROR_RESULT, "score_reason": "Response truncated (max_tokens)"}
+
     tool_block = next((b for b in response.content if b.type == "tool_use"), None)
     if not tool_block:
         return {**_ERROR_RESULT, "score_reason": "No tool_use block in response"}

@@ -3,18 +3,20 @@ from unittest.mock import MagicMock, patch
 from extractor.runner import extract_job, run_extraction
 
 
-def _make_tool_response(data: dict):
+def _make_tool_response(data: dict, stop_reason="tool_use"):
     block = MagicMock()
     block.type = "tool_use"
     block.input = data
     response = MagicMock()
     response.content = [block]
+    response.stop_reason = stop_reason
     return response
 
 
 def _make_empty_response():
     response = MagicMock()
     response.content = []
+    response.stop_reason = "end_turn"
     return response
 
 
@@ -46,6 +48,18 @@ def test_extract_job_returns_empty_on_api_error(mock_get_client):
 def test_extract_job_returns_empty_when_no_tool_block(mock_get_client):
     mock_get_client.return_value.messages.create.return_value = _make_empty_response()
     result = extract_job("Description without tool response")
+    assert result == {}
+
+
+@patch("extractor.runner._get_client")
+def test_extract_job_returns_empty_on_truncated_response(mock_get_client):
+    # Regression: a truncated tool_use block can still parse as valid-but-
+    # partial JSON — without an explicit stop_reason check, run_extraction()'s
+    # `if data:` guard would treat a truthy-but-incomplete dict as a final,
+    # complete extraction and never retry the missing fields.
+    payload = {"remote": True}  # as if cut off mid-object
+    mock_get_client.return_value.messages.create.return_value = _make_tool_response(payload, stop_reason="max_tokens")
+    result = extract_job("Some job description")
     assert result == {}
 
 

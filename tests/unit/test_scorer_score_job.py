@@ -9,7 +9,7 @@ def _job(**overrides):
     return base
 
 
-def _tool_response(**input_overrides):
+def _tool_response(stop_reason="tool_use", **input_overrides):
     tool_input = {
         "sub_scores": {"stack_fit": 8, "seniority_fit": 7, "company_fit": 6, "compensation_fit": 5},
         "pros": ["Strong PHP/Symfony match"],
@@ -25,6 +25,7 @@ def _tool_response(**input_overrides):
 
     response = MagicMock()
     response.content = [block]
+    response.stop_reason = stop_reason
     response.usage = MagicMock(input_tokens=100, output_tokens=50, cache_creation_input_tokens=0, cache_read_input_tokens=0)
     return response
 
@@ -74,6 +75,19 @@ class TestScoreJobStructuredResult:
         result = score_job(_job(), "system prompt")
         assert result["score"] is None
         assert result["breakdown"] is None
+
+    @patch("evaluator.scorer._get_client")
+    def test_truncated_response_returns_error_result_not_zero_score(self, mock_get_client):
+        # Regression: a truncated tool_use block can still parse as valid-but-
+        # incomplete JSON — missing "overall_score" would previously default
+        # to 0.0 via .get("overall_score", 0), permanently auto-rejecting the
+        # job instead of leaving it unscored (score=None) for retry.
+        response = _tool_response(stop_reason="max_tokens")
+        response.content[0].input = {"sub_scores": {}}  # overall_score missing, as if cut mid-object
+        mock_get_client.return_value.messages.create.return_value = response
+        result = score_job(_job(), "system prompt")
+        assert result["score"] is None
+        assert "truncated" in result["score_reason"].lower()
 
     @patch("evaluator.scorer._get_client")
     def test_api_error_returns_error_result(self, mock_get_client):

@@ -119,6 +119,14 @@ Use the submit_debate_review tool to report your findings."""
 
     log_anthropic(response, "debate", CLAUDE_MODEL)
 
+    if response.stop_reason == "max_tokens":
+        # A truncated review list could still parse as valid-but-partial JSON
+        # (missing the last few entries, or a malformed final one) — treat it
+        # the same as "no tool_use block" below: apply no flags rather than
+        # risk acting on a partial critique.
+        logger.error("Debate response truncated (max_tokens) — no flags applied.")
+        return ranked_jobs
+
     tool_block = next((b for b in response.content if b.type == "tool_use"), None)
     if not tool_block:
         logger.error("No tool_use block in debate response")
