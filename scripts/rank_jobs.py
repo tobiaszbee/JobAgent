@@ -23,7 +23,7 @@ from ranker.listwise import listwise_rank
 from ranker.debate import debate_rank
 from ranker.rank_cache import reuse_if_unchanged
 from ranker.would_apply import compute_would_apply
-from evaluator.profile import load_active_profile, load_questionnaire_preferences, build_retrieval_query
+from evaluator.profile import load_active_profile, load_questionnaire_preferences, build_hyde_query
 from config import RANKING
 
 try:
@@ -35,7 +35,7 @@ except ValueError as e:
 latest_pref = preference_repository.get_latest()
 preferences = latest_pref["signals"] if latest_pref else []
 questionnaire = load_questionnaire_preferences()
-retrieval_query = build_retrieval_query(candidate_profile)
+retrieval_query = build_hyde_query(candidate_profile, questionnaire)
 
 RANKING_POOL_LIMIT = 2000
 jobs = job_repository.get_jobs_for_ranking(limit=RANKING_POOL_LIMIT)

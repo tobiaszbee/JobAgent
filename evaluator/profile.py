@@ -1,4 +1,12 @@
+import logging
+
+import anthropic
+
+from config import ANTHROPIC_API_KEY, CLAUDE_EXTRACT_MODEL
 from db.repositories import candidate_preferences_repository, cv_repository
+from db.repositories.usage_repository import log_anthropic
+
+logger = logging.getLogger(__name__)
 
 # Fields worth folding into a semantic retrieval query — the ones with real
 # positive lexical/semantic overlap against job description text. Deliberately
@@ -123,3 +131,56 @@ def build_retrieval_query(candidate_profile: str) -> str:
 
     suffix = "Preferences: " + ", ".join(terms)
     return f"{candidate_profile}\n{suffix}" if candidate_profile else suffix
+
+
+_HYDE_PROMPT = """Based on this candidate's profile and stated preferences, write a single
+realistic job posting describing their IDEAL job — as if it were a real ad on a job board,
+not a description of the candidate. Write it in job-posting genre and voice: a job title,
+a short company blurb, a few bullet points of responsibilities, a few bullet points of
+requirements (matching their actual stack/seniority), and any preferences they stated
+(company type, industry, salary floor, work mode) folded in naturally as if the posting
+itself offers them. Keep it under 200 words. Output ONLY the posting text, no preamble,
+no markdown headers.
+
+{candidate_profile}
+
+{questionnaire}"""
+
+
+def build_hyde_query(candidate_profile: str, questionnaire: str = "") -> str:
+    """Generate a synthetic "ideal job posting" via a cheap LLM call and return it as
+    the retrieval query, in place of raw CV/preference text — used both for the
+    cold-start embedding query (embeddings/indexer.py::build_ideal_vector's fallback)
+    and the Voyage cross-encoder rerank query (ranker/reranker.py::rerank_jobs), which
+    both previously embedded the CV/questionnaire text directly.
+
+    That was a structural query/document genre mismatch: a CV describes what the
+    candidate has DONE, in resume voice; a job posting describes a role being
+    OFFERED, in ad voice. Embedding one genre to retrieve documents in the other
+    systematically under-weights postings that are excellent fits but phrased
+    nothing like a CV (classic HyDE — Hypothetical Document Embeddings, Gao et al.
+    2022 — generate a hypothetical answer/document in the target genre, embed
+    that instead of the raw query).
+
+    Falls back to build_retrieval_query()'s plain concatenation on any API failure
+    or empty response, so retrieval never goes fully blind over a transient error —
+    same fallback text used before this function existed."""
+    if not candidate_profile and not questionnaire:
+        return ""
+
+    prompt = _HYDE_PROMPT.format(candidate_profile=candidate_profile, questionnaire=questionnaire)
+    try:
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        response = client.messages.create(
+            model=CLAUDE_EXTRACT_MODEL,
+            max_tokens=400,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        log_anthropic(response, "hyde_query", CLAUDE_EXTRACT_MODEL)
+        text = response.content[0].text.strip()
+        if not text:
+            raise ValueError("empty HyDE response")
+        return text
+    except Exception as e:
+        logger.warning(f"HyDE query generation failed: {e} — falling back to CV/preferences text")
+        return build_retrieval_query(candidate_profile)

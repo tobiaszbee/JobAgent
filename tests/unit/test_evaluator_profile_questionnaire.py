@@ -1,6 +1,12 @@
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
-from evaluator.profile import build_retrieval_query, load_questionnaire_preferences
+from evaluator.profile import build_hyde_query, build_retrieval_query, load_questionnaire_preferences
+
+
+def _mock_claude_response(text: str):
+    resp = MagicMock()
+    resp.content = [MagicMock(text=text)]
+    return resp
 
 
 @patch("evaluator.profile.candidate_preferences_repository.get_active", return_value=None)
@@ -149,3 +155,53 @@ def test_retrieval_query_works_with_no_cv_profile(mock_prefs):
     query = build_retrieval_query("")
     assert "Rust" in query
     assert not query.startswith("\n")
+
+
+# --- build_hyde_query ---
+
+@patch("evaluator.profile.anthropic.Anthropic")
+def test_hyde_query_returns_generated_posting(mock_anthropic):
+    mock_anthropic.return_value.messages.create.return_value = _mock_claude_response(
+        "Senior Backend Engineer - Product SaaS company seeking a PHP/Symfony expert..."
+    )
+    query = build_hyde_query("CANDIDATE: Senior PHP dev", "CANDIDATE QUESTIONNAIRE:\n- Work mode: remote")
+    assert "Senior Backend Engineer" in query
+
+
+@patch("evaluator.profile.anthropic.Anthropic")
+def test_hyde_query_prompt_includes_profile_and_questionnaire(mock_anthropic):
+    mock_anthropic.return_value.messages.create.return_value = _mock_claude_response("A posting.")
+    build_hyde_query("CANDIDATE: Senior PHP dev", "CANDIDATE QUESTIONNAIRE:\n- Work mode: remote")
+    prompt = mock_anthropic.return_value.messages.create.call_args.kwargs["messages"][0]["content"]
+    assert "CANDIDATE: Senior PHP dev" in prompt
+    assert "Work mode: remote" in prompt
+
+
+@patch("evaluator.profile.log_anthropic")
+@patch("evaluator.profile.anthropic.Anthropic")
+def test_hyde_query_logs_usage(mock_anthropic, mock_log):
+    response = _mock_claude_response("A posting.")
+    mock_anthropic.return_value.messages.create.return_value = response
+    build_hyde_query("CANDIDATE: Senior PHP dev")
+    mock_log.assert_called_once()
+    assert mock_log.call_args.args[0] is response
+
+
+@patch("evaluator.profile.candidate_preferences_repository.get_active", return_value=None)
+@patch("evaluator.profile.anthropic.Anthropic")
+def test_hyde_query_falls_back_to_retrieval_query_on_api_error(mock_anthropic, mock_prefs):
+    mock_anthropic.return_value.messages.create.side_effect = Exception("API down")
+    query = build_hyde_query("CANDIDATE: Senior PHP dev")
+    assert query == "CANDIDATE: Senior PHP dev"
+
+
+@patch("evaluator.profile.candidate_preferences_repository.get_active", return_value=None)
+@patch("evaluator.profile.anthropic.Anthropic")
+def test_hyde_query_falls_back_on_empty_response(mock_anthropic, mock_prefs):
+    mock_anthropic.return_value.messages.create.return_value = _mock_claude_response("   ")
+    query = build_hyde_query("CANDIDATE: Senior PHP dev")
+    assert query == "CANDIDATE: Senior PHP dev"
+
+
+def test_hyde_query_empty_when_nothing_to_work_with():
+    assert build_hyde_query("", "") == ""
