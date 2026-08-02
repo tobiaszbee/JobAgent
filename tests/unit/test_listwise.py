@@ -4,11 +4,13 @@ from unittest.mock import MagicMock, patch
 from ranker.listwise import FALLBACK_RANK_REASON, OMITTED_RANK_REASON, _format_job, listwise_rank
 
 
-def _job(id="j1", title="Senior Dev", company="Acme", location="Remote", description="Good job", structured_data=None):
+def _job(id="j1", title="Senior Dev", company="Acme", location="Remote", description="Good job",
+         structured_data=None, score=None, score_reason=None):
     return {
         "id": id, "title": title, "company": company,
         "location": location, "description": description,
         "structured_data": json.dumps(structured_data) if structured_data else None,
+        "score": score, "score_reason": score_reason,
     }
 
 
@@ -57,6 +59,22 @@ class TestFormatJob:
         text = _format_job(_job(id="j1"))
         assert "Job #" not in text
         assert "[ID: j1]" in text
+
+    def test_scorer_rating_included_when_present(self):
+        # Regression: the listwise prompt never showed Opus the scorer's own
+        # rating — the most expensive signal in the pipeline was invisible to
+        # the model doing the final ranking.
+        text = _format_job(_job(score=8.5, score_reason="Strong Python/Django match"))
+        assert "8.5/10" in text
+        assert "Strong Python/Django match" in text
+
+    def test_scorer_rating_omitted_when_none(self):
+        text = _format_job(_job(score=None))
+        assert "Scorer's rating" not in text
+
+    def test_scorer_rating_without_reason_does_not_crash(self):
+        text = _format_job(_job(score=6.0, score_reason=None))
+        assert "6.0/10" in text
 
 
 @patch("ranker.listwise.random.shuffle")

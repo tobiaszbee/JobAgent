@@ -49,6 +49,13 @@ def _format_job(job: dict) -> str:
     if job.get("location"):
         parts.append(f"Location: {job['location']}")
 
+    # The scorer's rating never reached this prompt before — RRF (ranker/fusion.py)
+    # uses it to decide which jobs make the listwise pool at all, but Opus itself had
+    # no visibility into the most expensive signal in the pipeline once a job got here.
+    if job.get("score") is not None:
+        reason = f" — {job['score_reason']}" if job.get("score_reason") else ""
+        parts.append(f"Scorer's rating: {job['score']}/10{reason}")
+
     if structured:
         tags = []
         if structured.get("remote"):
