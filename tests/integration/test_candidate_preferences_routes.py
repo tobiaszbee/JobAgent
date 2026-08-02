@@ -169,3 +169,29 @@ class TestSavePreferences:
         flask_client.post("/api/candidate-preferences", json={"avoided_tech": ["WordPress"]})
         flask_client.post("/api/candidate-preferences", json={"avoided_tech": []})
         assert criteria_repository.get_active("rejected") == []
+
+    @patch("web.routes.candidate_preferences.anthropic.Anthropic")
+    def test_extra_tech_syncs_into_preferred_criteria(self, mock_anthropic, flask_client):
+        # Regression: the scorer prompt's PREFERRED section was only ever populated
+        # by the separate CV-derived apply-criteria flow, which nothing in this UI
+        # calls — extra_tech was collected (05 · Technologies) but never reached it.
+        mock_anthropic.return_value.messages.create.return_value = _mock_claude_response("[]")
+        flask_client.post("/api/candidate-preferences", json={"extra_tech": ["Rust", "Kubernetes"]})
+        preferred = criteria_repository.get_active("preferred")
+        assert set(preferred) == {"Rust", "Kubernetes"}
+
+    @patch("web.routes.candidate_preferences.anthropic.Anthropic")
+    def test_clearing_extra_tech_clears_preferred_criteria(self, mock_anthropic, flask_client):
+        mock_anthropic.return_value.messages.create.return_value = _mock_claude_response("[]")
+        flask_client.post("/api/candidate-preferences", json={"extra_tech": ["Rust"]})
+        flask_client.post("/api/candidate-preferences", json={"extra_tech": []})
+        assert criteria_repository.get_active("preferred") == []
+
+    @patch("web.routes.candidate_preferences.anthropic.Anthropic")
+    def test_extra_tech_does_not_populate_required_criteria(self, mock_anthropic, flask_client):
+        # Deliberate: populating "required" from the questionnaire, combined with
+        # the keyword pre-filter's now-functional \b-boundary regex, could reject
+        # an entire pool for a candidate whose stack includes e.g. C#/C++/.NET.
+        mock_anthropic.return_value.messages.create.return_value = _mock_claude_response("[]")
+        flask_client.post("/api/candidate-preferences", json={"extra_tech": ["Rust"]})
+        assert criteria_repository.get_active("required") == []

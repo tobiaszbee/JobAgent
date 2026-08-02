@@ -98,6 +98,17 @@ def _sync_criteria_from_preferences(fields: dict) -> dict:
     # the rejected keywords too.
     _replace_criteria("rejected", fields.get("avoided_tech") or [])
 
+    # Mirrors avoided_tech -> rejected above: extra_tech was collected (05 · Technologies)
+    # but nothing ever populated the scorer prompt's PREFERRED section from it — that
+    # section was only ever filled by the separate CV-derived apply-criteria flow, which
+    # nothing in this UI calls, so it stayed empty for every questionnaire-onboarded
+    # candidate. Deliberately NOT touching "required" here: combined with the keyword
+    # pre-filter's now-functional \b-boundary regex, a populated required-tech list could
+    # reject the entire pool for a candidate whose stack includes something like C#/C++/
+    # .NET if extraction ever mismatches a single required entry — required stays
+    # CV-derived-only, left for the user to set explicitly if they want it.
+    _replace_criteria("preferred", fields.get("extra_tech") or [])
+
     return {"warnings": warnings}
 
 
