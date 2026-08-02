@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 import api_client
 from db.repositories import job_repository, preference_repository
-from embeddings.indexer import build_ideal_vector, score_by_similarity, index_jobs
+from embeddings.indexer import score_pool_by_similarity, index_jobs
 from ranker.fusion import fuse_by_rrf
 from ranker.reranker import rerank_jobs
 from ranker.listwise import listwise_rank
@@ -55,14 +55,14 @@ if unindexed:
     indexed = index_jobs(unindexed)
     print(f"  Indexed {indexed} job(s)")
 
-# Step 2: Semantic similarity
-has_applied_history = bool(job_repository.get_applied_job_ids())
-ideal = build_ideal_vector(retrieval_query)
-if ideal:
-    basis = "applied jobs" if has_applied_history else "CV profile / questionnaire (no applied jobs yet)"
+# Step 2: Semantic similarity — max-sim kNN against individual applied vectors
+# when there's applied history, else a single-vector cold-start fallback (see
+# embeddings/indexer.py::score_pool_by_similarity for why max-sim replaced the
+# old single-centroid approach).
+job_ids = [j["id"] for j in jobs]
+sim_scores, basis = score_pool_by_similarity(job_ids, retrieval_query)
+if basis:
     print(f"\nScoring by semantic similarity to {basis}...")
-    job_ids = [j["id"] for j in jobs]
-    sim_scores = score_by_similarity(job_ids, ideal)
     for job in jobs:
         job["_embedding_score"] = sim_scores.get(job["id"], 0.0)
     jobs_by_sim = sorted(jobs, key=lambda j: j["_embedding_score"], reverse=True)

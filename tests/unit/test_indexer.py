@@ -3,12 +3,10 @@ import uuid
 import pytest
 from unittest.mock import MagicMock, patch
 
-import math
-
 import api_client
 from db.repositories import job_repository
 from embeddings.indexer import (
-    _embed_with_retry, _job_to_text, _l2_normalize, build_ideal_vector, index_jobs, score_by_similarity,
+    _embed_with_retry, _job_to_text, _max_scores, index_jobs, score_by_similarity, score_pool_by_similarity,
 )
 
 
@@ -71,114 +69,117 @@ class TestJobToText:
         assert "Clean text" in _job_to_text(job)
 
 
-class TestL2Normalize:
-    def test_scales_to_unit_length(self):
-        result = _l2_normalize([3.0, 4.0])
-        assert abs(result[0] - 0.6) < 1e-9
-        assert abs(result[1] - 0.8) < 1e-9
-
-    def test_already_unit_vector_unchanged(self):
-        result = _l2_normalize([1.0, 0.0])
-        assert result == [1.0, 0.0]
-
-    def test_zero_vector_returned_unchanged_not_divided_by_zero(self):
-        assert _l2_normalize([0.0, 0.0]) == [0.0, 0.0]
-
-    def test_direction_preserved_scale_invariant(self):
-        a = _l2_normalize([2.0, 0.0])
-        b = _l2_normalize([10.0, 0.0])
-        assert a == b
-
-
-class TestBuildIdealVector:
-    def test_returns_none_when_no_applied_jobs(self):
-        assert build_ideal_vector() is None
-
-    def test_returns_centroid_when_no_rejected_jobs(self):
-        j1 = _insert_job(status="applied")
+class TestMaxScores:
+    def test_empty_vectors_returns_empty_dict(self):
+        j1 = _insert_job()
         _insert_embedding(j1, [1.0, 0.0])
+        assert _max_scores([j1], []) == {}
 
-        result = build_ideal_vector()
-        assert result is not None
-        assert abs(result[0] - 1.0) < 1e-9
-        assert abs(result[1] - 0.0) < 1e-9
+    def test_single_vector_matches_score_by_similarity(self):
+        j1 = _insert_job()
+        _insert_embedding(j1, [1.0, 0.0])
+        assert _max_scores([j1], [[1.0, 0.0]]) == score_by_similarity([j1], [1.0, 0.0])
 
-    def test_centroid_of_two_applied_jobs_is_l2_normalized(self):
-        # raw mean: [3.0, 2.0], norm = sqrt(13) — the centroid is unit-normalized
-        # before being returned so its direction (not an arbitrary raw magnitude
-        # driven by how many/how similar the applied jobs are) is what downstream
-        # cosine similarity actually compares against.
-        j1 = _insert_job(status="applied")
-        j2 = _insert_job(status="applied")
-        _insert_embedding(j1, [2.0, 4.0])
-        _insert_embedding(j2, [4.0, 0.0])
+    def test_takes_max_across_multiple_vectors(self):
+        j1 = _insert_job()
+        _insert_embedding(j1, [1.0, 0.0])  # perfectly aligned with the 2nd vector below, orthogonal to the 1st
+        result = _max_scores([j1], [[0.0, 1.0], [1.0, 0.0]])
+        assert abs(result[j1] - 1.0) < 1e-9
 
-        result = build_ideal_vector()
-        assert result is not None
-        norm = math.sqrt(13)
-        assert abs(result[0] - 3.0 / norm) < 1e-9
-        assert abs(result[1] - 2.0 / norm) < 1e-9
-        assert abs(math.sqrt(result[0] ** 2 + result[1] ** 2) - 1.0) < 1e-9
 
-    def test_subtracts_rejected_centroid_with_weight(self):
-        # applied centroid (raw [2.0, 0.0], already unit length after normalizing): [1.0, 0.0]
-        # rejected centroid (raw [0.0, 1.0], already unit length): [0.0, 1.0]
-        # ideal: [1.0 - 0.3*0.0, 0.0 - 0.3*1.0] = [1.0, -0.3]
-        ja = _insert_job(status="applied")
-        _insert_embedding(ja, [2.0, 0.0])
-        jr = _insert_job(status="rejected")
-        _insert_embedding(jr, [0.0, 1.0])
+class TestScorePoolBySimilarity:
+    def test_empty_job_ids_returns_empty_and_no_basis(self):
+        assert score_pool_by_similarity([]) == ({}, None)
 
-        result = build_ideal_vector()
-        assert result is not None
-        assert abs(result[0] - 1.0) < 1e-9
-        assert abs(result[1] - (-0.3)) < 1e-9
-
-    def test_rejected_weight_unaffected_by_raw_centroid_magnitude(self):
-        # Regression for the audit's exact finding: a tightly clustered rejected
-        # set (large raw centroid magnitude, little internal cancellation)
-        # pushed the pre-fix ideal vector much harder than a diffuse one (small
-        # raw magnitude from vectors partially canceling out), even though both
-        # represent "the candidate rejected some jobs" equally. A rejected
-        # vector 5x the raw magnitude but identical direction must now produce
-        # the exact same ideal vector.
-        ja = _insert_job(status="applied")
-        _insert_embedding(ja, [1.0, 0.0])
-        jr = _insert_job(status="rejected")
-        _insert_embedding(jr, [0.0, 5.0])  # same direction as [0.0, 1.0], 5x the raw magnitude
-
-        result = build_ideal_vector()
-        assert result is not None
-        assert abs(result[0] - 1.0) < 1e-9
-        assert abs(result[1] - (-0.3)) < 1e-9
-
-    def test_ignores_jobs_without_embeddings(self):
-        _insert_job(status="applied")  # no embedding → skipped
-        assert build_ideal_vector() is None
-
-    def test_no_applied_jobs_no_profile_returns_none(self):
-        assert build_ideal_vector(candidate_profile=None) is None
-        assert build_ideal_vector(candidate_profile="") is None
+    def test_no_applied_jobs_no_profile_returns_empty_and_no_basis(self):
+        j1 = _insert_job()
+        assert score_pool_by_similarity([j1], candidate_profile=None) == ({}, None)
+        assert score_pool_by_similarity([j1], candidate_profile="") == ({}, None)
 
     @patch("embeddings.indexer._get_client")
     def test_falls_back_to_embedding_candidate_profile_when_no_applied_jobs(self, mock_get_client):
+        j1 = _insert_job()
+        _insert_embedding(j1, [0.7, 0.7])
         mock_client = MagicMock()
         mock_client.embed.return_value = [[0.7, 0.7]]
         mock_get_client.return_value = mock_client
 
-        result = build_ideal_vector(candidate_profile="CANDIDATE:\n- Senior PHP Developer")
+        scores, basis = score_pool_by_similarity([j1], candidate_profile="CANDIDATE:\n- Senior PHP Developer")
 
-        assert result == [0.7, 0.7]
+        assert basis == "CV profile / questionnaire (no applied jobs yet)"
+        assert abs(scores[j1] - 1.0) < 1e-9
         mock_client.embed.assert_called_once_with(["CANDIDATE:\n- Senior PHP Developer"], input_type="query")
 
     def test_applied_history_takes_priority_over_profile_fallback(self):
-        j1 = _insert_job(status="applied")
-        _insert_embedding(j1, [1.0, 0.0])
+        ja = _insert_job(status="applied")
+        _insert_embedding(ja, [1.0, 0.0])
+        jx = _insert_job()
+        _insert_embedding(jx, [1.0, 0.0])
 
-        result = build_ideal_vector(candidate_profile="CANDIDATE:\n- Senior PHP Developer")
+        scores, basis = score_pool_by_similarity([jx], candidate_profile="CANDIDATE:\n- Senior PHP Developer")
 
-        assert result is not None
-        assert abs(result[0] - 1.0) < 1e-9
+        assert basis == "applied jobs (max-sim)"
+        assert abs(scores[jx] - 1.0) < 1e-9
+
+    def test_scores_by_max_similarity_to_any_applied_vector(self):
+        ja1 = _insert_job(status="applied")
+        _insert_embedding(ja1, [1.0, 0.0])
+        ja2 = _insert_job(status="applied")
+        _insert_embedding(ja2, [0.0, 1.0])
+        jx = _insert_job()
+        _insert_embedding(jx, [1.0, 0.0])  # identical to ja1, orthogonal to ja2
+
+        scores, basis = score_pool_by_similarity([jx])
+        assert abs(scores[jx] - 1.0) < 1e-9
+
+    def test_max_sim_beats_the_old_centroid_approach_on_multi_modal_history(self):
+        # Regression for the audit's exact finding: two orthogonal applied clusters
+        # (e.g. backend Python roles vs data-engineering roles) used to be averaged
+        # into a single centroid sitting in semantic no-man's-land, close to
+        # neither. A candidate job identical to ONE of the two applied jobs should
+        # score a perfect 1.0 under max-sim — strictly higher than the ~0.707
+        # cosine similarity it would have gotten against the old centroid.
+        ja1 = _insert_job(status="applied")
+        _insert_embedding(ja1, [1.0, 0.0])
+        ja2 = _insert_job(status="applied")
+        _insert_embedding(ja2, [0.0, 1.0])
+        jx = _insert_job()
+        _insert_embedding(jx, [1.0, 0.0])
+
+        scores, _ = score_pool_by_similarity([jx])
+        old_centroid_similarity = 1.0 / (2 ** 0.5)  # cosine([1,0], normalize([1,1])) = 1/sqrt(2)
+        assert scores[jx] > old_centroid_similarity + 0.1
+
+    def test_penalizes_similarity_to_rejected_vectors(self):
+        ja = _insert_job(status="applied")
+        _insert_embedding(ja, [1.0, 0.0])
+        jr = _insert_job(status="rejected")
+        _insert_embedding(jr, [0.0, 1.0])
+        jx = _insert_job()
+        _insert_embedding(jx, [0.0, 1.0])  # matches applied on neither axis, matches rejected exactly
+
+        scores, _ = score_pool_by_similarity([jx])
+        # sim to applied ([1,0] vs [0,1]) = 0.0; sim to rejected ([0,1] vs [0,1]) = 1.0
+        # score = 0.0 - 0.3 * 1.0 = -0.3
+        assert abs(scores[jx] - (-0.3)) < 1e-9
+
+    def test_no_rejected_vectors_skips_penalty(self):
+        ja = _insert_job(status="applied")
+        _insert_embedding(ja, [1.0, 0.0])
+        jx = _insert_job()
+        _insert_embedding(jx, [1.0, 0.0])
+
+        scores, _ = score_pool_by_similarity([jx])
+        assert abs(scores[jx] - 1.0) < 1e-9
+
+    def test_job_without_embedding_absent_from_result_not_a_crash(self):
+        ja = _insert_job(status="applied")
+        _insert_embedding(ja, [1.0, 0.0])
+        jx = _insert_job()  # no embedding
+
+        scores, basis = score_pool_by_similarity([jx])
+        assert basis == "applied jobs (max-sim)"
+        assert jx not in scores
 
 
 class TestEmbedWithRetry:

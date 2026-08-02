@@ -1,5 +1,4 @@
 import logging
-import math
 import time
 
 from config import VOYAGE_EMBED_MODEL
@@ -79,49 +78,65 @@ def index_jobs(jobs: list[dict]) -> int:
     return indexed
 
 
-def _l2_normalize(vec: list[float]) -> list[float]:
-    norm = math.sqrt(sum(x * x for x in vec))
-    return [x / norm for x in vec] if norm > 0 else vec
+def _max_scores(job_ids: list[str], vectors: list[list[float]]) -> dict[str, float]:
+    """For each job_id, the max cosine similarity across all given vectors — one
+    /api/embeddings/similarity call per vector (each returns only {job_id: float}
+    for the whole pool, never raw vectors, so this stays cheap per call; it's just
+    more of them than the old single-centroid approach needed)."""
+    best: dict[str, float] = {}
+    for vec in vectors:
+        for job_id, score in score_by_similarity(job_ids, vec).items():
+            if job_id not in best or score > best[job_id]:
+                best[job_id] = score
+    return best
 
 
-def build_ideal_vector(candidate_profile: str | None = None) -> list[float] | None:
-    """
-    Compute the 'ideal job' embedding vector:
-    centroid(applied) - 0.3 × centroid(rejected)
+def score_pool_by_similarity(job_ids: list[str], candidate_profile: str | None = None) -> tuple[dict[str, float], str | None]:
+    """Score every job in job_ids for semantic fit to the candidate.
+    Returns ({job_id: score}, basis) — basis is None when there's nothing to score
+    against at all (no applied history and no candidate_profile/HyDE text), matching
+    the old build_ideal_vector()'s "return None" case.
 
-    Falls back to embedding `candidate_profile` (the CV summary) as a query vector when
-    there's no applied-job history yet. Without this fallback, a new candidate's semantic
-    retrieval step is skipped entirely (this function returned None) and the top-N pool
-    reaching the paid rerank/listwise stages ends up ordered by scrape recency, not by
-    fit — i.e. every new candidate's first run was scored on an essentially arbitrary
-    slice of the pool. Returns None only when there's truly nothing to build a vector
-    from (no applied jobs and no candidate profile).
-    """
+    With applied-job history: max-sim kNN — score(job) = max cosine-sim to ANY
+    individual applied vector, minus 0.3x max cosine-sim to any rejected vector.
+    Replaces the old single-centroid approach (average all applied vectors into one
+    point, average all rejected into another, then combine): a centroid over
+    multi-modal applied history — e.g. some backend Python roles, some data-
+    engineering roles — can land in semantic no-man's-land close to neither
+    cluster, silently starving one whole side of the candidate's actual interests
+    even though every individual applied job is a real, valid example of "similar
+    to something I applied to". max-sim instead credits a job for being close to
+    ANY one applied example, which is what that phrase should actually mean.
+
+    Without applied history: falls back to embedding candidate_profile (built by
+    evaluator/profile.py::build_hyde_query, a synthetic ideal-job-posting query) as
+    a single query vector — max-sim needs multiple individual examples to be
+    meaningful, and with zero applied jobs there's nothing to run kNN against. This
+    is the same fallback build_ideal_vector() used to provide; without it a new
+    candidate's semantic retrieval step is skipped entirely and the top-N pool
+    reaching the paid rerank/listwise stages ends up ordered by scrape recency."""
+    if not job_ids:
+        return {}, None
+
     vectors = api_client.get("/api/embeddings/decision-vectors").json()
     applied_vecs = vectors["applied"]
 
     if not applied_vecs:
         if not candidate_profile:
-            return None
+            return {}, None
         client = _get_client()
         [vec] = client.embed([candidate_profile], input_type="query")
-        return vec
+        return score_by_similarity(job_ids, vec), "CV profile / questionnaire (no applied jobs yet)"
 
-    dim = len(applied_vecs[0])
-    centroid_a = _l2_normalize([sum(v[i] for v in applied_vecs) / len(applied_vecs) for i in range(dim)])
+    max_applied = _max_scores(job_ids, applied_vecs)
 
     rejected_vecs = vectors["rejected"]
     if not rejected_vecs:
-        return centroid_a
+        return max_applied, "applied jobs (max-sim)"
 
-    # Both centroids are unit-normalized before combining so the 0.3 weight has a
-    # stable, comparable meaning regardless of how tightly clustered each set is —
-    # an unnormalized centroid over a few very similar rejections has a much larger
-    # magnitude than one over diverse rejections (which partially cancel out), so
-    # "0.3×" of the raw centroid was actually a wildly inconsistent push depending
-    # on rejection variety, not a stable 30% signal.
-    centroid_r = _l2_normalize([sum(v[i] for v in rejected_vecs) / len(rejected_vecs) for i in range(dim)])
-    return [centroid_a[i] - 0.3 * centroid_r[i] for i in range(dim)]
+    max_rejected = _max_scores(job_ids, rejected_vecs)
+    scores = {job_id: score - 0.3 * max_rejected.get(job_id, 0.0) for job_id, score in max_applied.items()}
+    return scores, "applied jobs (max-sim)"
 
 
 def score_by_similarity(job_ids: list[str], ideal: list[float]) -> dict[str, float]:
