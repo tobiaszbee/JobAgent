@@ -22,7 +22,7 @@ from ranker.listwise import listwise_rank
 from ranker.debate import debate_rank
 from ranker.rank_cache import reuse_if_unchanged
 from ranker.would_apply import compute_would_apply
-from evaluator.profile import load_active_profile, load_questionnaire_preferences
+from evaluator.profile import load_active_profile, load_questionnaire_preferences, build_retrieval_query
 from config import RANKING
 
 try:
@@ -34,6 +34,7 @@ except ValueError as e:
 latest_pref = preference_repository.get_latest()
 preferences = latest_pref["signals"] if latest_pref else []
 questionnaire = load_questionnaire_preferences()
+retrieval_query = build_retrieval_query(candidate_profile)
 
 RANKING_POOL_LIMIT = 2000
 jobs = job_repository.get_jobs_for_ranking(limit=RANKING_POOL_LIMIT)
@@ -55,9 +56,9 @@ if unindexed:
 
 # Step 2: Semantic similarity
 has_applied_history = bool(job_repository.get_applied_job_ids())
-ideal = build_ideal_vector(candidate_profile)
+ideal = build_ideal_vector(retrieval_query)
 if ideal:
-    basis = "applied jobs" if has_applied_history else "CV profile (no applied jobs yet)"
+    basis = "applied jobs" if has_applied_history else "CV profile / questionnaire (no applied jobs yet)"
     print(f"\nScoring by semantic similarity to {basis}...")
     job_ids = [j["id"] for j in jobs]
     sim_scores = score_by_similarity(job_ids, ideal)
@@ -67,7 +68,7 @@ if ideal:
     top_scores = [round(j["_embedding_score"], 3) for j in jobs_by_sim[:5]]
     print(f"  Top-5 similarity scores: {top_scores}")
 else:
-    print("\nNo applied jobs and no CV profile — skipping semantic retrieval.")
+    print("\nNo applied jobs, CV profile, or questionnaire preferences — skipping semantic retrieval.")
     jobs_by_sim = jobs
     for job in jobs:
         job["_embedding_score"] = None
@@ -85,7 +86,7 @@ if excluded_low_score:
 rerank_pool = ranking_eligible[:RANKING["top_n_rerank"]]
 if len(rerank_pool) > 1:
     print(f"\nReranking top-{len(rerank_pool)} with Voyage cross-encoder...")
-    rerank_pool = rerank_jobs(rerank_pool, candidate_profile, top_k=RANKING["top_n_listwise"])
+    rerank_pool = rerank_jobs(rerank_pool, retrieval_query, top_k=RANKING["top_n_listwise"])
     print(f"  Got {len(rerank_pool)} after reranking")
 else:
     for j in rerank_pool:

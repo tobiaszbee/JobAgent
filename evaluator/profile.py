@@ -1,5 +1,16 @@
 from db.repositories import candidate_preferences_repository, cv_repository
 
+# Fields worth folding into a semantic retrieval query — the ones with real
+# positive lexical/semantic overlap against job description text. Deliberately
+# excludes excluded_company_types/excluded_industries/avoided_tech: embeddings
+# and cross-encoder rerank have no way to represent negation from a bare word
+# in a query — including e.g. "agency" from an excluded_company_types entry
+# would just pull MORE agency jobs toward the top, the opposite of intent.
+# open_notes is included as full free text (not list terms) since a real
+# sentence like "not interested in gambling companies" gives the embedding
+# model actual negation context that a bare listed word can't.
+_RETRIEVAL_LIST_FIELDS = ["role_types", "preferred_company_types", "preferred_industries", "extra_tech"]
+
 # Maps a candidate_preferences list field to its rendered label — order here is
 # the order they appear in the prompt.
 _LIST_FIELD_LABELS = [
@@ -85,3 +96,30 @@ def load_questionnaire_preferences() -> str:
     if not lines:
         return ""
     return "CANDIDATE QUESTIONNAIRE (their own stated preferences):\n" + "\n".join(lines)
+
+
+def build_retrieval_query(candidate_profile: str) -> str:
+    """Combine the CV profile with a compact questionnaire summary for use as the
+    query text for both semantic retrieval (embeddings/indexer.py::build_ideal_vector's
+    cold-start fallback) and cross-encoder reranking (ranker/reranker.py::rerank_jobs)
+    — both previously only ever saw the CV, missing everything the candidate told the
+    questionnaire directly (extra tech interests, preferred industries, etc.). Kept
+    dense and unlabeled, unlike load_questionnaire_preferences() above (meant for an
+    LLM prompt): rerank_jobs truncates its query to 500 chars, so every character here
+    should be a real retrieval term, not prose structure."""
+    prefs = candidate_preferences_repository.get_active()
+    if not prefs:
+        return candidate_profile
+
+    terms = []
+    for field in _RETRIEVAL_LIST_FIELDS:
+        terms.extend(prefs.get(field) or [])
+    open_notes = (prefs.get("open_notes") or "").strip()
+    if open_notes:
+        terms.append(open_notes)
+
+    if not terms:
+        return candidate_profile
+
+    suffix = "Preferences: " + ", ".join(terms)
+    return f"{candidate_profile}\n{suffix}" if candidate_profile else suffix

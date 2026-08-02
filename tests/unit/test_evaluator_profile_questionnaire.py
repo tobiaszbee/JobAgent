@@ -1,6 +1,6 @@
 from unittest.mock import patch
 
-from evaluator.profile import load_questionnaire_preferences
+from evaluator.profile import build_retrieval_query, load_questionnaire_preferences
 
 
 @patch("evaluator.profile.candidate_preferences_repository.get_active", return_value=None)
@@ -95,3 +95,57 @@ def test_open_notes_quoted(mock_prefs):
 def test_open_notes_blank_string_omitted(mock_prefs):
     mock_prefs.return_value = {"open_notes": "   "}
     assert load_questionnaire_preferences() == ""
+
+
+# --- build_retrieval_query ---
+
+@patch("evaluator.profile.candidate_preferences_repository.get_active", return_value=None)
+def test_retrieval_query_falls_back_to_cv_when_no_prefs(mock_prefs):
+    assert build_retrieval_query("CANDIDATE: Senior Python dev") == "CANDIDATE: Senior Python dev"
+
+
+@patch("evaluator.profile.candidate_preferences_repository.get_active", return_value={})
+def test_retrieval_query_falls_back_to_cv_when_prefs_empty(mock_prefs):
+    assert build_retrieval_query("CANDIDATE: Senior Python dev") == "CANDIDATE: Senior Python dev"
+
+
+@patch("evaluator.profile.candidate_preferences_repository.get_active")
+def test_retrieval_query_appends_positive_terms(mock_prefs):
+    mock_prefs.return_value = {
+        "preferred_company_types": ["product"],
+        "extra_tech": ["Rust", "Kubernetes"],
+    }
+    query = build_retrieval_query("CANDIDATE: Senior Python dev")
+    assert query.startswith("CANDIDATE: Senior Python dev")
+    assert "product" in query
+    assert "Rust" in query
+    assert "Kubernetes" in query
+
+
+@patch("evaluator.profile.candidate_preferences_repository.get_active")
+def test_retrieval_query_excludes_negative_fields(mock_prefs):
+    # Regression: embeddings/cross-encoder rerank have no way to represent
+    # negation from a bare word — including e.g. "agency" from
+    # excluded_company_types would pull MORE agency jobs toward the top.
+    mock_prefs.return_value = {
+        "excluded_company_types": ["agency"],
+        "excluded_industries": ["gambling"],
+        "avoided_tech": ["PHP"],
+    }
+    query = build_retrieval_query("CANDIDATE: Senior Python dev")
+    assert query == "CANDIDATE: Senior Python dev"
+
+
+@patch("evaluator.profile.candidate_preferences_repository.get_active")
+def test_retrieval_query_includes_open_notes_as_free_text(mock_prefs):
+    mock_prefs.return_value = {"open_notes": "want to work on distributed systems"}
+    query = build_retrieval_query("CANDIDATE: Senior Python dev")
+    assert "want to work on distributed systems" in query
+
+
+@patch("evaluator.profile.candidate_preferences_repository.get_active")
+def test_retrieval_query_works_with_no_cv_profile(mock_prefs):
+    mock_prefs.return_value = {"extra_tech": ["Rust"]}
+    query = build_retrieval_query("")
+    assert "Rust" in query
+    assert not query.startswith("\n")
