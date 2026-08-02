@@ -10,6 +10,13 @@ logger = logging.getLogger(__name__)
 
 _VALID_FLAGS = {"dealbreaker_risk", "overrated", "underrated"}
 
+# How many positions an overrated/underrated flag shifts a job — modest by design:
+# debate is a secondary check, not a second full ranking pass, so it nudges the
+# primary listwise ranking rather than overriding its overall judgment. Naturally
+# clamped by list bounds (a job can't move further than the list allows) since the
+# reorder is a plain sort, not an explicit index swap.
+_RANK_NUDGE = 3
+
 _DEBATE_TOOL = {
     "name": "submit_debate_review",
     "description": "Submit a second-opinion critique of an existing job ranking.",
@@ -83,7 +90,8 @@ def debate_rank(ranked_jobs: list[dict], candidate_profile: str, questionnaire: 
     """Second-opinion critique of an already-ranked shortlist (the listwise top-N),
     using a different model than the primary ranker. Does not re-derive the ranking
     from scratch — only flags disagreements. Jobs flagged "dealbreaker_risk" are
-    demoted to the bottom of the list; other flags are attached but don't reorder."""
+    demoted to the bottom of the list; "overrated"/"underrated" get a modest
+    _RANK_NUDGE-position shift down/up instead of a full re-rank."""
     if not ranked_jobs:
         return ranked_jobs
 
@@ -148,11 +156,31 @@ Use the submit_debate_review tool to report your findings."""
         else:
             kept.append(job)
 
+    # overrated/underrated used to be attached to the job (debate_flag/debate_note,
+    # shown in the UI) but never changed its actual position — only dealbreaker_risk
+    # did anything. Nudge by _RANK_NUDGE positions instead: the +/-0.5 offset breaks
+    # ties strictly in the nudge's direction (without it, Python's stable sort would
+    # let an unflagged job at the landing index win the tie and blunt the shift by
+    # up to one position).
+    def _nudge_key(indexed_job: tuple[int, dict]) -> float:
+        index, job = indexed_job
+        flag = job.get("debate_flag")
+        if flag == "underrated":
+            return index - _RANK_NUDGE - 0.5
+        if flag == "overrated":
+            return index + _RANK_NUDGE + 0.5
+        return float(index)
+
+    nudged_count = sum(1 for job in kept if job.get("debate_flag") in ("overrated", "underrated"))
+    kept = [job for _, job in sorted(enumerate(kept), key=_nudge_key)]
+
     reordered = kept + demoted
     for i, job in enumerate(reordered, 1):
         job["listwise_rank"] = i
 
     if demoted:
         logger.info(f"Debate review: demoted {len(demoted)} job(s) flagged dealbreaker_risk")
+    if nudged_count:
+        logger.info(f"Debate review: nudged {nudged_count} job(s) flagged overrated/underrated")
 
     return reordered

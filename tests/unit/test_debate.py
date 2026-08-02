@@ -79,14 +79,68 @@ class TestDebateRank:
         assert result[-1]["debate_note"] == "Seniority mismatch"
 
     @patch("ranker.debate.anthropic.Anthropic")
-    def test_overrated_flag_does_not_reorder(self, mock_anthropic):
+    def test_overrated_flag_moves_job_down(self, mock_anthropic):
+        # Regression: overrated/underrated used to be attached to the job
+        # (debate_flag/debate_note, shown in the UI) but never changed its
+        # actual position — only dealbreaker_risk did anything.
         jobs = [_job("j1", rank=1), _job("j2", rank=2)]
         mock_anthropic.return_value.messages.create.return_value = _debate_response([
             {"job_id": "j1", "flag": "overrated", "note": "Slightly overrated"},
         ])
         result = debate_rank(jobs, "profile")
-        assert [j["id"] for j in result] == ["j1", "j2"]
-        assert result[0]["debate_flag"] == "overrated"
+        assert [j["id"] for j in result] == ["j2", "j1"]
+        assert result[-1]["debate_flag"] == "overrated"
+        assert result[-1]["listwise_rank"] == 2
+
+    @patch("ranker.debate.anthropic.Anthropic")
+    def test_overrated_flag_moves_down_by_rank_nudge_positions(self, mock_anthropic):
+        jobs = [_job(f"j{i}", rank=i) for i in range(1, 8)]  # j1..j7, plenty of room below
+        mock_anthropic.return_value.messages.create.return_value = _debate_response([
+            {"job_id": "j1", "flag": "overrated", "note": "x"},
+        ])
+        result = debate_rank(jobs, "profile")
+        ids = [j["id"] for j in result]
+        assert ids.index("j1") == 3  # moved from index 0 down exactly _RANK_NUDGE=3
+
+    @patch("ranker.debate.anthropic.Anthropic")
+    def test_underrated_flag_moves_up_by_rank_nudge_positions(self, mock_anthropic):
+        jobs = [_job(f"j{i}", rank=i) for i in range(1, 8)]  # j1..j7
+        mock_anthropic.return_value.messages.create.return_value = _debate_response([
+            {"job_id": "j7", "flag": "underrated", "note": "x"},
+        ])
+        result = debate_rank(jobs, "profile")
+        ids = [j["id"] for j in result]
+        assert ids.index("j7") == 3  # moved from index 6 up exactly _RANK_NUDGE=3
+
+    @patch("ranker.debate.anthropic.Anthropic")
+    def test_underrated_flag_clamped_at_top_when_not_enough_room(self, mock_anthropic):
+        jobs = [_job("j1", rank=1), _job("j2", rank=2), _job("j3", rank=3)]
+        mock_anthropic.return_value.messages.create.return_value = _debate_response([
+            {"job_id": "j2", "flag": "underrated", "note": "x"},
+        ])
+        result = debate_rank(jobs, "profile")
+        assert result[0]["id"] == "j2"
+
+    @patch("ranker.debate.anthropic.Anthropic")
+    def test_overrated_flag_clamped_at_bottom_when_not_enough_room(self, mock_anthropic):
+        jobs = [_job("j1", rank=1), _job("j2", rank=2), _job("j3", rank=3)]
+        mock_anthropic.return_value.messages.create.return_value = _debate_response([
+            {"job_id": "j2", "flag": "overrated", "note": "x"},
+        ])
+        result = debate_rank(jobs, "profile")
+        assert result[-1]["id"] == "j2"
+
+    @patch("ranker.debate.anthropic.Anthropic")
+    def test_dealbreaker_demotion_and_nudge_combine_correctly(self, mock_anthropic):
+        jobs = [_job("j1", rank=1), _job("j2", rank=2), _job("j3", rank=3), _job("j4", rank=4)]
+        mock_anthropic.return_value.messages.create.return_value = _debate_response([
+            {"job_id": "j1", "flag": "dealbreaker_risk", "note": "x"},
+            {"job_id": "j4", "flag": "underrated", "note": "y"},
+        ])
+        result = debate_rank(jobs, "profile")
+        ids = [j["id"] for j in result]
+        assert ids[-1] == "j1"  # dealbreaker still goes to the absolute bottom
+        assert ids.index("j4") < ids.index("j2")  # underrated j4 nudged ahead of j2/j3
 
     @patch("ranker.debate.anthropic.Anthropic")
     def test_ranks_renumbered_sequentially_after_demotion(self, mock_anthropic):
