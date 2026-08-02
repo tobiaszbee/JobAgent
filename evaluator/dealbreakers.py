@@ -147,6 +147,18 @@ def _seniority_reason(job_structured: dict, seniority_levels: list[str]) -> str 
     )
 
 
+def _no_salary_disclosed_reason(job_structured: dict, show_jobs_without_salary: bool) -> str | None:
+    """The questionnaire checkbox ("Also show postings with no salary listed",
+    checked/True by default) was saved but never read anywhere — unchecking it
+    had no effect at all. Only ever filters when the candidate explicitly opted
+    out; a job that does disclose a salary is never touched by this check."""
+    if show_jobs_without_salary:
+        return None
+    if job_structured.get("salary_max") or job_structured.get("salary_min"):
+        return None  # salary IS disclosed — not this check's concern
+    return "Dealbreaker: no salary disclosed, and you chose to hide postings without salary listed"
+
+
 def apply_dealbreaker_filter(jobs: list[dict]) -> tuple[list[dict], dict]:
     """Deterministic, pre-LLM hard filter. Runs on a list of not-yet-scored jobs
     (typically evaluator/runner.py's unscored_jobs) and auto-rejects any that violate
@@ -161,8 +173,16 @@ def apply_dealbreaker_filter(jobs: list[dict]) -> tuple[list[dict], dict]:
     work_mode = prefs.get("work_mode") or []
     remote_countries = prefs.get("remote_countries") or []
     seniority_levels = prefs.get("seniority_levels") or []
+    # Unset (predates this field) defaults to True, matching the questionnaire
+    # checkbox's own default (checked) — never surprise an existing candidate
+    # with newly-hidden postings just because this key doesn't exist yet.
+    raw_show_no_salary = prefs.get("show_jobs_without_salary")
+    show_jobs_without_salary = True if raw_show_no_salary is None else bool(raw_show_no_salary)
 
-    if not salary_min and "remote" not in work_mode and not seniority_levels:
+    if (
+        not salary_min and "remote" not in work_mode and not seniority_levels
+        and show_jobs_without_salary
+    ):
         return jobs, {"checked": len(jobs), "auto_rejected": 0}
 
     surviving = []
@@ -177,6 +197,8 @@ def apply_dealbreaker_filter(jobs: list[dict]) -> tuple[list[dict], dict]:
             reason = _geo_reason(structured, work_mode, remote_countries)
         if not reason:
             reason = _seniority_reason(structured, seniority_levels)
+        if not reason:
+            reason = _no_salary_disclosed_reason(structured, show_jobs_without_salary)
 
         if reason:
             job_repository.update_score_and_status(job["id"], 0.0, reason, "auto_rejected")

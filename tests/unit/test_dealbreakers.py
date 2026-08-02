@@ -16,7 +16,7 @@ def _job(job_id="job1", structured=None, **overrides):
 def _prefs(**overrides):
     base = {
         "salary_min": None, "salary_currency": None, "work_mode": [],
-        "remote_countries": [], "seniority_levels": [],
+        "remote_countries": [], "seniority_levels": [], "show_jobs_without_salary": None,
     }
     base.update(overrides)
     return base
@@ -410,6 +410,59 @@ class TestSeniorityMismatch:
         # on its own, not just salary_min/work_mode.
         mock_prefs.return_value = _prefs(seniority_levels=["lead"])
         job = _job(structured={"seniority": "junior"})
+        surviving, stats = apply_dealbreaker_filter([job])
+        assert surviving == []
+        assert stats["auto_rejected"] == 1
+
+
+class TestNoSalaryDisclosed:
+    # Regression: the "Also show postings with no salary listed" checkbox
+    # (checked/True by default) was saved to preferences but never read.
+
+    @patch("evaluator.dealbreakers.job_repository.update_score_and_status")
+    @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
+    def test_rejects_undisclosed_salary_when_opted_out(self, mock_prefs, mock_update):
+        mock_prefs.return_value = _prefs(show_jobs_without_salary=False)
+        job = _job(structured={})
+        surviving, stats = apply_dealbreaker_filter([job])
+        assert surviving == []
+        assert stats["auto_rejected"] == 1
+        assert "no salary disclosed" in mock_update.call_args[0][2]
+
+    @patch("evaluator.dealbreakers.job_repository.update_score_and_status")
+    @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
+    def test_disclosed_salary_never_rejected_by_this_check(self, mock_prefs, mock_update):
+        mock_prefs.return_value = _prefs(show_jobs_without_salary=False)
+        job = _job(structured={"salary_max": 100000, "salary_currency": "PLN", "salary_period": "yearly"})
+        surviving, stats = apply_dealbreaker_filter([job])
+        assert surviving == [job]
+        mock_update.assert_not_called()
+
+    @patch("evaluator.dealbreakers.job_repository.update_score_and_status")
+    @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
+    def test_default_true_shows_undisclosed_salary_jobs(self, mock_prefs, mock_update):
+        mock_prefs.return_value = _prefs(show_jobs_without_salary=True)
+        job = _job(structured={})
+        surviving, stats = apply_dealbreaker_filter([job])
+        assert surviving == [job]
+        mock_update.assert_not_called()
+
+    @patch("evaluator.dealbreakers.job_repository.update_score_and_status")
+    @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
+    def test_unset_key_defaults_to_showing_undisclosed_salary_jobs(self, mock_prefs, mock_update):
+        # Preferences saved before this field existed — must not suddenly
+        # start hiding jobs for an existing candidate.
+        mock_prefs.return_value = _prefs(show_jobs_without_salary=None)
+        job = _job(structured={})
+        surviving, stats = apply_dealbreaker_filter([job])
+        assert surviving == [job]
+        mock_update.assert_not_called()
+
+    @patch("evaluator.dealbreakers.job_repository.update_score_and_status")
+    @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
+    def test_opted_out_check_runs_even_with_no_other_preference(self, mock_prefs, mock_update):
+        mock_prefs.return_value = _prefs(show_jobs_without_salary=False)
+        job = _job(structured={"seniority": "senior"})  # no salary fields at all
         surviving, stats = apply_dealbreaker_filter([job])
         assert surviving == []
         assert stats["auto_rejected"] == 1
