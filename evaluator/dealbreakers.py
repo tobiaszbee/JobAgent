@@ -74,6 +74,41 @@ def _remote_only_reason(job_structured: dict, work_mode: list[str]) -> str | Non
     return None
 
 
+def _geo_reason(job_structured: dict, work_mode: list[str], remote_countries: list[str]) -> str | None:
+    """Closes the geo hole: a job can be genuinely remote (passes _remote_only_reason)
+    but still restricted to countries that don't include the candidate's — e.g.
+    "Remote — US only" reaching a candidate in Poland, with nothing anywhere in the
+    pipeline able to catch it (see extractor/runner.py's remote_regions field).
+
+    Deliberately conservative: any missing/unclear signal skips the check rather
+    than rejecting. remote_regions is a brand-new field (added alongside this
+    dealbreaker) — every job extracted before today has no such key at all, and
+    an empty list explicitly means "unstated" per its own schema description, not
+    "no countries allowed". Both cases must resolve to "don't reject" for this to
+    be safe to enable against the existing, unbackfilled pool."""
+    if "remote" not in work_mode:
+        return None
+    if not remote_countries:
+        return None  # candidate didn't say which countries matter — nothing to check
+    if job_structured.get("remote") is not True:
+        return None  # not a remote posting at all — a different dealbreaker's job
+    job_regions = job_structured.get("remote_regions")
+    if not job_regions:
+        return None  # unstated (or pre-migration row) — never treat as a restriction
+
+    from collector.location import location_matches
+    # Trailing space lets a bare "EU" match location.py's "eu " Europe token the
+    # same way real free-text job locations do — this list is otherwise just
+    # joined country/region names, not a sentence.
+    job_location_text = ", ".join(job_regions) + " "
+    if any(location_matches(job_location_text, country) for country in remote_countries):
+        return None
+    return (
+        f"Dealbreaker: remote work restricted to {', '.join(job_regions)}, "
+        f"not available for your selected countries ({', '.join(remote_countries)})"
+    )
+
+
 def apply_dealbreaker_filter(jobs: list[dict]) -> tuple[list[dict], dict]:
     """Deterministic, pre-LLM hard filter. Runs on a list of not-yet-scored jobs
     (typically evaluator/runner.py's unscored_jobs) and auto-rejects any that violate
@@ -86,8 +121,9 @@ def apply_dealbreaker_filter(jobs: list[dict]) -> tuple[list[dict], dict]:
     salary_min = prefs.get("salary_min")
     salary_currency = prefs.get("salary_currency")
     work_mode = prefs.get("work_mode") or []
+    remote_countries = prefs.get("remote_countries") or []
 
-    if not salary_min and work_mode != ["remote"]:
+    if not salary_min and "remote" not in work_mode:
         return jobs, {"checked": len(jobs), "auto_rejected": 0}
 
     surviving = []
@@ -98,6 +134,8 @@ def apply_dealbreaker_filter(jobs: list[dict]) -> tuple[list[dict], dict]:
         reason = _salary_floor_reason(structured, salary_min, salary_currency)
         if not reason:
             reason = _remote_only_reason(structured, work_mode)
+        if not reason:
+            reason = _geo_reason(structured, work_mode, remote_countries)
 
         if reason:
             job_repository.update_score_and_status(job["id"], 0.0, reason, "auto_rejected")

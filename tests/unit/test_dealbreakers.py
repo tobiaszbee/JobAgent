@@ -14,7 +14,7 @@ def _job(job_id="job1", structured=None, **overrides):
 
 
 def _prefs(**overrides):
-    base = {"salary_min": None, "salary_currency": None, "work_mode": []}
+    base = {"salary_min": None, "salary_currency": None, "work_mode": [], "remote_countries": []}
     base.update(overrides)
     return base
 
@@ -213,6 +213,115 @@ class TestRemoteOnlyMismatch:
         surviving, stats = apply_dealbreaker_filter([job])
         assert surviving == [job]
         mock_update.assert_not_called()
+
+
+class TestGeoRestriction:
+    # Etap 2-4 geo hole: a job can be genuinely remote (passes the remote-only
+    # check above) but restricted to countries that don't include the
+    # candidate's — e.g. "Remote — US only" reaching a candidate in Poland.
+
+    @patch("evaluator.dealbreakers.job_repository.update_score_and_status")
+    @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
+    def test_rejects_remote_job_restricted_to_a_different_country(self, mock_prefs, mock_update):
+        mock_prefs.return_value = _prefs(work_mode=["remote"], remote_countries=["Poland"])
+        job = _job(structured={"remote": True, "remote_regions": ["United States"]})
+        surviving, stats = apply_dealbreaker_filter([job])
+        assert surviving == []
+        assert stats["auto_rejected"] == 1
+        assert "restricted to United States" in mock_update.call_args[0][2]
+
+    @patch("evaluator.dealbreakers.job_repository.update_score_and_status")
+    @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
+    def test_passes_remote_job_when_candidate_country_is_eligible(self, mock_prefs, mock_update):
+        mock_prefs.return_value = _prefs(work_mode=["remote"], remote_countries=["Poland"])
+        job = _job(structured={"remote": True, "remote_regions": ["Poland", "Ukraine"]})
+        surviving, stats = apply_dealbreaker_filter([job])
+        assert surviving == [job]
+        mock_update.assert_not_called()
+
+    @patch("evaluator.dealbreakers.job_repository.update_score_and_status")
+    @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
+    def test_eu_region_matches_an_eu_candidate_country(self, mock_prefs, mock_update):
+        mock_prefs.return_value = _prefs(work_mode=["remote"], remote_countries=["Poland"])
+        job = _job(structured={"remote": True, "remote_regions": ["EU"]})
+        surviving, stats = apply_dealbreaker_filter([job])
+        assert surviving == [job]
+        mock_update.assert_not_called()
+
+    @patch("evaluator.dealbreakers.job_repository.update_score_and_status")
+    @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
+    def test_worldwide_region_never_restricts_anyone(self, mock_prefs, mock_update):
+        mock_prefs.return_value = _prefs(work_mode=["remote"], remote_countries=["Poland"])
+        job = _job(structured={"remote": True, "remote_regions": ["Worldwide"]})
+        surviving, stats = apply_dealbreaker_filter([job])
+        assert surviving == [job]
+        mock_update.assert_not_called()
+
+    @patch("evaluator.dealbreakers.job_repository.update_score_and_status")
+    @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
+    def test_empty_remote_regions_never_rejects(self, mock_prefs, mock_update):
+        # Critical null-safety case: empty list means "unstated" per the
+        # extractor's own schema, never "no countries allowed".
+        mock_prefs.return_value = _prefs(work_mode=["remote"], remote_countries=["Poland"])
+        job = _job(structured={"remote": True, "remote_regions": []})
+        surviving, stats = apply_dealbreaker_filter([job])
+        assert surviving == [job]
+        mock_update.assert_not_called()
+
+    @patch("evaluator.dealbreakers.job_repository.update_score_and_status")
+    @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
+    def test_missing_remote_regions_key_never_rejects(self, mock_prefs, mock_update):
+        # Every job extracted before this field existed has no "remote_regions"
+        # key at all — the entire existing pool must be unaffected by enabling
+        # this check.
+        mock_prefs.return_value = _prefs(work_mode=["remote"], remote_countries=["Poland"])
+        job = _job(structured={"remote": True})  # pre-migration shape, key absent
+        surviving, stats = apply_dealbreaker_filter([job])
+        assert surviving == [job]
+        mock_update.assert_not_called()
+
+    @patch("evaluator.dealbreakers.job_repository.update_score_and_status")
+    @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
+    def test_no_candidate_remote_countries_never_rejects(self, mock_prefs, mock_update):
+        mock_prefs.return_value = _prefs(work_mode=["remote"], remote_countries=[])
+        job = _job(structured={"remote": True, "remote_regions": ["United States"]})
+        surviving, stats = apply_dealbreaker_filter([job])
+        assert surviving == [job]
+        mock_update.assert_not_called()
+
+    @patch("evaluator.dealbreakers.job_repository.update_score_and_status")
+    @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
+    def test_non_remote_job_never_checked_for_geo(self, mock_prefs, mock_update):
+        # remote is False — a hybrid/onsite posting, a different dealbreaker's
+        # concern, not the geo-remote one. Uses work_mode=["remote","hybrid"] so
+        # _remote_only_reason's own (unrelated, exact-match-["remote"]) rule
+        # doesn't also fire and mask what this test is isolating.
+        mock_prefs.return_value = _prefs(work_mode=["remote", "hybrid"], remote_countries=["Poland"])
+        job = _job(structured={"remote": False, "remote_regions": ["United States"]})
+        surviving, stats = apply_dealbreaker_filter([job])
+        assert surviving == [job]
+        mock_update.assert_not_called()
+
+    @patch("evaluator.dealbreakers.job_repository.update_score_and_status")
+    @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
+    def test_candidate_not_wanting_remote_never_triggers_geo_check(self, mock_prefs, mock_update):
+        mock_prefs.return_value = _prefs(work_mode=["hybrid"], remote_countries=["Poland"])
+        job = _job(structured={"remote": True, "remote_regions": ["United States"]})
+        surviving, stats = apply_dealbreaker_filter([job])
+        assert surviving == [job]
+        mock_update.assert_not_called()
+
+    @patch("evaluator.dealbreakers.job_repository.update_score_and_status")
+    @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
+    def test_geo_check_applies_even_when_candidate_also_open_to_hybrid(self, mock_prefs, mock_update):
+        # Broadened trigger: "remote" in work_mode, not work_mode == ["remote"] —
+        # a candidate open to both hybrid and remote still cares whether a
+        # specific remote posting's geo restriction excludes them.
+        mock_prefs.return_value = _prefs(work_mode=["remote", "hybrid"], remote_countries=["Poland"])
+        job = _job(structured={"remote": True, "remote_regions": ["United States"]})
+        surviving, stats = apply_dealbreaker_filter([job])
+        assert surviving == []
+        assert stats["auto_rejected"] == 1
 
 
 class TestMultipleJobs:
