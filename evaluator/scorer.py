@@ -20,19 +20,28 @@ def _get_client() -> anthropic.Anthropic:
     return _client
 
 
+# Mirrors preference_agent/runner.py's _REASON_LIMIT (raised from a bare 120 to
+# 400 for the same reason): a rejection reason is the candidate's own direct
+# explanation — the richest signal available — and this system prompt is built
+# once per scoring batch and cached, not rebuilt per job, so the extra length
+# is paid once per run, not once per job scored.
+_EXAMPLE_DESC_LIMIT = 400
+_EXAMPLE_REASON_LIMIT = 400
+
+
 def _build_examples_section(positive: list[dict], negative: list[dict]) -> str:
     lines = []
     if positive:
         lines.append("EXAMPLES OF JOBS I APPLIED TO (high quality — learn what I like):")
         for ex in positive:
-            desc = build_excerpt(ex.get("description"), ex.get("source"))[:200].replace("\n", " ")
+            desc = build_excerpt(ex.get("description"), ex.get("source"))[:_EXAMPLE_DESC_LIMIT].replace("\n", " ")
             lines.append(f'- "{ex["title"]}" @ {ex["company"]}: {desc}...')
         lines.append("")
     if negative:
         lines.append("EXAMPLES OF JOBS I REJECTED (learn what to avoid):")
         for ex in negative:
-            desc = build_excerpt(ex.get("description"), ex.get("source"))[:150].replace("\n", " ")
-            reason = (ex.get("rejection_reason") or ex.get("score_reason") or "")[:150]
+            desc = build_excerpt(ex.get("description"), ex.get("source"))[:_EXAMPLE_DESC_LIMIT].replace("\n", " ")
+            reason = (ex.get("rejection_reason") or ex.get("score_reason") or "")[:_EXAMPLE_REASON_LIMIT]
             reason_str = f" [My reason: {reason}]" if reason else ""
             lines.append(f'- "{ex["title"]}" @ {ex["company"]}: {desc}...{reason_str}')
         lines.append("")
@@ -130,6 +139,12 @@ PREFERRED (increases score):
 {preferred_lines}
 
 Score the job 0-10 based on overall fit with the candidate profile, must-have criteria, and preferences.
+Use the full range — don't default to clustering scores in 6-8:
+- 9-10: Exceptional — matches nearly everything the candidate wants, no real cons.
+- 7-8: Strong — clearly worth applying to; only minor gaps or open questions.
+- 5-6: Mixed — meets the must-haves, but several stated preferences go unmet; a genuine toss-up.
+- 3-4: Weak — barely clears the must-haves, multiple real concerns.
+- 0-2: Poor / near-dealbreaker — fails or barely meets what matters most.
 
 Missing salary/compensation info is neutral, not a red flag — most postings simply don't disclose it. Never
 list "no salary shown" or similar as a con, and never let it lower the score. Only treat compensation as a

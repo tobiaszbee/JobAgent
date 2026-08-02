@@ -1,4 +1,7 @@
-from evaluator.scorer import build_system_prompt, _build_examples_section, _build_calibration_section, _build_user_message
+from evaluator.scorer import (
+    build_system_prompt, _build_examples_section, _build_calibration_section, _build_user_message,
+    _EXAMPLE_DESC_LIMIT, _EXAMPLE_REASON_LIMIT,
+)
 
 
 def _ex(**kwargs):
@@ -33,7 +36,26 @@ class TestBuildExamplesSection:
 
     def test_description_truncated_in_positive(self):
         section = _build_examples_section([_ex(description="x" * 500)], [])
-        assert "x" * 201 not in section  # truncated to 200 chars in the snippet
+        assert "x" * (_EXAMPLE_DESC_LIMIT + 1) not in section
+
+    def test_description_not_truncated_below_400_chars(self):
+        # Regression: descriptions used to be cut to 150-200 chars — too
+        # aggressive for the only concrete example the model has to learn from,
+        # especially in cold start before a distilled preference profile exists.
+        desc = "x" * 300
+        section = _build_examples_section([_ex(description=desc)], [])
+        assert desc in section
+
+    def test_rejection_reason_not_truncated_below_400_chars(self):
+        long_reason = "x" * 300
+        section = _build_examples_section([], [_ex(score_reason=long_reason)])
+        assert long_reason in section
+
+    def test_rejection_reason_still_truncated_at_limit(self):
+        long_reason = "x" * (_EXAMPLE_REASON_LIMIT + 100)
+        section = _build_examples_section([], [_ex(score_reason=long_reason)])
+        assert "x" * _EXAMPLE_REASON_LIMIT in section
+        assert "x" * (_EXAMPLE_REASON_LIMIT + 1) not in section
 
     def test_strips_linkedin_junk_in_examples(self):
         # Regression guard: example descriptions used to be sliced raw, letting
@@ -137,6 +159,14 @@ class TestBuildSystemPrompt:
     def test_no_divergence_cases_omits_calibration_section(self):
         prompt = build_system_prompt({}, [], [])
         assert "CALIBRATION" not in prompt
+
+    def test_score_scale_is_anchored(self):
+        # Regression: the model had no anchoring for what 7 vs 8 means, so
+        # scores clustered in a narrow 6-8 band instead of using the full range.
+        prompt = build_system_prompt({}, [], [])
+        assert "9-10" in prompt
+        assert "0-2" in prompt
+        assert "clustering" in prompt.lower()
 
 
 class TestBuildUserMessage:
