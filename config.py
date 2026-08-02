@@ -90,6 +90,16 @@ AGENT = {
 # not a requirement. See ../JobAgentWeb/README.md#deployment.
 JOBAGENTWEB_BASE_URL = os.getenv("JOBAGENTWEB_BASE_URL", "http://10.66.0.1:8000")
 
+# When set, api_client.py authenticates every request with this static key
+# (X-JobAgent-Api-Key header) instead of the browser-style session cookie —
+# this JobAgent installation never needs an interactive `scripts/login.py` run
+# again, and isn't affected by JobAgentWeb's session_epoch logout mechanism.
+# Must match JOBAGENT_API_KEY in JobAgentWeb's own .env on the server; traffic
+# still only ever crosses the private WireGuard tunnel (JOBAGENTWEB_BASE_URL
+# above), never the public HTTPS domain. Leave unset to keep using session-
+# cookie login instead.
+JOBAGENT_API_KEY = os.getenv("JOBAGENT_API_KEY")
+
 STEALTH = {
     "desc_delay_min": 8,   # reading-time delay after a description loads, clamped to this range
     "desc_delay_max": 45,

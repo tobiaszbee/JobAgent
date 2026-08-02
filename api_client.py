@@ -11,7 +11,7 @@ from pathlib import Path
 
 import httpx
 
-from config import JOBAGENTWEB_BASE_URL
+from config import JOBAGENTWEB_BASE_URL, JOBAGENT_API_KEY
 
 _SESSION_FILE = Path.home() / ".jobagent" / "session.json"
 
@@ -86,31 +86,45 @@ def register(username: str, password: str, invite_code: str = "") -> None:
 
 
 def logged_in() -> bool:
+    # A configured API key IS this installation's credential — there's no
+    # session file to check, and none is ever needed.
+    if JOBAGENT_API_KEY:
+        return True
     return _load_cookie() is not None
 
 
 def request(method: str, path: str, **kwargs):
     """Authenticated request against JobAgentWeb. Retries transient network/tunnel
     blips with backoff (matching the old direct-Postgres adapter's behavior) —
-    never retries a 4xx, since that's a real error, not a connectivity hiccup."""
-    cookie = _load_cookie()
-    if not cookie:
-        raise NotLoggedInError(
-            "Not logged in. Run `python scripts/login.py`, or register an account "
-            f"at {JOBAGENTWEB_BASE_URL}/register first."
-        )
+    never retries a 4xx, since that's a real error, not a connectivity hiccup.
 
-    # Cleared and re-set on every call, not just set once: httpx.Client auto-
-    # captures Set-Cookie from every response into its own jar by default, and
-    # Starlette's SessionMiddleware re-signs and re-sends the session cookie on
-    # every response — the auto-captured entry and this explicit .set() can
-    # coexist as separate (domain, path) entries in the jar instead of one
-    # replacing the other, so a request can end up sending two "session"
-    # cookies at once, with the server's cookie parser picking whichever it
-    # sees first (observed in practice: a stale cookie from a previous login
-    # sharing this same process, e.g. two isolated test users in one session).
-    _client.cookies.clear()
-    _client.cookies.set("session", cookie)
+    Prefers the static API key (JOBAGENT_API_KEY) over the session-cookie flow
+    when both could apply — the key never expires and isn't affected by
+    JobAgentWeb's session_epoch logout mechanism, so once configured this
+    installation never needs `scripts/login.py` again."""
+    if JOBAGENT_API_KEY:
+        headers = dict(kwargs.pop("headers", None) or {})
+        headers["X-JobAgent-Api-Key"] = JOBAGENT_API_KEY
+        kwargs["headers"] = headers
+    else:
+        cookie = _load_cookie()
+        if not cookie:
+            raise NotLoggedInError(
+                "Not logged in. Run `python scripts/login.py`, or register an account "
+                f"at {JOBAGENTWEB_BASE_URL}/register first."
+            )
+
+        # Cleared and re-set on every call, not just set once: httpx.Client auto-
+        # captures Set-Cookie from every response into its own jar by default, and
+        # Starlette's SessionMiddleware re-signs and re-sends the session cookie on
+        # every response — the auto-captured entry and this explicit .set() can
+        # coexist as separate (domain, path) entries in the jar instead of one
+        # replacing the other, so a request can end up sending two "session"
+        # cookies at once, with the server's cookie parser picking whichever it
+        # sees first (observed in practice: a stale cookie from a previous login
+        # sharing this same process, e.g. two isolated test users in one session).
+        _client.cookies.clear()
+        _client.cookies.set("session", cookie)
 
     last_error = None
     for attempt in range(3):
@@ -124,6 +138,11 @@ def request(method: str, path: str, **kwargs):
         raise last_error
 
     if resp.status_code == 401:
+        if JOBAGENT_API_KEY:
+            raise NotLoggedInError(
+                "JobAgentWeb rejected JOBAGENT_API_KEY — check it matches JOBAGENT_API_KEY "
+                "in JobAgentWeb's own .env on the server."
+            )
         raise NotLoggedInError("Session expired or invalid — run `python scripts/login.py` again.")
     if resp.status_code >= 400:
         try:
