@@ -40,6 +40,13 @@ something the questionnaire doesn't already say, or where it genuinely diverges 
 stated (e.g. they say they want product companies but keep applying to agencies) — that
 divergence is itself a high-value signal, worth calling out explicitly.
 
+Each APPLIED/REJECTED example is dated ("decided YYYY-MM-DD") — weight recent decisions more
+heavily than old ones, same evidence otherwise. If a dimension shows a clear split by time
+(e.g. rejected every agency 6 months ago, but applied to one last week), that's a genuine
+reversal, not conflicting evidence to average away — call it out and prefer the more recent
+pattern in the signal you emit, at a lower conf than you'd otherwise use given the small
+recent sample.
+
 You may also see a DISMISSED SCORE FACTORS section: cases where the candidate looked at a specific
 pro/con from a past AI evaluation and explicitly said it doesn't apply to them, with a reason. This is
 the strongest signal available — direct correction, not inference. Fold each into whichever dimension it
@@ -99,6 +106,11 @@ def _job_line(job: dict, include_reason: bool = False) -> str:
     job_parts = [f'"{title}" @ {company}']
     if location:
         job_parts.append(f"[{location}]")
+    # JobAgentWeb's /api/jobs/feedback now includes decided_at (ujs.updated_at) —
+    # date-only slice is plenty of recency signal without a full datetime parse.
+    decided_at = (job.get("decided_at") or "")[:10]
+    if decided_at:
+        job_parts.append(f"(decided {decided_at})")
     if description:
         job_parts.append(f"| {description[:_DESC_LIMIT]}")
     if include_reason:

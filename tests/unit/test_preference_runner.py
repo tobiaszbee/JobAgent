@@ -1,7 +1,7 @@
 from preference_agent.runner import _REASON_LIMIT, _build_prompt, _job_line, _build_dismissed_section, _divergence_line
 
 
-def _job(title="Dev", company="Corp", location="Remote", description="PHP Symfony", rejection_reason=None, score_reason=None, source=None):
+def _job(title="Dev", company="Corp", location="Remote", description="PHP Symfony", rejection_reason=None, score_reason=None, source=None, decided_at=None):
     return {
         "title": title,
         "company": company,
@@ -10,6 +10,7 @@ def _job(title="Dev", company="Corp", location="Remote", description="PHP Symfon
         "rejection_reason": rejection_reason,
         "score_reason": score_reason,
         "source": source,
+        "decided_at": decided_at,
     }
 
 
@@ -54,6 +55,26 @@ def test_job_line_reason_still_truncated_at_reason_limit():
     line = _job_line(j, include_reason=True)
     assert "x" * _REASON_LIMIT in line
     assert "x" * (_REASON_LIMIT + 1) not in line
+
+
+def test_job_line_includes_decided_at_date():
+    # Regression: examples had no date at all, so a 6-month-old decision counted
+    # identically to yesterday's — no way to express "this pattern reversed".
+    j = _job(decided_at="2026-07-15T10:23:45.123456")
+    line = _job_line(j)
+    assert "decided 2026-07-15" in line
+
+
+def test_job_line_omits_decided_at_when_missing():
+    j = _job(decided_at=None)
+    line = _job_line(j)
+    assert "decided" not in line
+
+
+def test_system_prompt_explains_recency_weighting():
+    from preference_agent.runner import _SYSTEM
+    assert "decided" in _SYSTEM.lower()
+    assert "recent" in _SYSTEM.lower()
 
 
 def test_build_prompt_applied_section():
