@@ -83,6 +83,14 @@ def _format_job(job: dict) -> str:
 # metrics, dashboard display).
 FALLBACK_RANK_REASON = "[unranked — Opus ranking unavailable this run, showing rerank order]"
 
+# Distinct from FALLBACK_RANK_REASON above: this is a partial-response case, not a
+# total failure — Opus responded and ranked most jobs for real, but silently left
+# some out of its <ranking> array. Those get appended at the end by the safety net
+# below; without a distinct marker, rank_reason="" was indistinguishable anywhere
+# in the stored data (calibration/precision metrics, dashboard display) from a
+# real (if unusually terse) Opus ranking.
+OMITTED_RANK_REASON = "[omitted by Opus — not in its ranking response, appended at the end]"
+
 
 def _fallback_ranking(jobs: list[dict]) -> list[dict]:
     return [{**job, "listwise_rank": i + 1, "rank_reason": FALLBACK_RANK_REASON} for i, job in enumerate(jobs)]
@@ -194,7 +202,7 @@ Include ALL {len(jobs)} jobs. No text after the closing </ranking> tag."""
     # Safety net: add any jobs Opus missed
     for job in jobs:
         if job["id"] not in seen:
-            result.append({**job, "listwise_rank": len(result) + 1, "rank_reason": ""})
+            result.append({**job, "listwise_rank": len(result) + 1, "rank_reason": OMITTED_RANK_REASON})
 
     logger.info(f"Listwise ranking complete: {len(result)} jobs ranked")
     return result

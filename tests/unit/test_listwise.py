@@ -1,7 +1,7 @@
 import json
 from unittest.mock import MagicMock, patch
 
-from ranker.listwise import FALLBACK_RANK_REASON, _format_job, listwise_rank
+from ranker.listwise import FALLBACK_RANK_REASON, OMITTED_RANK_REASON, _format_job, listwise_rank
 
 
 def _job(id="j1", title="Senior Dev", company="Acme", location="Remote", description="Good job", structured_data=None):
@@ -118,6 +118,14 @@ def test_listwise_rank_safety_net_adds_missed_jobs(mock_anthropic):
     assert "j1" in ids and "j2" in ids and "j3" in ids
     assert result[0]["listwise_rank"] == 1
     assert len(result) == 3
+
+    by_id = {r["id"]: r for r in result}
+    assert by_id["j1"]["rank_reason"] == "Best"
+    # Regression: omitted jobs used to get rank_reason="", indistinguishable from
+    # a real (if terse) Opus ranking anywhere downstream (calibration/precision
+    # metrics, dashboard display).
+    assert by_id["j2"]["rank_reason"] == OMITTED_RANK_REASON
+    assert by_id["j3"]["rank_reason"] == OMITTED_RANK_REASON
 
 
 @patch("ranker.listwise.anthropic.Anthropic")
