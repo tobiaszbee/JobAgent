@@ -1,4 +1,7 @@
-from preference_agent.runner import _REASON_LIMIT, _build_prompt, _job_line, _build_dismissed_section, _divergence_line
+from preference_agent.runner import (
+    _REASON_LIMIT, _build_prompt, _build_previous_profile_section, _job_line,
+    _build_dismissed_section, _divergence_line,
+)
 
 
 def _job(title="Dev", company="Corp", location="Remote", description="PHP Symfony", rejection_reason=None, score_reason=None, source=None, decided_at=None):
@@ -75,6 +78,40 @@ def test_system_prompt_explains_recency_weighting():
     from preference_agent.runner import _SYSTEM
     assert "decided" in _SYSTEM.lower()
     assert "recent" in _SYSTEM.lower()
+
+
+# --- _build_previous_profile_section (task #53) ---
+
+def test_previous_profile_section_empty_when_none():
+    assert _build_previous_profile_section(None) == ""
+
+
+def test_previous_profile_section_empty_when_empty_list():
+    assert _build_previous_profile_section([]) == ""
+
+
+def test_previous_profile_section_includes_neutral_signals():
+    # Unlike evaluator/scorer.py's LEARNED PREFERENCE PROFILE section (which drops
+    # NEUTRAL — irrelevant to scoring), the distiller needs its own prior NEUTRAL
+    # conclusions too: "I already checked this dimension, found no pattern" is
+    # exactly the kind of prior state reconciliation is meant to preserve or revise.
+    signals = [{"type": "NEUTRAL", "dim": "contract_form"}, {"type": "NEUTRAL", "dim": "domain"}]
+    section = _build_previous_profile_section(signals)
+    assert "NEUTRAL[contract_form" in section
+    assert "NEUTRAL[domain" in section
+
+
+def test_previous_profile_section_renders_signals():
+    signals = [{"type": "ACCEPT", "dim": "company_type", "value": "product", "conf": "HIGH", "n_match": 3, "n_total": 3}]
+    section = _build_previous_profile_section(signals)
+    assert "YOUR PREVIOUS PROFILE" in section
+    assert "ACCEPT[company_type=product" in section
+
+
+def test_system_prompt_instructs_reconciliation_not_re_derivation():
+    from preference_agent.runner import _SYSTEM
+    assert "PREVIOUS PROFILE" in _SYSTEM
+    assert "reconcile" in _SYSTEM.lower()
 
 
 def test_build_prompt_applied_section():

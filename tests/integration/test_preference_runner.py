@@ -186,6 +186,27 @@ class TestPreferenceRunner:
         assert result["ok"]
         assert result["signals"] == new_signals
 
+    def test_prompt_includes_previous_profile_on_redistillation(self):
+        # Regression: the distiller re-derived the profile from scratch every run
+        # with no view of its own prior conclusions — the same evidence could flip
+        # a signal's value/conf on pure model variance instead of a real change.
+        _insert_applied()
+        _insert_rejected()
+        preference_repository.save(_SIGNALS, applied_count=1, rejected_count=0)  # stale count triggers redistillation
+        with _patched_api() as (mock_client, _):
+            run()
+        prompt_content = mock_client.messages.create.call_args.kwargs["messages"][0]["content"]
+        assert "YOUR PREVIOUS PROFILE" in prompt_content
+        assert "ACCEPT[company_type=product_saas" in prompt_content
+
+    def test_prompt_has_no_previous_profile_section_on_first_ever_run(self):
+        _insert_applied()
+        _insert_rejected()
+        with _patched_api() as (mock_client, _):
+            run()
+        prompt_content = mock_client.messages.create.call_args.kwargs["messages"][0]["content"]
+        assert "YOUR PREVIOUS PROFILE" not in prompt_content
+
     def test_only_applied_jobs_triggers_run(self):
         _insert_applied()
         with _patched_api():

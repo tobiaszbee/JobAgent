@@ -47,6 +47,14 @@ reversal, not conflicting evidence to average away — call it out and prefer th
 pattern in the signal you emit, at a lower conf than you'd otherwise use given the small
 recent sample.
 
+If a YOUR PREVIOUS PROFILE section appears below, reconcile with it — it's your own prior
+conclusion from the last distillation, not a new candidate to weigh against this one. Keep a
+previous signal (updated n_match/n_total to the current totals) if it's still supported by the
+evidence; only change or drop it when new evidence genuinely contradicts it, and prefer to state
+that as a reversal (see the recency guidance above) rather than silently emitting a different
+value for the same dimension. Don't let the same underlying evidence flip a signal's value or
+confidence run-to-run on nothing but chance.
+
 You may also see a DISMISSED SCORE FACTORS section: cases where the candidate looked at a specific
 pro/con from a past AI evaluation and explicitly said it doesn't apply to them, with a reason. This is
 the strongest signal available — direct correction, not inference. Fold each into whichever dimension it
@@ -135,6 +143,24 @@ def _build_dismissed_section(items: list[dict]) -> str:
     return "\n\n" + "\n".join(lines)
 
 
+def _build_previous_profile_section(previous_signals: list[dict] | None) -> str:
+    """The distiller re-derived the whole profile from scratch every run, with no
+    view of its own prior conclusions — nothing anchored a dimension's signal
+    run-to-run, so the same underlying evidence could flip a signal's value or conf
+    on pure model variance rather than because anything actually changed. Feeding
+    the previous profile back in gives the model something concrete to reconcile
+    against instead of re-deriving blind."""
+    if not previous_signals:
+        return ""
+    rendered = render_signals(previous_signals)
+    if not rendered.strip():
+        return ""
+    return (
+        "\n\nYOUR PREVIOUS PROFILE (from the last distillation — reconcile with it, "
+        "don't re-derive from scratch):\n" + rendered
+    )
+
+
 def _divergence_line(case: dict) -> str:
     """JobAgentWeb's /api/eval/report divergence cases carry divergence_type +
     listwise_rank, not a pre-formatted label — same presentation the calibration
@@ -214,6 +240,7 @@ def run() -> dict:
     )
     questionnaire = load_questionnaire_preferences()
     prompt = _build_prompt(applied, rejected, applied_total, rejected_total, questionnaire)
+    prompt += _build_previous_profile_section(previous_profile.get("signals") if previous_profile else None)
     prompt += _build_dismissed_section(dismissed_item_repository.get_recent(50))
 
     from evaluation.harness import divergence_cases
