@@ -23,7 +23,7 @@ from ranker.listwise import listwise_rank
 from ranker.debate import debate_rank
 from ranker.rank_cache import reuse_if_unchanged
 from ranker.would_apply import compute_revocations, compute_would_apply
-from ranker.exploration import pick_exploration_slots, tag_exploration_picks
+from ranker.exploration import compute_non_exploration_ranks, pick_exploration_slots, tag_exploration_picks
 from evaluator.profile import load_active_profile, load_questionnaire_preferences, build_hyde_query
 from config import RANKING, EXPLORATION
 
@@ -134,10 +134,20 @@ else:
 
 # Step 4b: Would-apply flag — phase 1 of the auto-apply plan (flag-and-validate
 # only, never sends anything). See ranker/would_apply.py for the gate logic.
+# Gated on the rank a job would have had with exploration picks removed, not
+# its raw listwise_rank — Opus/debate rank the exploration-extended pool as
+# one list, so an exploration pick landing ahead of a real candidate would
+# otherwise push that candidate past rank_ceiling and cost it its would-apply
+# slot, exactly the displacement extending (rather than replacing top-N slots)
+# was meant to avoid. Exploration jobs get no effective rank and are therefore
+# never would-apply eligible themselves — would-apply is a live auto-apply
+# gate, exploration's role is diagnostic, not conversion.
+non_exploration_ranks = compute_non_exploration_ranks(ranked, exploration_ids)
 would_apply_items = []
 would_apply_count = 0
 for job in ranked:
-    flagged, reason = compute_would_apply(job.get("score"), job.get("debate_flag"), job.get("listwise_rank"))
+    effective_rank = non_exploration_ranks.get(job["id"])
+    flagged, reason = compute_would_apply(job.get("score"), job.get("debate_flag"), effective_rank)
     would_apply_count += flagged
     would_apply_items.append({"job_id": job["id"], "would_apply": flagged, "reason": reason})
 if would_apply_items:
