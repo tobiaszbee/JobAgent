@@ -32,6 +32,16 @@ RANKING = {
     "min_score_for_ranking": 2.0,  # below scorer's own near-dealbreaker cutoff — skip paid ranking
 }
 
+EXPLORATION = {
+    # Randomly-sampled jobs from outside the top-N pool, given a real Opus +
+    # debate look anyway — tests whether the deterministic pipeline (embedding
+    # similarity, RRF, cross-encoder rerank) is systematically burying good
+    # jobs lower down. Extends the listwise pool (top_n_listwise + slots) on
+    # exploration days rather than displacing real top-N candidates, so no
+    # candidate loses a slot to make room. See ranker/exploration.py.
+    "slots_per_day": 3,
+}
+
 WOULD_APPLY = {
     # Phase 1 of auto-apply: flag-and-validate only, not a live auto-apply threshold yet.
     "score_floor": 7.0,

@@ -23,8 +23,9 @@ from ranker.listwise import listwise_rank
 from ranker.debate import debate_rank
 from ranker.rank_cache import reuse_if_unchanged
 from ranker.would_apply import compute_revocations, compute_would_apply
+from ranker.exploration import pick_exploration_slots, tag_exploration_picks
 from evaluator.profile import load_active_profile, load_questionnaire_preferences, build_hyde_query
-from config import RANKING
+from config import RANKING, EXPLORATION
 
 try:
     candidate_profile = load_active_profile()
@@ -104,6 +105,20 @@ else:
 # Opus/debate against the exact same jobs would just reproduce the same
 # reasoning at full cost (the one real repeated waste flagged by the audit).
 listwise_pool = rerank_pool[:RANKING["top_n_listwise"]]
+
+# Exploration slots: a few jobs from OUTSIDE the top-N pool (everything the
+# deterministic pipeline — embedding similarity, RRF, cross-encoder rerank —
+# didn't already surface) get a real Opus + debate look anyway, extending the
+# listwise pool rather than displacing real top-N candidates. See
+# ranker/exploration.py for why this is seeded by date, not per-run.
+listwise_pool_ids = {j["id"] for j in listwise_pool}
+exploration_candidates = [j for j in fused if j["id"] not in listwise_pool_ids]
+exploration_picks = pick_exploration_slots(exploration_candidates, EXPLORATION["slots_per_day"])
+if exploration_picks:
+    print(f"\nExploration: adding {len(exploration_picks)} job(s) from outside the top-{RANKING['top_n_listwise']} pool")
+    listwise_pool = listwise_pool + exploration_picks
+exploration_ids = {j["id"] for j in exploration_picks}
+
 reused = reuse_if_unchanged(listwise_pool, jobs)
 if reused is not None:
     if reused:
@@ -114,6 +129,8 @@ else:
     ranked = listwise_rank(listwise_pool, candidate_profile, preferences, questionnaire)
     print(f"\nDebate review of top-{len(ranked)} with a second model...")
     ranked = debate_rank(ranked, candidate_profile, questionnaire)
+    if exploration_ids:
+        tag_exploration_picks(ranked, exploration_ids)
 
 # Step 4b: Would-apply flag — phase 1 of the auto-apply plan (flag-and-validate
 # only, never sends anything). See ranker/would_apply.py for the gate logic.
