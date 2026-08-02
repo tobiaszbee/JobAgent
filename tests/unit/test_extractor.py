@@ -1,6 +1,6 @@
 from unittest.mock import MagicMock, patch
 
-from extractor.runner import extract_job, run_extraction
+from extractor.runner import _EXTRACT_TOOL, extract_job, run_extraction
 
 
 def _make_tool_response(data: dict, stop_reason="tool_use"):
@@ -34,7 +34,54 @@ def test_extract_job_returns_parsed_dict(mock_get_client):
     assert result["remote"] is True
     assert result["seniority"] == "senior"
     assert "Python" in result["stack"]
-    assert result["company_type"] == "startup"
+
+
+class TestExtractionSchema:
+    # Regression coverage for the audit's biggest single schema gap: `remote`
+    # was a bare boolean with no geo information, so nothing in the pipeline
+    # could ever tell "remote — Poland only" from "remote — US only" apart.
+    _NEW_FIELDS = {
+        "remote_regions", "timezone_requirement", "contract_types",
+        "stack_required", "stack_preferred",
+    }
+
+    def test_new_fields_present_in_schema(self):
+        props = _EXTRACT_TOOL["input_schema"]["properties"]
+        assert self._NEW_FIELDS <= props.keys()
+
+    def test_new_fields_are_required_so_the_model_always_considers_them(self):
+        # "required" here means "must appear in the tool call" — nullable/empty-
+        # array fields still satisfy it, this just stops the model from silently
+        # omitting the field rather than explicitly saying "unstated".
+        required = set(_EXTRACT_TOOL["input_schema"]["required"])
+        assert self._NEW_FIELDS <= required
+
+    def test_remote_regions_and_stack_tiers_are_plain_string_arrays(self):
+        props = _EXTRACT_TOOL["input_schema"]["properties"]
+        for field in ("remote_regions", "stack_required", "stack_preferred"):
+            assert props[field]["type"] == "array"
+
+    def test_timezone_requirement_is_nullable_string(self):
+        assert _EXTRACT_TOOL["input_schema"]["properties"]["timezone_requirement"]["type"] == ["string", "null"]
+
+    @patch("extractor.runner._get_client")
+    def test_new_fields_round_trip_through_extract_job(self, mock_get_client):
+        payload = {
+            "remote": True, "hybrid": False, "seniority": "senior",
+            "salary_min": None, "salary_max": None, "salary_period": None, "salary_currency": None,
+            "stack": ["Kubernetes", "Docker"], "stack_required": ["Kubernetes"], "stack_preferred": ["Docker"],
+            "company_type": "startup", "product_vs_outsourcing": "product", "working_language": "english",
+            "remote_regions": ["Poland", "Ukraine"], "timezone_requirement": "CET ±2", "contract_types": ["b2b"],
+        }
+        mock_get_client.return_value.messages.create.return_value = _make_tool_response(payload)
+
+        result = extract_job("Senior Kubernetes role, remote from Poland/Ukraine, CET +-2h, B2B")
+        assert result["remote_regions"] == ["Poland", "Ukraine"]
+        assert result["timezone_requirement"] == "CET ±2"
+        assert result["contract_types"] == ["b2b"]
+        assert result["stack_required"] == ["Kubernetes"]
+        assert result["stack_preferred"] == ["Docker"]
+        assert result["company_type"] == "startup"
 
 
 @patch("extractor.runner._get_client")

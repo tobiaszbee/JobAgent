@@ -38,6 +38,25 @@ _EXTRACT_TOOL = {
                 "items": {"type": "string"},
                 "description": "Technologies, frameworks, and tools explicitly mentioned.",
             },
+            "stack_required": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "Subset of `stack` explicitly stated as required/must-have (e.g. "
+                    "'5 years of Kubernetes required'). Empty array if the posting "
+                    "doesn't distinguish required from nice-to-have — do not guess "
+                    "which items in `stack` would belong here."
+                ),
+            },
+            "stack_preferred": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "Subset of `stack` explicitly stated as nice-to-have/a plus/preferred, "
+                    "not required (e.g. 'Kubernetes is a plus'). Empty array if the posting "
+                    "doesn't distinguish required from nice-to-have."
+                ),
+            },
             "company_type": {
                 "type": "string",
                 "enum": ["startup", "scaleup", "enterprise", "agency", "unknown"],
@@ -50,11 +69,40 @@ _EXTRACT_TOOL = {
                 "type": "string",
                 "enum": ["polish", "english", "both", "unknown"],
             },
+            "remote_regions": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "Geographic regions/countries the posting explicitly says remote work is "
+                    "allowed from (e.g. ['Poland'], ['EU'], ['worldwide'], ['Poland', 'Ukraine']). "
+                    "Empty array if remote isn't offered (remote=false), OR if remote is offered "
+                    "but the posting never states which locations are eligible — an empty array "
+                    "means 'unstated', not 'nowhere', and must never be treated as a geographic "
+                    "restriction by anything reading this field."
+                ),
+            },
+            "timezone_requirement": {
+                "type": ["string", "null"],
+                "description": (
+                    "Required working-hours timezone/overlap if explicitly stated "
+                    "(e.g. 'CET ±2', 'US Eastern business hours overlap'). null if not mentioned."
+                ),
+            },
+            "contract_types": {
+                "type": "array",
+                "items": {"type": "string", "enum": ["b2b", "employment", "mandate", "other"]},
+                "description": (
+                    "Contract type(s) offered: b2b, employment (UoP/permanent), mandate "
+                    "(zlecenie/contractor), other. Empty array if not stated."
+                ),
+            },
         },
         "required": [
             "remote", "hybrid", "seniority",
             "salary_min", "salary_max", "salary_period", "salary_currency",
-            "stack", "company_type", "product_vs_outsourcing", "working_language",
+            "stack", "stack_required", "stack_preferred",
+            "company_type", "product_vs_outsourcing", "working_language",
+            "remote_regions", "timezone_requirement", "contract_types",
         ],
     },
 }
