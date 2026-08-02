@@ -2,7 +2,7 @@ import uuid
 from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
-from db.repositories import job_repository, preference_repository, dismissed_item_repository
+from db.repositories import candidate_preferences_repository, job_repository, preference_repository, dismissed_item_repository
 from preference_agent.runner import run
 
 
@@ -242,6 +242,24 @@ class TestPreferenceRunner:
             result = run()
         assert result["ok"]
         mock_client.messages.create.assert_called_once()
+
+    def test_prompt_includes_questionnaire_when_preferences_saved(self):
+        candidate_preferences_repository.insert(None, {"work_mode": ["remote"]})
+        _insert_applied()
+        _insert_rejected()
+        with _patched_api() as (mock_client, _):
+            run()
+        prompt_content = mock_client.messages.create.call_args.kwargs["messages"][0]["content"]
+        assert "CANDIDATE QUESTIONNAIRE" in prompt_content
+        assert "Work mode: remote" in prompt_content
+
+    def test_prompt_has_no_questionnaire_section_without_saved_preferences(self):
+        _insert_applied()
+        _insert_rejected()
+        with _patched_api() as (mock_client, _):
+            run()
+        prompt_content = mock_client.messages.create.call_args.kwargs["messages"][0]["content"]
+        assert "CANDIDATE QUESTIONNAIRE" not in prompt_content
 
     def test_no_new_dismissed_items_still_skips(self):
         _insert_applied()

@@ -9,6 +9,7 @@ from config import ANTHROPIC_API_KEY, CLAUDE_DISTILL_MODEL
 from collector.utils import build_excerpt
 from db.repositories import job_repository, preference_repository, dismissed_item_repository
 from db.repositories.usage_repository import log_anthropic
+from evaluator.profile import load_questionnaire_preferences
 from preference_agent.profile import _DISTILL_TOOL, render_signals
 
 _SYSTEM = """\
@@ -25,7 +26,19 @@ Analyze ALL dimensions relevant to job-candidate fit, including but not limited 
 - Role responsibilities and scope
 - Any other patterns consistently visible in the feedback
 
-Do NOT include: location, remote/on-site, geography, visa — filtered upstream.
+Remote-country matching is now enforced deterministically upstream whenever the candidate
+has set remote_countries in their questionnaire (evaluator/dealbreakers.py's geo dealbreaker
+rejects a remote job restricted to the wrong countries before it ever reaches feedback) — do
+NOT re-derive that narrow signal. Other location/geography nuance is NOT filtered upstream and
+remains fair game: timezone-overlap preferences, visa/relocation requirements, hybrid/onsite
+city fit, or any pattern in rejection reasons the deterministic filter can't see.
+
+If a CANDIDATE QUESTIONNAIRE section appears below, treat it as ground truth already known to
+the evaluator — do not spend a signal restating something the candidate stated there directly
+(e.g. a company type or salary floor already given). Only emit a signal where behavior reveals
+something the questionnaire doesn't already say, or where it genuinely diverges from what was
+stated (e.g. they say they want product companies but keep applying to agencies) — that
+divergence is itself a high-value signal, worth calling out explicitly.
 
 You may also see a DISMISSED SCORE FACTORS section: cases where the candidate looked at a specific
 pro/con from a past AI evaluation and explicitly said it doesn't apply to them, with a reason. This is
@@ -116,12 +129,16 @@ def _divergence_line(case: dict) -> str:
     return f"  {label}: {case['title']} @ {case['company']}"
 
 
-def _build_prompt(applied: list[dict], rejected: list[dict], applied_total: int, rejected_total: int) -> str:
+def _build_prompt(
+    applied: list[dict], rejected: list[dict], applied_total: int, rejected_total: int, questionnaire: str = ""
+) -> str:
     """`applied`/`rejected` arrive already capped to at most _MAX_APPLIED/_MAX_REJECTED
     (most-recent-first) and description-truncated server-side — see
     job_repository.get_all_feedback(). `applied_total`/`rejected_total` are the true,
     uncapped counts, only for the "N older omitted" messaging below."""
     sections = []
+    if questionnaire:
+        sections.append(questionnaire)
     if applied:
         omitted = applied_total - len(applied)
         header = f"APPLIED ({applied_total} jobs, showing {len(applied)} most recent" + (f", {omitted} older omitted" if omitted else "") + "):"
@@ -178,7 +195,8 @@ def run() -> dict:
         f"Distilling from {applied_total} applied + {rejected_total} rejected "
         f"+ {dismissed_total} dismissed score factor(s)..."
     )
-    prompt = _build_prompt(applied, rejected, applied_total, rejected_total)
+    questionnaire = load_questionnaire_preferences()
+    prompt = _build_prompt(applied, rejected, applied_total, rejected_total, questionnaire)
     prompt += _build_dismissed_section(dismissed_item_repository.get_recent(50))
 
     from evaluation.harness import divergence_cases

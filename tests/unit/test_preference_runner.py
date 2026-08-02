@@ -135,3 +135,38 @@ def test_divergence_line_false_positive():
 def test_divergence_line_false_negative():
     case = {"divergence_type": "false_negative", "listwise_rank": 18, "title": "Hidden Gem", "company": "Corp"}
     assert _divergence_line(case) == "  Applied despite rank #18: Hidden Gem @ Corp"
+
+
+def test_build_prompt_includes_questionnaire_when_given():
+    prompt = _build_prompt([], [], 0, 0, questionnaire="CANDIDATE QUESTIONNAIRE:\n- Work mode: remote")
+    assert "CANDIDATE QUESTIONNAIRE" in prompt
+    assert "Work mode: remote" in prompt
+
+
+def test_build_prompt_no_questionnaire_section_when_omitted():
+    prompt = _build_prompt([], [], 0, 0)
+    assert "CANDIDATE QUESTIONNAIRE" not in prompt
+
+
+def test_build_prompt_questionnaire_appears_before_applied_section():
+    applied = [_job("SWE", "BigCo")]
+    prompt = _build_prompt(applied, [], 1, 0, questionnaire="CANDIDATE QUESTIONNAIRE:\n- Work mode: remote")
+    assert prompt.index("CANDIDATE QUESTIONNAIRE") < prompt.index("APPLIED")
+
+
+def test_system_prompt_no_longer_bans_all_geo_signal():
+    # Regression: the distiller used to unconditionally forbid learning any
+    # location/remote/geography/visa signal, claiming it was "filtered
+    # upstream" — that wasn't true until the P3 geo dealbreaker, and even now
+    # only covers the narrow remote+country case, not timezone/visa/hybrid-city
+    # nuance.
+    from preference_agent.runner import _SYSTEM
+    assert "Do NOT include: location, remote/on-site, geography, visa" not in _SYSTEM
+    assert "timezone" in _SYSTEM.lower()
+    assert "visa" in _SYSTEM.lower()
+
+
+def test_system_prompt_instructs_treating_questionnaire_as_ground_truth():
+    from preference_agent.runner import _SYSTEM
+    assert "QUESTIONNAIRE" in _SYSTEM
+    assert "ground truth" in _SYSTEM.lower()
