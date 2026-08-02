@@ -153,16 +153,33 @@ def _seniority_reason(job_structured: dict, seniority_levels: list[str]) -> str 
 # really asking about extractor/runner.py's product_vs_outsourcing axis, not its separate
 # company_type enum (startup/scaleup/enterprise/agency/unknown) — "consulting" has no exact
 # company_type match either, so it's treated as either an agency or an outsourcing engagement.
+def _tri_or(*values: bool | None) -> bool | None:
+    """OR over tri-state (True/False/None) values: True if any is confirmed True,
+    False only if every value is confirmed False, None if nothing is True but at
+    least one value is unknown/inconclusive — a single confirmed-False axis can't
+    rule out an overall match when a sibling axis might still be True."""
+    if any(v is True for v in values):
+        return True
+    if any(v is None for v in values):
+        return None
+    return False
+
+
 def _matches_preferred_company_type(preferred_type: str, company_type: str | None, outsourcing: str | None) -> bool | None:
-    """True/False if the relevant axis has enough info to decide, None if unknown."""
+    """True/False if the relevant axis has enough info to decide, None if unknown
+    or inconclusive (product_vs_outsourcing's own "mixed" value is a genuine
+    partial match, not evidence either way — never resolve it to a confirmed
+    mismatch, same fail-open rule as an outright missing/unknown value)."""
     if preferred_type == "product":
-        if not outsourcing or outsourcing == "unknown":
+        if not outsourcing or outsourcing in ("unknown", "mixed"):
             return None
         return outsourcing == "product"
     if preferred_type == "consulting":
-        if (not company_type or company_type == "unknown") and (not outsourcing or outsourcing == "unknown"):
-            return None
-        return company_type == "agency" or outsourcing == "outsourcing"
+        is_agency = None if not company_type or company_type == "unknown" else company_type == "agency"
+        is_outsourcing = None
+        if outsourcing and outsourcing not in ("unknown", "mixed"):
+            is_outsourcing = outsourcing == "outsourcing"
+        return _tri_or(is_agency, is_outsourcing)
     # startup / scaleup / enterprise map directly onto company_type
     if not company_type or company_type == "unknown":
         return None

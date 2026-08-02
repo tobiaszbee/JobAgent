@@ -576,6 +576,31 @@ class TestCompanyTypeFilter:
         assert surviving == [job]
         mock_update.assert_not_called()
 
+    @patch("evaluator.dealbreakers.job_repository.update_score_and_status")
+    @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
+    def test_product_preference_mixed_outsourcing_treated_as_inconclusive(self, mock_prefs, mock_update):
+        # Regression: "mixed" is a genuine partial match, not evidence of a
+        # mismatch — it used to resolve to a confirmed False (reject) the same
+        # way a hard "outsourcing" value does, which is wrong.
+        mock_prefs.return_value = _prefs(preferred_company_types=["product"])
+        job = _job(structured={"product_vs_outsourcing": "mixed"})
+        surviving, stats = apply_dealbreaker_filter([job])
+        assert surviving == [job]
+        mock_update.assert_not_called()
+
+    @patch("evaluator.dealbreakers.job_repository.update_score_and_status")
+    @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
+    def test_consulting_preference_mixed_outsourcing_with_known_non_agency_type_inconclusive(self, mock_prefs, mock_update):
+        # Regression: company_type confirmed non-agency ("startup") used to be
+        # enough on its own to reject a "consulting" preference outright, even
+        # though the other axis (product_vs_outsourcing="mixed") can't rule out
+        # a partial consulting/outsourcing fit.
+        mock_prefs.return_value = _prefs(preferred_company_types=["consulting"])
+        job = _job(structured={"company_type": "startup", "product_vs_outsourcing": "mixed"})
+        surviving, stats = apply_dealbreaker_filter([job])
+        assert surviving == [job]
+        mock_update.assert_not_called()
+
 
 class TestMultipleJobs:
     @patch("evaluator.dealbreakers.job_repository.update_score_and_status")
