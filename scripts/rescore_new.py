@@ -14,5 +14,5 @@ if not jobs:
     sys.exit(0)
 
 print(f"Will re-score {len(jobs)} job(s) with current preferences...")
-result = evaluate(force_rescore=True)
+result = evaluate(force_rescore=True, jobs=jobs)
 print(f"\nDone. Scored {result.get('jobs_scored', 0)} job(s).")

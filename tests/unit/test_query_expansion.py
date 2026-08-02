@@ -43,6 +43,24 @@ def test_suggest_queries_returns_ok_true_on_success(mock_get_client, mock_get_fe
     assert result["rationale"] == "good reasons"
 
 
+@patch("query_expansion.runner.log_anthropic")
+@patch("db.repositories.criteria_repository.get_active", return_value=[])
+@patch("db.repositories.job_repository.get_all_feedback")
+@patch("query_expansion.runner._get_client")
+def test_suggest_queries_logs_anthropic_usage(mock_get_client, mock_get_feedback, mock_get_active, mock_log):
+    # Regression: this call site never reported cost, so the usage dashboard
+    # undercounted real Anthropic spend for this user-triggered action.
+    mock_get_feedback.return_value = (_applied_jobs(5), [])
+    response = _make_tool_response(["python developer remote"])
+    mock_get_client.return_value = _mock_client(create_return=response)
+
+    from query_expansion.runner import suggest_queries
+    suggest_queries()
+
+    mock_log.assert_called_once()
+    assert mock_log.call_args.args[0] is response
+
+
 @patch("db.repositories.job_repository.get_all_feedback")
 def test_suggest_queries_requires_at_least_3_applied(mock_get_feedback):
     mock_get_feedback.return_value = (_applied_jobs(2), [])

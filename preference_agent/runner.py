@@ -217,12 +217,21 @@ def run() -> dict:
         logger.error("Distiller returned empty signals list.")
         return {"ok": False, "reason": "empty_signals"}
 
+    # Filter out just the bad entries instead of discarding the whole (expensive)
+    # response over one malformed signal out of potentially dozens.
     _VALID_TYPES = {"ACCEPT", "REJECT", "INFER", "NEUTRAL"}
+    valid_signals = []
     for sig in signals:
         if sig.get("type") not in _VALID_TYPES or not sig.get("dim"):
-            logger.error(f"Invalid signal in distiller response: {sig}")
-            return {"ok": False, "reason": "invalid_signal", "signal": sig}
+            logger.warning(f"Dropping invalid signal in distiller response: {sig}")
+        else:
+            valid_signals.append(sig)
 
+    if not valid_signals:
+        logger.error("No valid signals left after filtering the distiller response.")
+        return {"ok": False, "reason": "invalid_signal"}
+
+    signals = valid_signals
     rendered = render_signals(signals)
     preference_repository.save(signals, applied_total, rejected_total, dismissed_total)
     logger.info(f"Preference profile updated ({len(signals)} signals).")

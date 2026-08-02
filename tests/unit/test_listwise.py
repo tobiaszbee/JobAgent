@@ -98,6 +98,32 @@ def test_listwise_rank_safety_net_adds_missed_jobs(mock_anthropic):
 
 
 @patch("ranker.listwise.anthropic.Anthropic")
+def test_listwise_rank_no_duplicate_ranks_when_hallucinated_id_precedes_an_omission(mock_anthropic):
+    # Regression: rank_pos used to come from enumerate(ranking)'s raw index,
+    # which still advances past a skipped (hallucinated) job_id — leaving a
+    # gap the safety-net loop (numbering from len(result) + 1) could collide
+    # with. Here "ghost" (hallucinated) precedes "j2", and "j3" is omitted
+    # entirely — j2 used to land on the same listwise_rank as j3's safety-net
+    # entry.
+    jobs = [_job("j1"), _job("j2"), _job("j3")]
+    ranking = [
+        {"job_id": "j1", "reason": "Best"},
+        {"job_id": "ghost", "reason": "Hallucinated id, not a real job"},
+        {"job_id": "j2", "reason": "Second"},
+    ]  # j3 omitted by Opus
+    mock_anthropic.return_value.messages.create.return_value = _make_ranking_response(ranking)
+
+    result = listwise_rank(jobs, "", [])
+    ranks = [r["listwise_rank"] for r in result]
+    assert len(ranks) == len(set(ranks)), f"duplicate listwise_rank values: {ranks}"
+    assert sorted(ranks) == [1, 2, 3]
+    ids_by_rank = {r["listwise_rank"]: r["id"] for r in result}
+    assert ids_by_rank[1] == "j1"
+    assert ids_by_rank[2] == "j2"
+    assert ids_by_rank[3] == "j3"  # safety net, correctly placed after the compacted real ranks
+
+
+@patch("ranker.listwise.anthropic.Anthropic")
 def test_listwise_rank_fallback_on_api_error(mock_anthropic):
     jobs = [_job("j1"), _job("j2")]
     mock_anthropic.return_value.messages.create.side_effect = Exception("API down")

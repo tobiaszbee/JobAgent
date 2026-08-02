@@ -272,6 +272,21 @@ class TestCriteriaEndpoints:
         remaining = [i["value"] for i in flask_client.get("/api/criteria").json]
         assert "PHP Dev" not in remaining
 
+    def test_toggle_nonexistent_criterion_404s_cleanly(self, flask_client):
+        # Regression: JobAgentWeb's toggle now 404s on a bad id; without the
+        # try/except here, that ApiError propagated uncaught out of the Flask
+        # route as an unhandled 500 instead of a clean error response.
+        resp = flask_client.post(
+            "/api/criteria/999999/toggle",
+            data=json.dumps({"active": False}),
+            content_type="application/json",
+        )
+        assert resp.status_code == 404
+
+    def test_delete_nonexistent_criterion_404s_cleanly(self, flask_client):
+        resp = flask_client.delete("/api/criteria/999999")
+        assert resp.status_code == 404
+
 
 class TestAgentStatus:
     def test_returns_not_running_by_default(self, flask_client):
@@ -303,6 +318,10 @@ class TestExcludedSearchQueriesEndpoints:
         resp = flask_client.post(f"/api/search-queries/excluded/{id_}/reinstate")
         assert resp.status_code == 200
         assert flask_client.get("/api/search-queries/excluded").json == []
+
+    def test_reinstate_nonexistent_404s_cleanly(self, flask_client):
+        resp = flask_client.post("/api/search-queries/excluded/999999/reinstate")
+        assert resp.status_code == 404
 
 
 class TestRootRouting:

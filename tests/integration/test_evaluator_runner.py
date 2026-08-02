@@ -64,6 +64,21 @@ class TestEvaluatorRunner:
         assert job["score"] == 7.5
         assert job["status"] == "new"
 
+    def test_explicit_jobs_list_skips_the_fetch_and_is_used_directly(self):
+        # Regression: scripts/rescore_new.py already fetches this same list to
+        # check emptiness and print a count before calling run(force_rescore=True)
+        # — run() used to redundantly re-fetch the identical (potentially large,
+        # full-description) list itself.
+        job_id = _insert_scoreable()
+        job = next(j for j in job_repository.search(status="all") if j["id"] == job_id)
+        with _patched_run(), \
+             patch("evaluator.runner.job_repository.get_new_with_descriptions") as mock_fetch, \
+             patch("evaluator.runner.job_repository.get_unscored") as mock_unscored:
+            result = run(force_rescore=True, jobs=[job])
+        mock_fetch.assert_not_called()
+        mock_unscored.assert_not_called()
+        assert result["jobs_scored"] == 1
+
     def test_build_system_prompt_called_once_for_entire_batch(self):
         _insert_scoreable(url="https://a.com/1")
         _insert_scoreable(company="Beta", url="https://a.com/2")

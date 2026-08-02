@@ -1,3 +1,5 @@
+import logging
+
 from flask import Flask, jsonify, redirect, render_template, request
 
 import api_client
@@ -5,7 +7,7 @@ from config import JOBAGENTWEB_BASE_URL
 from db.repositories import candidate_preferences_repository, cv_repository, session_repository
 from web.routes import (
     candidate_preferences, jobs, jobs_admin, criteria, runner, cv, sources, preferences,
-    ranking, query_expansion, evaluation, search_queries,
+    query_expansion, evaluation, search_queries,
 )
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
@@ -20,7 +22,6 @@ app.register_blueprint(cv.bp)
 app.register_blueprint(sources.bp)
 app.register_blueprint(preferences.bp)
 app.register_blueprint(candidate_preferences.bp)
-app.register_blueprint(ranking.bp)
 app.register_blueprint(query_expansion.bp)
 app.register_blueprint(search_queries.bp)
 runner.init_sock(app)
@@ -78,9 +79,22 @@ def how_it_works():
     return render_template("how_it_works.html")
 
 
+def _clear_stale_session_at_startup():
+    """Clear any stale 'running' session left over from a previous crash —
+    best-effort, not fatal: logged_in() only checks that a session file
+    exists, not that it's still valid, so a stale/expired cookie (401) or a
+    momentary JobAgentWeb/tunnel hiccup here must not take down the whole app
+    before it can even serve /login."""
+    if not api_client.logged_in():
+        return
+    try:
+        session_repository.cancel_active()
+    except Exception:
+        logging.getLogger(__name__).warning("Could not clear stale session at startup", exc_info=True)
+
+
 if __name__ == "__main__":
-    if api_client.logged_in():
-        session_repository.cancel_active()  # clear any stale running sessions from a previous crash
+    _clear_stale_session_at_startup()
     print("Starting Job Agent Dashboard...")
     print("Open: http://localhost:5000")
     app.run(debug=False, port=5000)

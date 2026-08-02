@@ -399,6 +399,7 @@ h1,h2,h3 { text-wrap: balance; }
 .modal-ft { display: flex; justify-content: flex-end; gap: 10px; padding: 16px 20px; border-top: 1px solid var(--line-soft); }
 .modal-hint { font-size: 0.82rem; color: var(--ink-soft); margin: 0 0 14px; }
 .modal-hint a { color: var(--signal); text-underline-offset: 2px; }
+.modal-hint--warn { color: var(--flag-red); }
 .btn-primary { background: var(--signal); color: var(--signal-ink); border: none; border-radius: 9px; padding: 9px 18px; font-size: 0.86rem; font-weight: 600; display: inline-flex; align-items: center; gap: 7px; }
 .btn-primary:hover { filter: brightness(1.06); }
 .btn-primary:disabled { opacity: .5; cursor: default; filter: none; }

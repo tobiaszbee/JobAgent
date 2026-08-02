@@ -15,10 +15,7 @@ document.addEventListener('keydown', (e) => {
   document.querySelectorAll('details.nav-menu[open]').forEach(menu => menu.removeAttribute('open'));
 });
 
-document.getElementById('cv-file').addEventListener('change', async (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
-
+async function _uploadCv(file) {
   const dropzone = document.getElementById('dropzone');
   const dropzoneText = document.getElementById('dropzone-text');
   const errorEl = document.getElementById('hero-error');
@@ -39,6 +36,33 @@ document.getElementById('cv-file').addEventListener('change', async (e) => {
     dropzoneText.innerHTML = '<strong>Upload your CV</strong><span>PDF · drag and drop, or click to choose a file</span>';
     errorEl.textContent = err.message;
     errorEl.classList.add('is-visible');
-    e.target.value = '';
+    document.getElementById('cv-file').value = '';
   }
+}
+
+document.getElementById('cv-file').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (file) _uploadCv(file);
+});
+
+// The dropzone's copy has always claimed drag-and-drop support, but no
+// listeners actually implemented it — dropping a file just let the browser's
+// default behavior take over (navigating the tab to open the PDF directly),
+// which looks exactly like the app broke.
+const _dropzoneEl = document.getElementById('dropzone');
+['dragenter', 'dragover'].forEach(evt => {
+  _dropzoneEl.addEventListener(evt, (e) => {
+    e.preventDefault();
+    if (!_dropzoneEl.classList.contains('is-busy')) _dropzoneEl.classList.add('is-dragover');
+  });
+});
+['dragleave', 'dragend'].forEach(evt => {
+  _dropzoneEl.addEventListener(evt, () => _dropzoneEl.classList.remove('is-dragover'));
+});
+_dropzoneEl.addEventListener('drop', (e) => {
+  e.preventDefault();
+  _dropzoneEl.classList.remove('is-dragover');
+  if (_dropzoneEl.classList.contains('is-busy')) return;
+  const file = e.dataTransfer.files[0];
+  if (file) _uploadCv(file);
 });

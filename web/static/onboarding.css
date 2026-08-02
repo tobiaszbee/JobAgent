@@ -125,7 +125,7 @@ button { font-family: inherit; }
   transition: border-color 0.15s ease, background 0.15s ease;
   box-shadow: var(--shadow);
 }
-.dropzone:hover, .dropzone:focus-visible { border-color: var(--signal); background: var(--signal-soft); }
+.dropzone:hover, .dropzone:focus-visible, .dropzone.is-dragover { border-color: var(--signal); background: var(--signal-soft); }
 .dropzone.is-busy { opacity: 0.6; pointer-events: none; }
 .dropzone__icon {
   flex: none; width: 46px; height: 46px; border-radius: 10px;

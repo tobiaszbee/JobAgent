@@ -6,6 +6,7 @@ from flask import Blueprint, jsonify, request
 
 from config import ANTHROPIC_API_KEY, CLAUDE_EXTRACT_MODEL
 from db.repositories import candidate_preferences_repository, criteria_repository, cv_repository
+from db.repositories.usage_repository import log_anthropic
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,7 @@ def _derive_search_queries(tech: list[str], role_types: list[str], seniority_lev
         max_tokens=300,
         messages=[{"role": "user", "content": prompt}],
     )
+    log_anthropic(response, "derive_search_queries", CLAUDE_EXTRACT_MODEL)
     raw = response.content[0].text.strip()
     raw = raw.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
     queries = json.loads(raw)

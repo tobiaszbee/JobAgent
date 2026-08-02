@@ -62,6 +62,19 @@ class TestSavePreferences:
         assert resp.status_code == 200
         assert resp.json["warnings"]
 
+    @patch("web.routes.candidate_preferences.log_anthropic")
+    @patch("web.routes.candidate_preferences.anthropic.Anthropic")
+    def test_derivation_logs_anthropic_usage(self, mock_anthropic, mock_log, flask_client):
+        # Regression: this call site never reported cost, undercounting the
+        # usage dashboard for a user-triggered (questionnaire save) action.
+        response = _mock_claude_response('["PHP", "Symfony Developer"]')
+        mock_anthropic.return_value.messages.create.return_value = response
+        flask_client.post("/api/candidate-preferences", json={
+            "extra_tech": ["PHP", "Symfony"], "role_types": ["developer"], "seniority_levels": ["senior"],
+        })
+        mock_log.assert_called_once()
+        assert mock_log.call_args.args[0] is response
+
     @patch("web.routes.candidate_preferences.anthropic.Anthropic")
     def test_remote_countries_sync_into_location_criteria(self, mock_anthropic, flask_client):
         mock_anthropic.return_value.messages.create.return_value = _mock_claude_response("[]")

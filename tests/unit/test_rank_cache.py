@@ -34,7 +34,7 @@ def test_reuses_and_sorts_by_previous_listwise_rank_when_pool_unchanged():
     assert [j["id"] for j in result] == ["a", "b"]
 
 
-def test_previous_jobs_with_other_unrelated_ids_are_ignored():
+def test_previous_top_set_larger_than_current_pool_invalidates_cache():
     listwise_pool = [{"id": "a", "listwise_rank": 1}]
     previous_jobs = [
         {"id": "a", "listwise_rank": 1},

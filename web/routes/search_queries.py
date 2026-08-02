@@ -1,4 +1,6 @@
 from flask import Blueprint, jsonify
+
+import api_client
 from db.repositories import excluded_search_queries_repository
 
 bp = Blueprint("search_queries", __name__)
@@ -11,5 +13,8 @@ def list_excluded():
 
 @bp.post("/api/search-queries/excluded/<int:id>/reinstate")
 def reinstate_excluded(id):
-    excluded_search_queries_repository.reinstate(id)
+    try:
+        excluded_search_queries_repository.reinstate(id)
+    except api_client.ApiError as e:
+        return jsonify({"error": e.detail}), e.status_code
     return jsonify({"ok": True})

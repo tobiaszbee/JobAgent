@@ -5,8 +5,10 @@ import PyPDF2
 import anthropic
 from flask import Blueprint, jsonify, request
 
+import api_client
 from config import ANTHROPIC_API_KEY, CLAUDE_MODEL
 from db.repositories import cv_repository, criteria_repository
+from db.repositories.usage_repository import log_anthropic
 
 bp = Blueprint("cv", __name__)
 
@@ -34,6 +36,7 @@ def _parse_with_claude(raw_text: str) -> dict:
         max_tokens=600,
         messages=[{"role": "user", "content": f"{_PARSE_PROMPT}\n\nCV text:\n{raw_text[:4000]}"}],
     )
+    log_anthropic(response, "cv_parse", CLAUDE_MODEL)
     raw = response.content[0].text.strip()
     raw = raw.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
     return json.loads(raw)
@@ -72,7 +75,10 @@ def upload_cv():
 
 @bp.post("/api/cv/<int:id>/activate")
 def activate_profile(id):
-    cv_repository.set_active(id)
+    try:
+        cv_repository.set_active(id)
+    except api_client.ApiError as e:
+        return jsonify({"error": e.detail}), e.status_code
     return jsonify({"ok": True})
 
 
@@ -116,6 +122,7 @@ def _suggest_with_claude(parsed: dict) -> dict:
         max_tokens=400,
         messages=[{"role": "user", "content": _SUGGEST_PROMPT.format(profile=profile_text)}],
     )
+    log_anthropic(response, "cv_suggest_criteria", CLAUDE_MODEL)
     raw = response.content[0].text.strip()
     raw = raw.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
     return json.loads(raw)

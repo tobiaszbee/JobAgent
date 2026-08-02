@@ -15,8 +15,15 @@ from evaluator.profile import load_active_profile
 _CALIBRATION_LIMIT = 10
 
 
-def run(force_rescore: bool = False) -> dict:
-    if force_rescore:
+def run(force_rescore: bool = False, jobs: list[dict] | None = None) -> dict:
+    """`jobs` lets a caller that already fetched the same list (to check
+    emptiness/print a count before calling this) pass it straight through
+    instead of this function re-fetching it — only meaningful with
+    force_rescore=True, since that's the mode that shares get_new_with_descriptions()
+    with a typical caller."""
+    if jobs is not None:
+        unscored_jobs = jobs
+    elif force_rescore:
         unscored_jobs = job_repository.get_new_with_descriptions()
         if unscored_jobs:
             logger.info(f"Force-rescore mode: {len(unscored_jobs)} job(s) will be re-scored.")

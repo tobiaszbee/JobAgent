@@ -161,6 +161,7 @@ async function loadStats() {
     r = await fetch('/api/stats');
     s = await r.json();
   } catch {
+    showToast('Failed to load stats — is the server running?');
     return;
   }
   document.getElementById('f-new').textContent      = s.new;
@@ -378,11 +379,11 @@ function _renderBadges(j, s) {
   if (work) tags.push(`<span class="b key${on('work=' + work)}" onclick="toggleBadgeFilter('work=${work}')"><span class="dotmark"></span>${_WORK_LABEL[work]}</span>`);
 
   if (s && s.seniority && s.seniority !== 'unknown')
-    tags.push(`<span class="b${on('seniority=' + s.seniority)}" onclick="toggleBadgeFilter('seniority=${s.seniority}')">${cap(s.seniority)}</span>`);
+    tags.push(`<span class="b${on('seniority=' + s.seniority)}" onclick="toggleBadgeFilter('${escJs('seniority=' + s.seniority)}')">${esc(cap(s.seniority))}</span>`);
   if (s && s.company_type && s.company_type !== 'unknown')
-    tags.push(`<span class="b${on('ctype=' + s.company_type)}" onclick="toggleBadgeFilter('ctype=${s.company_type}')">${cap(s.company_type)}</span>`);
+    tags.push(`<span class="b${on('ctype=' + s.company_type)}" onclick="toggleBadgeFilter('${escJs('ctype=' + s.company_type)}')">${esc(cap(s.company_type))}</span>`);
   if (s && s.product_vs_outsourcing && s.product_vs_outsourcing !== 'unknown')
-    tags.push(`<span class="b${on('pvo=' + s.product_vs_outsourcing)}" onclick="toggleBadgeFilter('pvo=${s.product_vs_outsourcing}')">${cap(s.product_vs_outsourcing)}</span>`);
+    tags.push(`<span class="b${on('pvo=' + s.product_vs_outsourcing)}" onclick="toggleBadgeFilter('${escJs('pvo=' + s.product_vs_outsourcing)}')">${esc(cap(s.product_vs_outsourcing))}</span>`);
   (s && s.stack || []).slice(0, 6).forEach(t => {
     const key = 'stack=' + t.toLowerCase();
     tags.push(`<span class="b stack${on(key)}" onclick="toggleBadgeFilter('${escJs(key)}')">${esc(t)}</span>`);
@@ -399,7 +400,11 @@ function _renderSecondOpinion(j) {
     <div class="second ${cls}">
       <span class="glyph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg></span>
       <div class="so-body">
-        <div class="so-label">Second opinion <span class="so-flag">${esc(flag.replace(/_/g, ' '))}</span></div>
+        <div class="so-label">Second opinion <span class="so-flag">${esc(flag.replace(/_/g, ' '))}</span>
+          <span class="info"><button type="button" class="info-btn">?</button>
+            <span class="tip">A second AI model reviews the primary ranking's top picks looking for mismatches the first pass might have missed. <b>dealbreaker risk</b> demotes the job to the bottom of the shortlist; <b>overrated</b>/<b>underrated</b> are just a note — they don't change its rank.</span>
+          </span>
+        </div>
         <div class="so-note">${esc(j.debate_note)}</div>
       </div>
     </div>`;
@@ -583,7 +588,16 @@ function render() {
   container.innerHTML = '';
 
   if (!_lazyJobs.length) {
-    container.innerHTML = '<div class="no-results">No jobs found.</div>';
+    const search = document.getElementById('search').value.trim();
+    const source = document.getElementById('source-filter').value;
+    const hasActiveFilter = search || source || _badgeFilters.size;
+    if (!ALL_JOBS.length && !hasActiveFilter && currentStatus === 'new') {
+      container.innerHTML = '<div class="no-results">No jobs yet — click <strong>Run agent</strong> above to collect your first batch.</div>';
+    } else if (hasActiveFilter) {
+      container.innerHTML = '<div class="no-results">No jobs match your filters.</div>';
+    } else {
+      container.innerHTML = '<div class="no-results">No jobs found.</div>';
+    }
     return;
   }
 
@@ -1337,6 +1351,7 @@ function _runGeneric(wsPath, title) {
   document.getElementById('run-modal-params').style.display = 'none';
   document.getElementById('btn-start').style.display = 'none';
   document.getElementById('btn-generic-stop').style.display = '';
+  document.getElementById('run-progress').style.display = 'none';
   document.getElementById('run-log').textContent = '';
   document.getElementById('run-modal').classList.add('open');
 
@@ -1373,11 +1388,16 @@ async function reevaluateRejected() {
     costPer100 = s.usage && s.usage.cost_per_100_usd;
   } catch {}
 
-  if (count === 0) { alert('No auto-rejected jobs to re-evaluate.'); return; }
+  if (count === 0) { showToast('No auto-rejected jobs to re-evaluate.'); return; }
 
   const estCost = costPer100 != null ? ` (est. $${(count / 100 * costPer100).toFixed(2)})` : '';
-  if (!confirm(`Re-evaluate ${count} auto-rejected job(s)? This re-runs the keyword filter and AI scoring on each one${estCost}.`)) return;
-
+  const msg = document.getElementById('reevaluate-rejected-msg');
+  if (msg) msg.textContent = `Re-evaluate ${count} auto-rejected job(s)? This re-runs the keyword filter and AI scoring on each one${estCost}.`;
+  document.getElementById('reevaluate-rejected-modal').classList.add('open');
+}
+function closeReevaluateRejectedModal() { document.getElementById('reevaluate-rejected-modal').classList.remove('open'); }
+function confirmReevaluateRejected() {
+  closeReevaluateRejectedModal();
   _runGeneric('/ws/reevaluate-rejected', 'Re-evaluating auto-rejected jobs');
 }
 function rescoreNew()         { _runGeneric('/ws/rescore-new', 'Re-scoring new jobs'); }
@@ -1401,6 +1421,7 @@ async function openRunModal() {
   document.getElementById('run-modal-params').style.display = '';
   document.getElementById('btn-start').style.display = '';
   document.getElementById('btn-generic-stop').style.display = 'none';
+  document.getElementById('run-progress').style.display = 'none';
   document.getElementById('run-modal').classList.add('open');
   document.getElementById('run-log').textContent = '';
   checkAgentStatus();
@@ -1449,15 +1470,28 @@ function pollAgentStatus() {
     .finally(() => setTimeout(pollAgentStatus, 5000));
 }
 
+// Fixed stage count for the main pipeline run (COLLECTOR + the 5 stages in
+// runner.py's _post_collect_stages()) — used to drive a stage-level progress
+// bar from the "=== STAGE ===" headers already streamed in the log, with no
+// server-side protocol change needed.
+const _AGENT_STAGE_COUNT = 6;
+
 function startAgent() {
   const sinceLast = document.getElementById('run-since-last').checked;
   const days = document.getElementById('run-days').value || 1;
   const log = document.getElementById('run-log');
   const btn = document.getElementById('btn-start');
+  const prog = document.getElementById('run-progress');
+  const bar = document.getElementById('run-progress-bar');
+  const lbl = document.getElementById('run-progress-label');
+  let stageIndex = 0;
 
   log.textContent = '';
   btn.textContent = 'Stop';
   btn.onclick = stopAgent;
+  prog.style.display = '';
+  bar.style.width = '0%';
+  lbl.textContent = `Stage 0 / ${_AGENT_STAGE_COUNT}`;
 
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   agentSocket = new WebSocket(`${proto}://${location.host}/ws/agent`);
@@ -1475,11 +1509,20 @@ function startAgent() {
 
   agentSocket.onmessage = e => {
     if (e.data.includes('__DONE__')) {
+      bar.style.width = '100%';
+      lbl.textContent = `Stage ${_AGENT_STAGE_COUNT} / ${_AGENT_STAGE_COUNT}`;
       _resetStartBtn();
       _updateAgentIndicator(false);
       loadStats();
       loadJobs();
       return;
+    }
+    const stageMatch = e.data.match(/^=== (.+?) ===/m);
+    if (stageMatch) {
+      stageIndex++;
+      const pct = Math.round(stageIndex / _AGENT_STAGE_COUNT * 100);
+      bar.style.width = pct + '%';
+      lbl.textContent = `Stage ${stageIndex} / ${_AGENT_STAGE_COUNT}: ${stageMatch[1]}`;
     }
     log.textContent += e.data;
     log.scrollTop = log.scrollHeight;

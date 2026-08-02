@@ -18,10 +18,6 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 from collector.runner import run as collect
 from evaluator.runner import run as evaluate
 from extractor.runner import run_extraction
-from embeddings.indexer import index_jobs, build_ideal_vector, score_by_similarity
-from ranker.reranker import rerank_jobs
-from ranker.listwise import listwise_rank
-from config import RANKING
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +49,16 @@ def _configure_logging(log_path: str | None) -> list[logging.Handler]:
         handlers.append(user_h)
 
     return handlers
+
+
+def _run_script(name: str) -> int:
+    """Runs a scripts/*.py file with no importable entrypoint (no `if __name__`
+    guard — see scripts/distill_preferences.py, scripts/prune_search_queries.py,
+    scripts/rank_jobs.py) as a subprocess, matching the actual dashboard
+    pipeline's approach for these same stages (web/routes/runner.py)."""
+    import subprocess
+    script_path = os.path.join(ROOT, "scripts", name)
+    return subprocess.run([sys.executable, script_path], check=False).returncode
 
 
 def main() -> int:
@@ -88,6 +94,12 @@ def main() -> int:
 
         logger.info(f"\nCollector result: found={c_result['jobs_found']}  new={c_result['jobs_new']}")
 
+        # Matches the dashboard pipeline's stage order (web/routes/runner.py):
+        # COLLECTOR -> DISTILL -> EXTRACTOR -> EVALUATOR -> PRUNE QUERIES -> RANKING.
+        logger.info("\n=== DISTILL PREFERENCES ===")
+        if _run_script("distill_preferences.py") != 0:
+            logger.warning("Preference distillation failed (non-fatal)")
+
         # Must precede EVALUATOR — dealbreakers.py reads structured_data, and a job
         # never re-enters the unscored pool once scored.
         logger.info("\n=== EXTRACTOR ===")
@@ -108,13 +120,13 @@ def main() -> int:
 
         logger.info(f"\nEvaluator result: scored={e_result.get('jobs_scored', 0)}")
 
+        logger.info("\n=== PRUNE QUERIES ===")
+        if _run_script("prune_search_queries.py") != 0:
+            logger.warning("Search query pruning failed (non-fatal)")
+
         logger.info("\n=== EMBEDDINGS + RANKING ===")
-        try:
-            import subprocess, os as _os
-            rank_script = _os.path.join(ROOT, "scripts", "rank_jobs.py")
-            subprocess.run([sys.executable, rank_script], check=False)
-        except Exception as e:
-            logger.warning(f"Ranking failed (non-fatal): {e}")
+        if _run_script("rank_jobs.py") != 0:
+            logger.warning("Ranking failed (non-fatal)")
 
         logger.info("\n" + "=" * 60)
         logger.info("Run complete.")

@@ -193,6 +193,11 @@
           <label class="f disabled" id="run-days-label">Search last <input type="number" id="run-days" value="1" min="1" max="60" disabled> days</label>
         </div>
         <p class="modal-hint">Search queries, countries, and sources are derived from your <a href="/questionnaire">preferences</a>.</p>
+        <p class="modal-hint modal-hint--warn">First run only: a Chrome window will open for LinkedIn login — check your taskbar if the log below looks stalled after starting.</p>
+      </div>
+      <div class="progress-wrap" id="run-progress" style="display:none">
+        <div class="progress-bar-track"><div class="progress-bar-fill" id="run-progress-bar" style="width:0%"></div></div>
+        <div class="progress-label" id="run-progress-label">Stage 0 / 6</div>
       </div>
       <div class="run-log" id="run-log"></div>
     </div>
@@ -358,6 +363,20 @@
     <div class="modal-ft">
       <button class="btn-ghost" onclick="closeBulkRejectModal()">Cancel</button>
       <button class="btn-stop" onclick="confirmBulkReject()">Reject all</button>
+    </div>
+  </div>
+</div>
+
+<!-- Re-evaluate rejected modal -->
+<div class="overlay" id="reevaluate-rejected-modal">
+  <div class="modal sm">
+    <div class="modal-hd"><h2>Re-evaluate auto-rejected jobs</h2><button class="modal-close" onclick="closeReevaluateRejectedModal()">✕</button></div>
+    <div class="modal-bd">
+      <p class="modal-hint" id="reevaluate-rejected-msg"></p>
+    </div>
+    <div class="modal-ft">
+      <button class="btn-ghost" onclick="closeReevaluateRejectedModal()">Cancel</button>
+      <button class="btn-primary" onclick="confirmReevaluateRejected()">Re-evaluate</button>
     </div>
   </div>
 </div>

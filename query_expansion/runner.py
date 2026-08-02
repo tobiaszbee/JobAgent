@@ -2,6 +2,7 @@ import logging
 import anthropic
 
 from config import ANTHROPIC_API_KEY, CLAUDE_MODEL
+from db.repositories.usage_repository import log_anthropic
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +78,8 @@ Do NOT suggest queries already in use. Return concise, LinkedIn-friendly search 
     except Exception as e:
         logger.error(f"Query expansion failed: {e}")
         return {"ok": False, "reason": str(e), "queries": [], "rationale": ""}
+
+    log_anthropic(response, "query_expansion", CLAUDE_MODEL)
 
     tool_block = next((b for b in response.content if b.type == "tool_use"), None)
     if not tool_block:

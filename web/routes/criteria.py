@@ -1,4 +1,6 @@
 from flask import Blueprint, jsonify, request
+
+import api_client
 from db.repositories import criteria_repository
 
 bp = Blueprint("criteria", __name__)
@@ -26,11 +28,17 @@ def add_criterion():
 @bp.post("/api/criteria/<int:id>/toggle")
 def toggle_criterion(id):
     data = request.get_json()
-    criteria_repository.toggle(id, data.get("active", True))
+    try:
+        criteria_repository.toggle(id, data.get("active", True))
+    except api_client.ApiError as e:
+        return jsonify({"error": e.detail}), e.status_code
     return jsonify({"ok": True})
 
 
 @bp.delete("/api/criteria/<int:id>")
 def delete_criterion(id):
-    criteria_repository.delete(id)
+    try:
+        criteria_repository.delete(id)
+    except api_client.ApiError as e:
+        return jsonify({"error": e.detail}), e.status_code
     return jsonify({"ok": True})

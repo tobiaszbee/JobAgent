@@ -148,6 +148,24 @@ class TestPreferenceRunner:
         assert result["reason"] == "invalid_signal"
         assert preference_repository.get_latest() is None
 
+    def test_one_bad_signal_among_valid_ones_is_dropped_not_fatal(self):
+        # Regression: a single malformed signal out of potentially dozens used
+        # to discard the entire (expensive) distillation response instead of
+        # just filtering out the bad entry.
+        _insert_applied()
+        _insert_rejected()
+        mixed_signals = [
+            {"type": "ACCEPT", "dim": "company_type", "value": "product_saas", "conf": "HIGH", "n_match": 1, "n_total": 1},
+            {"type": "PREFER", "dim": "broken"},  # invalid type — should be dropped
+            {"type": "REJECT", "dim": "compensation"},  # valid — should be kept
+        ]
+        with _patched_api(_mock_response(signals=mixed_signals)):
+            result = run()
+        assert result["ok"] is True
+        assert len(result["signals"]) == 2
+        assert {s["dim"] for s in result["signals"]} == {"company_type", "compensation"}
+        assert preference_repository.get_latest() is not None
+
     def test_api_exception_returns_error(self):
         _insert_applied()
         _insert_rejected()

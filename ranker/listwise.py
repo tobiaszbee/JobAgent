@@ -153,10 +153,15 @@ Include ALL {len(jobs)} jobs. No text after the closing </ranking> tag."""
     result = []
     seen = set()
 
-    for rank_pos, item in enumerate(ranking, 1):
+    # listwise_rank is always len(result) + 1 at append time — a compacted,
+    # gap-free sequence. Using enumerate(ranking)'s raw index instead used to
+    # leave a gap whenever a hallucinated/invalid job_id was skipped, which
+    # the safety-net loop below (also numbering from len(result) + 1) could
+    # then collide with, producing two jobs sharing the same listwise_rank.
+    for item in ranking:
         job_id = item.get("job_id")
         if job_id in job_by_id and job_id not in seen:
-            result.append({**job_by_id[job_id], "listwise_rank": rank_pos, "rank_reason": item.get("reason", "")})
+            result.append({**job_by_id[job_id], "listwise_rank": len(result) + 1, "rank_reason": item.get("reason", "")})
             seen.add(job_id)
 
     # Safety net: add any jobs Opus missed
