@@ -24,6 +24,7 @@ class TestEvalReport:
         report = eval_report()
         assert "precision_at_10" in report
         assert "precision_at_5" in report
+        assert "apply_rate_by_bucket" in report
         assert "divergence_cases" in report
         assert "total_ranked" in report
         assert "would_apply" in report
@@ -36,6 +37,17 @@ class TestEvalReport:
         assert report["n_evaluated_5"] == 2
         assert len(report["divergence_cases"]) == 1  # rank 3 + rejected → FP
         assert report["total_ranked"] == 2
+
+    def test_apply_rate_by_bucket_grows_past_precision_at_ks_fixed_sample(self):
+        # apply_rate_by_bucket's whole reason for existing: precision@5 is
+        # permanently capped at 5 data points, the bucket for the same rank
+        # range keeps growing with every decision in it.
+        for i in range(7):
+            _insert_ranked(f"Job {i}", "applied" if i % 2 == 0 else "rejected", 1, url=f"https://example.com/bucket-{i}")
+        report = eval_report()
+        assert report["n_evaluated_5"] == 5
+        bucket = next(b for b in report["apply_rate_by_bucket"] if b["range"] == "1-5")
+        assert bucket["n"] == 7
 
     def test_would_apply_reflects_repository_stats(self):
         job_id = job_repository.insert(
