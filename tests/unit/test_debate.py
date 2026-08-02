@@ -128,3 +128,20 @@ class TestDebateRank:
         result = debate_rank(jobs, "profile")
         assert result == jobs
         assert "debate_flag" not in result[0]
+
+    @patch("ranker.debate.anthropic.Anthropic")
+    def test_questionnaire_included_in_system_prompt_when_given(self, mock_anthropic):
+        jobs = [_job("j1", rank=1)]
+        mock_anthropic.return_value.messages.create.return_value = _debate_response([])
+        debate_rank(jobs, "profile", questionnaire="CANDIDATE QUESTIONNAIRE:\n- Work mode: remote")
+        system_prompt = mock_anthropic.return_value.messages.create.call_args.kwargs["system"]
+        assert "CANDIDATE QUESTIONNAIRE" in system_prompt
+        assert "Work mode: remote" in system_prompt
+
+    @patch("ranker.debate.anthropic.Anthropic")
+    def test_no_questionnaire_section_when_omitted(self, mock_anthropic):
+        jobs = [_job("j1", rank=1)]
+        mock_anthropic.return_value.messages.create.return_value = _debate_response([])
+        debate_rank(jobs, "profile")
+        system_prompt = mock_anthropic.return_value.messages.create.call_args.kwargs["system"]
+        assert "CANDIDATE QUESTIONNAIRE" not in system_prompt

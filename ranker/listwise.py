@@ -98,7 +98,7 @@ def _parse_ranking_json(text: str) -> list[dict]:
     return []
 
 
-def listwise_rank(jobs: list[dict], candidate_profile: str, preferences: list[dict]) -> list[dict]:
+def listwise_rank(jobs: list[dict], candidate_profile: str, preferences: list[dict], questionnaire: str = "") -> list[dict]:
     """Extended thinking is incompatible with forced tool_choice, so we use JSON in text instead."""
     if not jobs:
         return []
@@ -109,6 +109,8 @@ def listwise_rank(jobs: list[dict], candidate_profile: str, preferences: list[di
         scored = [s for s in preferences if s.get("type") != "NEUTRAL"]
         if scored:
             prefs_text = f"PREFERENCE PROFILE:\n{render_signals(scored)}\n\n"
+
+    questionnaire_text = f"{questionnaire}\n\n" if questionnaire else ""
 
     # Shuffled presentation order: a listwise ranker shown jobs best-first (the
     # reranker's own order) with sequential "[Job #N]" labels tends to mostly
@@ -126,8 +128,9 @@ def listwise_rank(jobs: list[dict], candidate_profile: str, preferences: list[di
 
 {candidate_profile}
 
-{prefs_text}Your task: rank ALL {len(jobs)} jobs from best (rank 1) to worst fit. Consider:
+{questionnaire_text}{prefs_text}Your task: rank ALL {len(jobs)} jobs from best (rank 1) to worst fit. Consider:
 - Overall match with candidate profile and experience
+- The candidate's own stated questionnaire preferences (if given above) — direct and current, outranks the inferred preference profile when they conflict
 - Preference signals (strong signals = heavy weight)
 - Role quality, growth potential, company type
 - Dealbreakers (REJECT[conf=ABSOLUTE/HIGH] signals)

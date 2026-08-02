@@ -106,3 +106,33 @@ def test_build_system_prompt_preferences_before_examples():
 def test_build_system_prompt_works_with_empty_list():
     prompt = build_system_prompt(_criteria(), [], [], learned_preferences=[])
     assert "PREFERRED" in prompt
+
+
+# --- questionnaire injection ---
+
+def test_build_system_prompt_includes_questionnaire_when_given():
+    prompt = build_system_prompt(_criteria(), [], [], questionnaire="CANDIDATE QUESTIONNAIRE:\n- Work mode: remote")
+    assert "CANDIDATE QUESTIONNAIRE" in prompt
+    assert "Work mode: remote" in prompt
+
+
+def test_build_system_prompt_no_questionnaire_section_when_omitted():
+    prompt = build_system_prompt(_criteria(), [], [])
+    assert "CANDIDATE QUESTIONNAIRE" not in prompt
+
+
+def test_build_system_prompt_questionnaire_before_learned_profile():
+    signals = [{"type": "ACCEPT", "dim": "x", "value": "y"}]
+    prompt = build_system_prompt(
+        _criteria(), [], [], learned_preferences=signals, questionnaire="CANDIDATE QUESTIONNAIRE:\n- Work mode: remote"
+    )
+    questionnaire_pos = prompt.index("CANDIDATE QUESTIONNAIRE")
+    profile_pos = prompt.index("LEARNED PREFERENCE PROFILE")
+    assert questionnaire_pos < profile_pos
+
+
+def test_legend_states_questionnaire_precedence_over_learned_profile():
+    signals = [{"type": "ACCEPT", "dim": "x", "value": "y"}]
+    prompt = build_system_prompt(_criteria(), [], [], learned_preferences=signals)
+    assert "QUESTIONNAIRE" in prompt
+    assert "outranks this LEARNED PREFERENCE PROFILE" in prompt

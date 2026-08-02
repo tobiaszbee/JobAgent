@@ -8,7 +8,7 @@ from db.repositories import job_repository, criteria_repository, preference_repo
 from evaluation.harness import divergence_cases
 from evaluator.dealbreakers import apply_dealbreaker_filter
 from evaluator.scorer import score_job, build_system_prompt
-from evaluator.profile import load_active_profile
+from evaluator.profile import load_active_profile, load_questionnaire_preferences
 
 # Cap on how many past ranking mistakes get fed back into the scoring prompt — bounds
 # prompt size as more divergence cases accumulate over time.
@@ -48,6 +48,7 @@ def run(force_rescore: bool = False, jobs: list[dict] | None = None) -> dict:
         return {"jobs_scored": 0}
 
     criteria = criteria_repository.get_active_dict()
+    questionnaire = load_questionnaire_preferences()
 
     latest_preference = preference_repository.get_latest()
     learned_preferences = latest_preference["signals"] if latest_preference else []
@@ -63,7 +64,7 @@ def run(force_rescore: bool = False, jobs: list[dict] | None = None) -> dict:
 
     shared_system_prompt = build_system_prompt(
         criteria, positive_examples, negative_examples, candidate_profile, learned_preferences,
-        divergence_cases=calibration_cases,
+        divergence_cases=calibration_cases, questionnaire=questionnaire,
     )
 
     logger.info(f"Evaluating {len(unscored_jobs)} job(s)...")

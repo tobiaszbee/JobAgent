@@ -22,7 +22,7 @@ from ranker.listwise import listwise_rank
 from ranker.debate import debate_rank
 from ranker.rank_cache import reuse_if_unchanged
 from ranker.would_apply import compute_would_apply
-from evaluator.profile import load_active_profile
+from evaluator.profile import load_active_profile, load_questionnaire_preferences
 from config import RANKING
 
 try:
@@ -33,6 +33,7 @@ except ValueError as e:
 
 latest_pref = preference_repository.get_latest()
 preferences = latest_pref["signals"] if latest_pref else []
+questionnaire = load_questionnaire_preferences()
 
 RANKING_POOL_LIMIT = 2000
 jobs = job_repository.get_jobs_for_ranking(limit=RANKING_POOL_LIMIT)
@@ -102,9 +103,9 @@ if reused is not None:
     ranked = reused
 else:
     print(f"\nListwise ranking {len(listwise_pool)} job(s) with Claude Opus + extended thinking...")
-    ranked = listwise_rank(listwise_pool, candidate_profile, preferences)
+    ranked = listwise_rank(listwise_pool, candidate_profile, preferences, questionnaire)
     print(f"\nDebate review of top-{len(ranked)} with a second model...")
-    ranked = debate_rank(ranked, candidate_profile)
+    ranked = debate_rank(ranked, candidate_profile, questionnaire)
 
 # Step 4b: Would-apply flag — phase 1 of the auto-apply plan (flag-and-validate
 # only, never sends anything). See ranker/would_apply.py for the gate logic.

@@ -204,3 +204,30 @@ def test_system_prompt_forbids_deliberation_in_reason(mock_anthropic):
 
     system_prompt = mock_anthropic.return_value.messages.create.call_args.kwargs["system"]
     assert "deliberation" in system_prompt.lower() or "wait, correcting" in system_prompt.lower()
+
+
+@patch("ranker.listwise.anthropic.Anthropic")
+def test_questionnaire_included_in_system_prompt_when_given(mock_anthropic):
+    jobs = [_job("j1")]
+    mock_anthropic.return_value.messages.create.return_value = _make_ranking_response(
+        [{"job_id": "j1", "reason": "Good match"}]
+    )
+
+    listwise_rank(jobs, "", [], questionnaire="CANDIDATE QUESTIONNAIRE:\n- Work mode: remote")
+
+    system_prompt = mock_anthropic.return_value.messages.create.call_args.kwargs["system"]
+    assert "CANDIDATE QUESTIONNAIRE" in system_prompt
+    assert "Work mode: remote" in system_prompt
+
+
+@patch("ranker.listwise.anthropic.Anthropic")
+def test_no_questionnaire_section_when_omitted(mock_anthropic):
+    jobs = [_job("j1")]
+    mock_anthropic.return_value.messages.create.return_value = _make_ranking_response(
+        [{"job_id": "j1", "reason": "Good match"}]
+    )
+
+    listwise_rank(jobs, "", [])
+
+    system_prompt = mock_anthropic.return_value.messages.create.call_args.kwargs["system"]
+    assert "CANDIDATE QUESTIONNAIRE" not in system_prompt

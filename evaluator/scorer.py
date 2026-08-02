@@ -46,7 +46,10 @@ _LEGEND = (
     "- ACCEPT[...]: positive signal — weight by conf the same way\n"
     "- INFER[...]: soft signal — if the offer lacks the data (e.g. no salary shown), do NOT penalize\n"
     "- n=X/Y = evidence count; higher Y = more reliable signal\n"
-    "- This profile overrides PREFERRED criteria, but MUST HAVE always wins\n\n"
+    "- Precedence when sources conflict: MUST HAVE always wins; then the CANDIDATE QUESTIONNAIRE "
+    "(their own direct, current answers) outranks this LEARNED PREFERENCE PROFILE (inferred from past "
+    "applied/rejected jobs — useful nuance, but a proxy for what they told you directly, not a "
+    "replacement); this profile in turn overrides PREFERRED criteria\n\n"
 )
 
 
@@ -95,8 +98,10 @@ def build_system_prompt(
     candidate_profile: str = "",
     learned_preferences: list[dict] | str = "",
     divergence_cases: list[dict] | None = None,
+    questionnaire: str = "",
 ) -> str:
     """Call once per batch and reuse across jobs."""
+    questionnaire_section = f"{questionnaire}\n\n" if questionnaire else ""
     prefs_section = _build_preferences_section(learned_preferences)
     examples_section = _build_examples_section(positive_examples, negative_examples)
     calibration_section = _build_calibration_section(divergence_cases or [])
@@ -118,7 +123,7 @@ def build_system_prompt(
 
 {candidate_profile}
 
-{prefs_section}{examples_section}{calibration_section}{required_header}
+{questionnaire_section}{prefs_section}{examples_section}{calibration_section}{required_header}
 {required_lines}
 
 PREFERRED (increases score):
@@ -195,7 +200,13 @@ def score_job(job: dict, system_prompt: str) -> ScoreResult:
         try:
             response = client.messages.create(
                 model=CLAUDE_MODEL,
-                max_tokens=500,
+                # 500 was tight even before the questionnaire section was added to the
+                # system prompt; richer context tends to produce richer (longer)
+                # pros/cons, and a truncated response now silently returns score=None
+                # (evaluator/runner.py retries it forever) instead of the old, worse
+                # behavior of guessing a fake score — so the cost of running a little
+                # short is higher than the cost of a few extra output tokens.
+                max_tokens=700,
                 system=[{
                     "type": "text",
                     "text": system_prompt,

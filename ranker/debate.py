@@ -79,7 +79,7 @@ def _parse_reviews(tool_input: dict) -> dict[str, dict]:
     return reviews
 
 
-def debate_rank(ranked_jobs: list[dict], candidate_profile: str) -> list[dict]:
+def debate_rank(ranked_jobs: list[dict], candidate_profile: str, questionnaire: str = "") -> list[dict]:
     """Second-opinion critique of an already-ranked shortlist (the listwise top-N),
     using a different model than the primary ranker. Does not re-derive the ranking
     from scratch — only flags disagreements. Jobs flagged "dealbreaker_risk" are
@@ -88,12 +88,13 @@ def debate_rank(ranked_jobs: list[dict], candidate_profile: str) -> list[dict]:
         return ranked_jobs
 
     jobs_text = "\n\n---\n\n".join(_format_job_for_review(job, i) for i, job in enumerate(ranked_jobs))
+    questionnaire_text = f"{questionnaire}\n\n" if questionnaire else ""
 
     system = f"""You are a second, independent reviewer checking another model's job ranking for this candidate.
 
 {candidate_profile}
 
-The primary ranking below is already ordered best (rank #1) to worst. Your job is NOT to re-rank —
+{questionnaire_text}The primary ranking below is already ordered best (rank #1) to worst. Your job is NOT to re-rank —
 it's to catch cases the primary ranking may have gotten wrong, especially where strong stack/keyword
 similarity could mask a real dealbreaker (seniority mismatch, wrong company type, an explicit
 requirement the candidate can't meet, etc.).
