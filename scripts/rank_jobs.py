@@ -128,7 +128,7 @@ else:
     print(f"\nListwise ranking {len(listwise_pool)} job(s) with Claude Opus + extended thinking...")
     ranked = listwise_rank(listwise_pool, candidate_profile, preferences, questionnaire)
     print(f"\nDebate review of top-{len(ranked)} with a second model...")
-    ranked = debate_rank(ranked, candidate_profile, questionnaire)
+    ranked = debate_rank(ranked, candidate_profile, preferences, questionnaire)
     if exploration_ids:
         tag_exploration_picks(ranked, exploration_ids)
 

@@ -86,14 +86,27 @@ def _parse_reviews(tool_input: dict) -> dict[str, dict]:
     return reviews
 
 
-def debate_rank(ranked_jobs: list[dict], candidate_profile: str, questionnaire: str = "") -> list[dict]:
+def debate_rank(ranked_jobs: list[dict], candidate_profile: str, preferences: list[dict] | None = None, questionnaire: str = "") -> list[dict]:
     """Second-opinion critique of an already-ranked shortlist (the listwise top-N),
     using a different model than the primary ranker. Does not re-derive the ranking
     from scratch — only flags disagreements. Jobs flagged "dealbreaker_risk" are
     demoted to the bottom of the list; "overrated"/"underrated" get a modest
-    _RANK_NUDGE-position shift down/up instead of a full re-rank."""
+    _RANK_NUDGE-position shift down/up instead of a full re-rank.
+
+    preferences is the distilled learned-preference profile (same shape
+    listwise_rank already receives) — before this, the reviewer critiqued a
+    ranking that WAS built from learned preferences while having no visibility
+    into those preferences itself, auditing with less information than the
+    thing it was auditing had."""
     if not ranked_jobs:
         return ranked_jobs
+
+    from preference_agent.profile import render_signals
+    prefs_text = ""
+    if preferences:
+        scored = [s for s in preferences if s.get("type") != "NEUTRAL"]
+        if scored:
+            prefs_text = f"PREFERENCE PROFILE:\n{render_signals(scored)}\n\n"
 
     jobs_text = "\n\n---\n\n".join(_format_job_for_review(job, i) for i, job in enumerate(ranked_jobs))
     questionnaire_text = f"{questionnaire}\n\n" if questionnaire else ""
@@ -102,7 +115,7 @@ def debate_rank(ranked_jobs: list[dict], candidate_profile: str, questionnaire: 
 
 {candidate_profile}
 
-{questionnaire_text}The primary ranking below is already ordered best (rank #1) to worst. Your job is NOT to re-rank —
+{questionnaire_text}{prefs_text}The primary ranking below is already ordered best (rank #1) to worst. Your job is NOT to re-rank —
 it's to catch cases the primary ranking may have gotten wrong, especially where strong stack/keyword
 similarity could mask a real dealbreaker (seniority mismatch, wrong company type, an explicit
 requirement the candidate can't meet, etc.).

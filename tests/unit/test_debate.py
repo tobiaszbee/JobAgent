@@ -199,3 +199,37 @@ class TestDebateRank:
         debate_rank(jobs, "profile")
         system_prompt = mock_anthropic.return_value.messages.create.call_args.kwargs["system"]
         assert "CANDIDATE QUESTIONNAIRE" not in system_prompt
+
+    @patch("ranker.debate.anthropic.Anthropic")
+    def test_preference_profile_included_in_system_prompt_when_given(self, mock_anthropic):
+        # Regression: the reviewer used to critique a ranking that WAS built
+        # from the learned preference profile while having no visibility into
+        # that profile itself — auditing with less information than the thing
+        # it was auditing had.
+        jobs = [_job("j1", rank=1)]
+        preferences = [{"type": "ACCEPT", "dim": "company_type", "value": "product", "conf": "HIGH", "n_match": 3, "n_total": 3}]
+        mock_anthropic.return_value.messages.create.return_value = _debate_response([])
+        debate_rank(jobs, "profile", preferences)
+        system_prompt = mock_anthropic.return_value.messages.create.call_args.kwargs["system"]
+        assert "PREFERENCE PROFILE" in system_prompt
+        assert "ACCEPT[company_type=product" in system_prompt
+
+    @patch("ranker.debate.anthropic.Anthropic")
+    def test_no_preference_section_when_omitted(self, mock_anthropic):
+        jobs = [_job("j1", rank=1)]
+        mock_anthropic.return_value.messages.create.return_value = _debate_response([])
+        debate_rank(jobs, "profile")
+        system_prompt = mock_anthropic.return_value.messages.create.call_args.kwargs["system"]
+        assert "PREFERENCE PROFILE" not in system_prompt
+
+    @patch("ranker.debate.anthropic.Anthropic")
+    def test_neutral_only_preferences_omit_the_section(self, mock_anthropic):
+        # Mirrors listwise_rank's own filtering: NEUTRAL signals aren't
+        # actionable, so a profile containing only NEUTRAL entries shouldn't
+        # render an empty/useless PREFERENCE PROFILE section.
+        jobs = [_job("j1", rank=1)]
+        preferences = [{"type": "NEUTRAL", "dim": "compensation"}]
+        mock_anthropic.return_value.messages.create.return_value = _debate_response([])
+        debate_rank(jobs, "profile", preferences)
+        system_prompt = mock_anthropic.return_value.messages.create.call_args.kwargs["system"]
+        assert "PREFERENCE PROFILE" not in system_prompt
