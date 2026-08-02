@@ -1,4 +1,5 @@
 import logging
+import math
 import time
 
 from config import VOYAGE_EMBED_MODEL
@@ -78,6 +79,11 @@ def index_jobs(jobs: list[dict]) -> int:
     return indexed
 
 
+def _l2_normalize(vec: list[float]) -> list[float]:
+    norm = math.sqrt(sum(x * x for x in vec))
+    return [x / norm for x in vec] if norm > 0 else vec
+
+
 def build_ideal_vector(candidate_profile: str | None = None) -> list[float] | None:
     """
     Compute the 'ideal job' embedding vector:
@@ -102,13 +108,19 @@ def build_ideal_vector(candidate_profile: str | None = None) -> list[float] | No
         return vec
 
     dim = len(applied_vecs[0])
-    centroid_a = [sum(v[i] for v in applied_vecs) / len(applied_vecs) for i in range(dim)]
+    centroid_a = _l2_normalize([sum(v[i] for v in applied_vecs) / len(applied_vecs) for i in range(dim)])
 
     rejected_vecs = vectors["rejected"]
     if not rejected_vecs:
         return centroid_a
 
-    centroid_r = [sum(v[i] for v in rejected_vecs) / len(rejected_vecs) for i in range(dim)]
+    # Both centroids are unit-normalized before combining so the 0.3 weight has a
+    # stable, comparable meaning regardless of how tightly clustered each set is —
+    # an unnormalized centroid over a few very similar rejections has a much larger
+    # magnitude than one over diverse rejections (which partially cancel out), so
+    # "0.3×" of the raw centroid was actually a wildly inconsistent push depending
+    # on rejection variety, not a stable 30% signal.
+    centroid_r = _l2_normalize([sum(v[i] for v in rejected_vecs) / len(rejected_vecs) for i in range(dim)])
     return [centroid_a[i] - 0.3 * centroid_r[i] for i in range(dim)]
 
 
