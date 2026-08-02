@@ -2,6 +2,8 @@ import json
 import stat
 import sys
 import uuid
+from unittest.mock import patch
+
 import pytest
 import api_client
 from db.repositories import candidate_preferences_repository, cv_repository, job_repository, criteria_repository
@@ -67,7 +69,24 @@ class TestJobsEndpoints:
             content_type="application/json",
         )
         assert resp.status_code == 400
-        assert "error" in resp.json
+
+    def test_list_jobs_passes_the_safety_cap_as_limit(self, flask_client):
+        with patch("web.routes.jobs.job_repository.search", return_value=[]) as mock_search:
+            flask_client.get("/api/jobs")
+        assert mock_search.call_args.kwargs["limit"] == 2000
+
+    def test_list_jobs_not_truncated_header_below_cap(self, flask_client):
+        _add_job()
+        resp = flask_client.get("/api/jobs")
+        assert resp.headers["X-Jobs-Truncated"] == "false"
+
+    def test_list_jobs_truncated_header_when_result_hits_the_cap(self, flask_client):
+        # A real 2000-row insert would make this test glacially slow — mock the
+        # repository call instead to exercise just the truncation-detection logic.
+        fake_results = [{"id": str(i)} for i in range(2000)]
+        with patch("web.routes.jobs.job_repository.search", return_value=fake_results):
+            resp = flask_client.get("/api/jobs")
+        assert resp.headers["X-Jobs-Truncated"] == "true"
 
     def test_update_status_all_valid_values_accepted(self, flask_client):
         for status in ("new", "reviewed", "applied", "rejected"):

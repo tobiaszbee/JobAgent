@@ -5,6 +5,12 @@ from db.repositories import job_repository, cv_repository, dismissed_item_reposi
 # counts live in jobs_admin.bp instead — see that module.
 bp = Blueprint("jobs", __name__)
 
+# Safety net, not a normal-use limit — a status/search/source-filtered view under
+# regular triage is dozens to a few hundred jobs. This only engages during a real
+# pileup (e.g. the pool grows unattended for months), and the dashboard shows a
+# visible banner rather than silently dropping jobs off the end.
+_LIST_SAFETY_CAP = 2000
+
 
 @bp.get("/api/jobs")
 def list_jobs():
@@ -12,7 +18,12 @@ def list_jobs():
     min_score = request.args.get("min_score", type=float)
     query     = request.args.get("search", "").strip() or None
     source    = request.args.get("source", "").strip() or None
-    return jsonify(job_repository.search(status=status, min_score=min_score, query=query, source=source))
+    results = job_repository.search(
+        status=status, min_score=min_score, query=query, source=source, limit=_LIST_SAFETY_CAP,
+    )
+    resp = jsonify(results)
+    resp.headers["X-Jobs-Truncated"] = "true" if len(results) >= _LIST_SAFETY_CAP else "false"
+    return resp
 
 
 @bp.post("/api/jobs/<job_id>/status")

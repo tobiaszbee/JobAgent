@@ -287,6 +287,24 @@ class TestGetMissingDescriptions:
         assert row["source"] == "justjoin"
 
 
+class TestGetMissingStructuredData:
+    def test_returns_job_with_description_and_no_extraction(self):
+        job_id = _insert()  # has description in defaults
+        ids = [j["id"] for j in job_repository.get_missing_structured_data()]
+        assert job_id in ids
+
+    def test_excludes_already_extracted_job(self):
+        job_id = _insert()
+        job_repository.update_structured_data(job_id, {"remote": True})
+        ids = [j["id"] for j in job_repository.get_missing_structured_data()]
+        assert job_id not in ids
+
+    def test_excludes_job_without_description(self):
+        job_id = job_repository.insert("Dev", "Co", "PL", _unique_url("https://a.com/nd"), "linkedin")
+        ids = [j["id"] for j in job_repository.get_missing_structured_data()]
+        assert job_id not in ids
+
+
 class TestGetStats:
     def test_includes_last_run_key(self):
         stats = job_repository.get_stats()

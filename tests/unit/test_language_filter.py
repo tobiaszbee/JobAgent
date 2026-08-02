@@ -18,7 +18,7 @@ class TestNoConfiguredLanguages:
     @patch("collector.language_filter.candidate_preferences_repository.get_active", return_value=None)
     def test_no_active_preferences_skips_everything(self, mock_prefs, mock_jr):
         result = apply_language_filter()
-        assert result == {"checked": 0, "auto_rejected": 0}
+        assert result == {"checked": 0, "auto_rejected": 0, "rejected_ids": []}
         mock_jr.get_new.assert_not_called()
 
     @patch("collector.language_filter.job_repository")
@@ -26,7 +26,7 @@ class TestNoConfiguredLanguages:
     def test_empty_languages_list_skips_everything(self, mock_prefs, mock_jr):
         mock_prefs.return_value = _prefs([])
         result = apply_language_filter()
-        assert result == {"checked": 0, "auto_rejected": 0}
+        assert result == {"checked": 0, "auto_rejected": 0, "rejected_ids": []}
         mock_jr.get_new.assert_not_called()
 
     @patch("collector.language_filter.job_repository")
@@ -34,7 +34,7 @@ class TestNoConfiguredLanguages:
     def test_unrecognized_language_name_ignored(self, mock_prefs, mock_jr):
         mock_prefs.return_value = _prefs([{"language": "klingon", "level": "Native"}])
         result = apply_language_filter()
-        assert result == {"checked": 0, "auto_rejected": 0}
+        assert result == {"checked": 0, "auto_rejected": 0, "rejected_ids": []}
         mock_jr.get_new.assert_not_called()
 
 
@@ -48,7 +48,7 @@ class TestDetectionBehavior:
         mock_detect.return_value = [Language("en", 0.99)]
 
         result = apply_language_filter()
-        assert result == {"checked": 1, "auto_rejected": 0}
+        assert result == {"checked": 1, "auto_rejected": 0, "rejected_ids": []}
         mock_jr.update_score_and_status.assert_not_called()
 
     @patch("collector.language_filter.job_repository")
@@ -60,7 +60,7 @@ class TestDetectionBehavior:
         mock_detect.return_value = [Language("de", 0.95)]
 
         result = apply_language_filter()
-        assert result == {"checked": 1, "auto_rejected": 1}
+        assert result == {"checked": 1, "auto_rejected": 1, "rejected_ids": ["job1"]}
         mock_jr.update_score_and_status.assert_called_once()
         args = mock_jr.update_score_and_status.call_args[0]
         assert args[3] == "auto_rejected"
@@ -78,7 +78,7 @@ class TestDetectionBehavior:
         mock_detect.return_value = [Language("pl", 0.9)]
 
         result = apply_language_filter()
-        assert result == {"checked": 1, "auto_rejected": 0}
+        assert result == {"checked": 1, "auto_rejected": 0, "rejected_ids": []}
         mock_jr.update_score_and_status.assert_not_called()
 
     @patch("collector.language_filter.job_repository")
@@ -92,7 +92,7 @@ class TestDetectionBehavior:
         mock_detect.return_value = [Language("de", 0.55), Language("en", 0.4)]
 
         result = apply_language_filter()
-        assert result == {"checked": 1, "auto_rejected": 0}
+        assert result == {"checked": 1, "auto_rejected": 0, "rejected_ids": []}
         mock_jr.update_score_and_status.assert_not_called()
 
     @patch("collector.language_filter.job_repository")
@@ -105,7 +105,7 @@ class TestDetectionBehavior:
         mock_detect.side_effect = LangDetectException(1, "no features")
 
         result = apply_language_filter()
-        assert result == {"checked": 1, "auto_rejected": 0}
+        assert result == {"checked": 1, "auto_rejected": 0, "rejected_ids": []}
         mock_jr.update_score_and_status.assert_not_called()
 
     @patch("collector.language_filter.job_repository")
@@ -116,7 +116,7 @@ class TestDetectionBehavior:
         mock_jr.get_new.return_value = [_job(title="Dev", description="")]
 
         result = apply_language_filter()
-        assert result == {"checked": 1, "auto_rejected": 0}
+        assert result == {"checked": 1, "auto_rejected": 0, "rejected_ids": []}
         mock_detect.assert_not_called()
 
     @patch("collector.language_filter.job_repository")
@@ -130,7 +130,7 @@ class TestDetectionBehavior:
         mock_detect.side_effect = [[Language("en", 0.9)], [Language("pl", 0.9)]]
 
         result = apply_language_filter()
-        assert result == {"checked": 2, "auto_rejected": 1}
+        assert result == {"checked": 2, "auto_rejected": 1, "rejected_ids": ["bad"]}
         mock_jr.update_score_and_status.assert_called_once()
         call_args = mock_jr.update_score_and_status.call_args[0]
         assert call_args[0] == "bad"

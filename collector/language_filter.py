@@ -57,19 +57,25 @@ def _detected_codes(text: str) -> set[str]:
         return set()
 
 
-def apply_language_filter() -> dict:
+def apply_language_filter(jobs: list[dict] | None = None) -> dict:
     """Hard-reject jobs written in a language the candidate didn't select in the
     questionnaire. Deterministic, no LLM call — runs as early as possible, right
     after collection, before any paid filter/scoring step. Skips gracefully (never
     rejects) when the candidate hasn't configured any languages, the text is too
     short, or detection is inconclusive — absence of a clear signal is never
-    treated as a violation."""
+    treated as a violation.
+
+    `jobs` lets a caller that's also running apply_keyword_filter() share one
+    get_new() fetch instead of each independently pulling the full 'new' pool
+    (with descriptions) over HTTP. Defaults to fetching its own when omitted."""
     candidate_codes = _candidate_language_codes()
     if not candidate_codes:
-        return {"checked": 0, "auto_rejected": 0}
+        return {"checked": 0, "auto_rejected": 0, "rejected_ids": []}
 
-    jobs = job_repository.get_new()
+    if jobs is None:
+        jobs = job_repository.get_new()
     auto_rejected = 0
+    rejected_ids = []
 
     for job in jobs:
         text = f"{job['title']} {job.get('description') or ''}".strip()
@@ -86,6 +92,7 @@ def apply_language_filter() -> dict:
         )
         job_repository.update_score_and_status(job["id"], 0.0, reason, "auto_rejected")
         auto_rejected += 1
+        rejected_ids.append(job["id"])
         logger.info(f"  [language] {job['title']} @ {job['company']} — {reason}")
 
-    return {"checked": len(jobs), "auto_rejected": auto_rejected}
+    return {"checked": len(jobs), "auto_rejected": auto_rejected, "rejected_ids": rejected_ids}

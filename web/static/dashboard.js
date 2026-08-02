@@ -1,4 +1,5 @@
 let ALL_JOBS = [];
+let _jobsTruncated = false;
 let currentStatus = 'new';
 let agentSocket = null;
 
@@ -359,6 +360,7 @@ async function loadJobs() {
   try {
     const r = await fetch('/api/jobs?' + params);
     ALL_JOBS = await r.json();
+    _jobsTruncated = r.headers.get('X-Jobs-Truncated') === 'true';
   } catch {
     showToast('Failed to load jobs — is the server running?');
     return;
@@ -564,6 +566,14 @@ function render() {
   if (_badgeFilters.size) _lazyJobs = _lazyJobs.filter(_matchesBadgeFilters);
   _updateFilterBar();
   _updateFilterBadges();
+
+  const banner = document.getElementById('truncated-banner');
+  if (_jobsTruncated) {
+    banner.style.display = '';
+    banner.textContent = `Showing the most recent ${ALL_JOBS.length.toLocaleString()} jobs for this view — narrow with a search, status, or source filter to see the rest.`;
+  } else {
+    banner.style.display = 'none';
+  }
 
   document.getElementById('count').textContent = `${_lazyJobs.length} job${_lazyJobs.length !== 1 ? 's' : ''}`;
   _renderedCount = 0;

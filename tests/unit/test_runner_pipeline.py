@@ -44,25 +44,26 @@ def _last_finished(dt: datetime | None) -> str | None:
 
 
 class TestDaysSinceLastRun:
-    # get_last_finished_at()'s own query semantics (most-recent "done", ignoring
-    # "cancelled") are covered in JobAgentWeb's test_sessions.py, not re-derived here.
+    # get_last_collected_at()'s own query semantics (most-recent collected_at,
+    # ignoring sessions that finished without ever collecting) are covered in
+    # JobAgentWeb's test_sessions.py, not re-derived here.
     def test_no_prior_run_falls_back_to_default(self):
-        with patch("web.routes.runner.session_repository.get_last_finished_at", return_value=None):
+        with patch("web.routes.runner.session_repository.get_last_collected_at", return_value=None):
             assert _days_since_last_run() == 7
 
     def test_ten_hours_ago_rounds_up_to_one_day(self):
         finished = _last_finished(datetime.utcnow() - timedelta(hours=10))
-        with patch("web.routes.runner.session_repository.get_last_finished_at", return_value=finished):
+        with patch("web.routes.runner.session_repository.get_last_collected_at", return_value=finished):
             assert _days_since_last_run() == 1
 
     def test_just_under_one_day_ago_stays_one_day(self):
         finished = _last_finished(datetime.utcnow() - timedelta(hours=23, minutes=50))
-        with patch("web.routes.runner.session_repository.get_last_finished_at", return_value=finished):
+        with patch("web.routes.runner.session_repository.get_last_collected_at", return_value=finished):
             assert _days_since_last_run() == 1
 
     def test_fifty_hours_ago_rounds_up_to_three_days(self):
         finished = _last_finished(datetime.utcnow() - timedelta(hours=50))
-        with patch("web.routes.runner.session_repository.get_last_finished_at", return_value=finished):
+        with patch("web.routes.runner.session_repository.get_last_collected_at", return_value=finished):
             assert _days_since_last_run() == 3
 
 
@@ -181,3 +182,29 @@ class TestSessionSpansWholeHandler:
 
         assert len(calls) == 1  # only the collector ran, every post-collect stage skipped
         assert session_repository.get_latest()["status"] == "done"  # a handled failure, not an exception
+
+    def test_agent_ws_marks_collected_when_collector_succeeds(self):
+        mock_ws = MagicMock()
+        mock_ws.receive.return_value = json.dumps({"days": 1})
+
+        with patch("web.routes.runner._run_script", return_value=0):
+            runner_module._agent_run(mock_ws)
+
+        assert session_repository.get_last_collected_at() is not None
+
+    def test_agent_ws_does_not_mark_collected_when_collector_fails(self):
+        mock_ws = MagicMock()
+        mock_ws.receive.return_value = json.dumps({"days": 1})
+
+        with patch("web.routes.runner._run_script", return_value=1):
+            runner_module._agent_run(mock_ws)
+
+        assert session_repository.get_last_collected_at() is None
+
+    def test_rank_ws_never_marks_collected(self):
+        # Regression guard for H3: none of the other 4 handlers ever run a
+        # COLLECTOR stage, so none of them should ever advance last-collected.
+        with patch("web.routes.runner._run_script", return_value=0):
+            runner_module._rank_run(MagicMock())
+
+        assert session_repository.get_last_collected_at() is None

@@ -32,6 +32,10 @@ def get_missing_descriptions() -> list[dict]:
     return api_client.get("/api/jobs/missing-descriptions").json()
 
 
+def get_missing_structured_data() -> list[dict]:
+    return api_client.get("/api/jobs/missing-structured-data").json()
+
+
 def update_description(job_id: str, description: str) -> None:
     api_client.patch(f"/api/jobs/{job_id}/description", json={"description": description})
 

@@ -23,19 +23,25 @@ def title_banned_reason(title: str, rejected_kw: list[str]) -> str | None:
     return None
 
 
-def apply_keyword_filter() -> dict:
+def apply_keyword_filter(jobs: list[dict] | None = None) -> dict:
     """Hard-reject jobs based on two checks (in order):
     1. Banned keywords (rejected): any match in title+description → reject.
     2. Required keywords: none present anywhere in title+description → reject.
-    """
+
+    `jobs` lets a caller that's also running apply_language_filter() share one
+    get_new() fetch instead of each independently pulling the full 'new' pool
+    (with descriptions) over HTTP. Defaults to fetching its own when omitted,
+    so standalone callers (scripts/reevaluate_rejected.py) are unaffected."""
     rejected_kw = [r.lower() for r in criteria_repository.get_active("rejected")]
     required_kw = [r.lower() for r in criteria_repository.get_active("required")]
 
     if not rejected_kw and not required_kw:
-        return {"checked": 0, "auto_rejected": 0}
+        return {"checked": 0, "auto_rejected": 0, "rejected_ids": []}
 
-    jobs = job_repository.get_new()
+    if jobs is None:
+        jobs = job_repository.get_new()
     auto_rejected = 0
+    rejected_ids = []
 
     for job in jobs:
         text = f"{job['title']} {job.get('description') or ''}".lower()
@@ -52,6 +58,7 @@ def apply_keyword_filter() -> dict:
         if reason:
             job_repository.update_score_and_status(job["id"], 0.0, reason, "auto_rejected")
             auto_rejected += 1
+            rejected_ids.append(job["id"])
             logger.info(f"  [E2] {job['title']} @ {job['company']} — {reason}")
 
-    return {"checked": len(jobs), "auto_rejected": auto_rejected}
+    return {"checked": len(jobs), "auto_rejected": auto_rejected, "rejected_ids": rejected_ids}

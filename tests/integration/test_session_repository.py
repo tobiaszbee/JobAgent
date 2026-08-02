@@ -96,9 +96,37 @@ class TestGetLatest:
         assert "started_at" in latest
 
 
-class TestDaysSinceLastRunAgainstRealApi:
-    # Regression guard: JobAgentWeb serializes finished_at as ISO, not SQLite's old space-separated format.
-    def test_freshly_finished_session_reports_one_day(self):
+class TestMarkCollected:
+    def test_last_collected_is_none_until_marked(self):
         sid = session_repository.start()
+        session_repository.finish(sid, jobs_found=0, jobs_scored=0)
+        assert session_repository.get_last_collected_at() is None
+
+    def test_mark_collected_sets_last_collected(self):
+        sid = session_repository.start()
+        session_repository.mark_collected(sid)
+        assert session_repository.get_last_collected_at() is not None
+
+    def test_finish_alone_does_not_count_as_collected(self):
+        # Regression: a ranking/rescoring/re-evaluating session finishes 'done'
+        # exactly like a real collection does — only an explicit mark_collected()
+        # call (from the collector stage itself) should move this forward.
+        sid = session_repository.start()
+        session_repository.finish(sid, jobs_found=5, jobs_scored=5, status="done")
+        assert session_repository.get_last_collected_at() is None
+
+
+class TestDaysSinceLastRunAgainstRealApi:
+    # Regression guard: JobAgentWeb serializes collected_at as ISO, not SQLite's old space-separated format.
+    def test_freshly_collected_session_reports_one_day(self):
+        sid = session_repository.start()
+        session_repository.mark_collected(sid)
         session_repository.finish(sid, jobs_found=1, jobs_scored=1)
         assert _days_since_last_run() == 1
+
+    def test_a_finished_but_never_collected_session_does_not_count(self):
+        # Regression guard for the H3 bug: clicking "AI Ranking" (or any other
+        # non-collector action) must not narrow tomorrow's collection window.
+        sid = session_repository.start()
+        session_repository.finish(sid, jobs_found=0, jobs_scored=0)
+        assert _days_since_last_run() == 7  # falls back to the no-prior-run default

@@ -44,13 +44,17 @@ _SESSION_ID_PLACEHOLDER = "__SESSION_ID__"
 def _days_since_last_run() -> int:
     """Collector sources filter by whole days, not exact timestamps — so "since last
     run" is approximated as the number of days back that comfortably covers the time
-    since the last successful run, rounded up. Slight overlap is harmless (the
-    collector already dedupes by URL); under-covering would silently miss postings."""
-    last_finished = session_repository.get_last_finished_at()
-    if not last_finished:
+    since the last successful *collection*, rounded up. Slight overlap is harmless
+    (the collector already dedupes by URL); under-covering would silently miss
+    postings. Deliberately reads last-collected, not last-finished — every pipeline
+    session finishes 'done' regardless of run type (ranking, rescoring, etc never
+    collect), so last-finished would silently narrow this window on any day where
+    something other than an actual collection ran first."""
+    last_collected = session_repository.get_last_collected_at()
+    if not last_collected:
         return _DEFAULT_DAYS_NO_PRIOR_RUN
     try:
-        last_dt = datetime.fromisoformat(last_finished)
+        last_dt = datetime.fromisoformat(last_collected)
     except ValueError:
         return _DEFAULT_DAYS_NO_PRIOR_RUN
     hours_elapsed = (datetime.utcnow() - last_dt).total_seconds() / 3600
@@ -267,6 +271,8 @@ def _run_pipeline_ws(ws, run_label: str, build_stages) -> None:
                     log_file.write(header)
                     _safe_send(ws, header)
                     exit_code = _run_script(ws, script_path, args, log_file=log_file)
+                    if exit_code == 0 and label.startswith("COLLECTOR"):
+                        session_repository.mark_collected(session_id)
                     if stop_if_fails and exit_code != 0:
                         msg = f"\n{label} failed (exit code {exit_code}). Skipping remaining stages.\n"
                         log_file.write(msg)

@@ -11,9 +11,8 @@ from extractor.runner import run_extraction
 logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stdout)
 logger = logging.getLogger(__name__)
 
-jobs = job_repository.search(status="all")
-pending = [j for j in jobs if j.get("description") and not j.get("structured_data")]
-logger.info(f"Jobs to extract: {len(pending)} / {len(jobs)}")
+pending = job_repository.get_missing_structured_data()
+logger.info(f"Jobs to extract: {len(pending)}")
 
 if not pending:
     logger.info("Nothing to do.")

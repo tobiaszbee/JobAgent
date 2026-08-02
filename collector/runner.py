@@ -332,21 +332,33 @@ def run(
             time.sleep(cooldown)
             _fetch_descriptions_in_batches(jobs_pending_description)
 
+        # Fetched once and shared — both filters used to independently pull the
+        # entire 'new' pool (full descriptions included) over HTTP every run.
+        new_jobs = job_repository.get_new()
+
         logger.info("\n=== LANGUAGE FILTER ===")
-        lang_result = apply_language_filter()
+        lang_result = apply_language_filter(new_jobs)
         if lang_result["checked"]:
             logger.info(f"Checked {lang_result['checked']} job(s), auto-rejected {lang_result['auto_rejected']}")
         else:
             logger.info("No languages configured — all jobs passed through")
 
+        # Excludes whatever the language filter just rejected — otherwise the
+        # keyword filter would re-check jobs against a stale in-memory snapshot
+        # that still shows them as 'new', possibly overwriting a language-based
+        # rejection reason with an unrelated keyword-based one.
+        already_rejected = set(lang_result["rejected_ids"])
+        remaining_jobs = [j for j in new_jobs if j["id"] not in already_rejected]
+
         logger.info("\n=== KEYWORD FILTER ===")
-        filter_result = apply_keyword_filter()
+        filter_result = apply_keyword_filter(remaining_jobs)
         if filter_result["checked"]:
             logger.info(f"Checked {filter_result['checked']} job(s), auto-rejected {filter_result['auto_rejected']}")
         else:
             logger.info("No criteria configured — all jobs passed through")
 
         if owns_session:
+            session_repository.mark_collected(session_id)
             session_repository.finish(session_id, jobs_found=jobs_found, jobs_scored=0)
 
         logger.info("\n" + "=" * 50)

@@ -20,7 +20,7 @@ class TestRunE2Filter:
     def test_no_criteria_returns_early(self):
         _insert_job()
         result = apply_keyword_filter()
-        assert result == {"checked": 0, "auto_rejected": 0}
+        assert result == {"checked": 0, "auto_rejected": 0, "rejected_ids": []}
 
     def test_only_rejected_criteria_no_match_passes(self):
         criteria_repository.insert("rejected", "junior")
@@ -119,6 +119,17 @@ class TestRunE2Filter:
         job_repository.update_score_and_status(job_id, 0.0, "LinkedIn unavailable", "auto_rejected")
         result = apply_keyword_filter()
         assert result["checked"] == 0
+
+    def test_uses_the_given_jobs_list_instead_of_fetching_its_own(self):
+        # Regression guard: collector/runner.py shares one get_new() fetch between
+        # the language and keyword filters instead of each independently pulling
+        # the full 'new' pool — confirms an explicit list is actually honored.
+        criteria_repository.insert("rejected", "junior")
+        job_id = _insert_job(title="Senior PHP Developer", description="Backend role")
+        explicit_jobs = [{"id": job_id, "title": "Junior PHP Developer", "company": "Acme", "description": "Backend role"}]
+        result = apply_keyword_filter(explicit_jobs)
+        assert result["checked"] == 1
+        assert result["rejected_ids"] == [job_id]
 
 
 class TestTitleBannedReason:

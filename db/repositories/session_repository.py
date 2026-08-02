@@ -24,5 +24,13 @@ def get_last_finished_at() -> str | None:
     return api_client.get("/api/sessions/last-finished").json()["finished_at"]
 
 
+def mark_collected(session_id: int) -> None:
+    api_client.post(f"/api/sessions/{session_id}/mark-collected")
+
+
+def get_last_collected_at() -> str | None:
+    return api_client.get("/api/sessions/last-collected").json()["collected_at"]
+
+
 def get_latest() -> dict | None:
     return api_client.get("/api/sessions/latest").json()["session"]

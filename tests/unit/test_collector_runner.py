@@ -238,9 +238,10 @@ def _mock_run_deps(mock_criteria, mock_jobs, mock_collect, mock_lang, mock_kw):
         "titles": ["PHP"], "locations": ["Poland"], "search_queries": [], "rejected": [],
     }
     mock_jobs.get_all_urls.return_value = set()
+    mock_jobs.get_new.return_value = []
     mock_collect.return_value = (0, 0, [])
-    mock_lang.return_value = {"checked": 0, "auto_rejected": 0}
-    mock_kw.return_value = {"checked": 0, "auto_rejected": 0}
+    mock_lang.return_value = {"checked": 0, "auto_rejected": 0, "rejected_ids": []}
+    mock_kw.return_value = {"checked": 0, "auto_rejected": 0, "rejected_ids": []}
 
 
 class TestRunSessionOwnership:
@@ -264,6 +265,7 @@ class TestRunSessionOwnership:
         collector_run(days_back=1)
 
         mock_session.start.assert_called_once()
+        mock_session.mark_collected.assert_called_once_with(99)
         mock_session.finish.assert_called_once_with(99, jobs_found=0, jobs_scored=0)
 
     @patch("collector.runner.apply_keyword_filter")
@@ -281,6 +283,9 @@ class TestRunSessionOwnership:
 
         mock_session.start.assert_not_called()
         mock_session.finish.assert_not_called()
+        # Reusing a session means the caller owns its whole lifecycle, including
+        # marking it collected — that's _run_pipeline_ws's job in this case, not ours.
+        mock_session.mark_collected.assert_not_called()
         assert mock_collect.call_args.args[-1] == 42
 
     @patch("collector.runner.apply_keyword_filter")
@@ -300,3 +305,47 @@ class TestRunSessionOwnership:
 
         mock_session.start.assert_not_called()
         mock_session.finish.assert_not_called()
+
+
+class TestFilterFetchSharing:
+    """Regression coverage: apply_language_filter() and apply_keyword_filter()
+    used to each independently call job_repository.get_new() — a full 'new'
+    pool fetch with descriptions, twice per collector run. run() now fetches
+    once and shares the list."""
+
+    @patch("collector.runner.apply_keyword_filter")
+    @patch("collector.runner.apply_language_filter")
+    @patch("collector.runner._collect_job_cards")
+    @patch("collector.runner.job_repository")
+    @patch("collector.runner.session_repository")
+    @patch("collector.runner.criteria_repository")
+    def test_get_new_is_fetched_only_once(
+        self, mock_criteria, mock_session, mock_jobs, mock_collect, mock_lang, mock_kw,
+    ):
+        _mock_run_deps(mock_criteria, mock_jobs, mock_collect, mock_lang, mock_kw)
+
+        collector_run(days_back=1)
+
+        mock_jobs.get_new.assert_called_once()
+
+    @patch("collector.runner.apply_keyword_filter")
+    @patch("collector.runner.apply_language_filter")
+    @patch("collector.runner._collect_job_cards")
+    @patch("collector.runner.job_repository")
+    @patch("collector.runner.session_repository")
+    @patch("collector.runner.criteria_repository")
+    def test_keyword_filter_never_sees_a_job_the_language_filter_already_rejected(
+        self, mock_criteria, mock_session, mock_jobs, mock_collect, mock_lang, mock_kw,
+    ):
+        # Otherwise the keyword filter would re-check a job against a stale
+        # in-memory snapshot that still shows it as 'new', possibly overwriting
+        # a language-based rejection reason with an unrelated keyword-based one.
+        _mock_run_deps(mock_criteria, mock_jobs, mock_collect, mock_lang, mock_kw)
+        good, bad = {"id": "good"}, {"id": "bad"}
+        mock_jobs.get_new.return_value = [good, bad]
+        mock_lang.return_value = {"checked": 2, "auto_rejected": 1, "rejected_ids": ["bad"]}
+
+        collector_run(days_back=1)
+
+        passed_to_keyword_filter = mock_kw.call_args.args[0]
+        assert passed_to_keyword_filter == [good]
