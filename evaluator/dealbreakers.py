@@ -37,6 +37,20 @@ def _annualize(amount: int, period: str | None) -> int | None:
     return None
 
 
+# Static, approximate mid-rates to PLN — not live-fetched. A dealbreaker filter
+# only needs to be directionally right ("is this roughly in range"), not payroll-
+# accurate; update these occasionally rather than wiring in a live FX API for a
+# threshold check. Previously a currency mismatch just skipped the check
+# entirely rather than applying it conservatively, silently letting e.g. every
+# EUR/USD posting bypass a PLN salary floor regardless of actual pay.
+_TO_PLN_RATE = {"PLN": 1.0, "EUR": 4.3, "USD": 4.0, "GBP": 5.0}
+
+
+def _to_pln(amount: int, currency: str | None) -> int | None:
+    rate = _TO_PLN_RATE.get(currency)
+    return round(amount * rate) if rate is not None else None
+
+
 def _salary_floor_reason(job_structured: dict, salary_min: int | None, salary_currency: str | None) -> str | None:
     if not salary_min:
         return None
@@ -44,16 +58,23 @@ def _salary_floor_reason(job_structured: dict, salary_min: int | None, salary_cu
     job_currency = job_structured.get("salary_currency")
     if not job_max or not job_currency or not salary_currency:
         return None
-    if job_currency != salary_currency:
-        return None  # no FX conversion in this pass — skip rather than guess
     annual_job_max = _annualize(job_max, job_structured.get("salary_period"))
     if annual_job_max is None:
         return None  # unknown pay period — never guess a basis, skip rather than false-reject
-    if annual_job_max < salary_min:
+
+    # Always compare in PLN, even when both currencies already match (rate=1.0,
+    # a no-op) — one path instead of a same-currency/converted branch split.
+    job_max_pln = _to_pln(annual_job_max, job_currency)
+    candidate_min_pln = _to_pln(salary_min, salary_currency)
+    if job_max_pln is None or candidate_min_pln is None:
+        return None  # unsupported currency — skip rather than guess
+
+    if job_max_pln < candidate_min_pln:
         period = job_structured.get("salary_period")
+        conversion_note = "" if job_currency == "PLN" else f" (~{job_max_pln} PLN)"
         return (
             f"Dealbreaker: salary_max {job_max} {job_currency}/{period} "
-            f"(~{annual_job_max} {job_currency}/year) below your minimum {salary_min} {salary_currency}/year"
+            f"(~{annual_job_max} {job_currency}/year{conversion_note}) below your minimum {salary_min} {salary_currency}/year"
         )
     return None
 
@@ -109,6 +130,23 @@ def _geo_reason(job_structured: dict, work_mode: list[str], remote_countries: li
     )
 
 
+def _seniority_reason(job_structured: dict, seniority_levels: list[str]) -> str | None:
+    """Candidate-side and job-side seniority data both already existed (questionnaire's
+    seniority_levels, extraction's seniority) with nothing enforcing a hard mismatch —
+    a near-free addition compared to the geo/currency checks above."""
+    if not seniority_levels:
+        return None  # candidate didn't restrict — nothing to check
+    job_seniority = job_structured.get("seniority")
+    if not job_seniority:
+        return None  # unknown — never treat absence as a violation
+    if job_seniority in seniority_levels:
+        return None
+    return (
+        f"Dealbreaker: seniority level '{job_seniority}' not in your selected levels "
+        f"({', '.join(seniority_levels)})"
+    )
+
+
 def apply_dealbreaker_filter(jobs: list[dict]) -> tuple[list[dict], dict]:
     """Deterministic, pre-LLM hard filter. Runs on a list of not-yet-scored jobs
     (typically evaluator/runner.py's unscored_jobs) and auto-rejects any that violate
@@ -122,8 +160,9 @@ def apply_dealbreaker_filter(jobs: list[dict]) -> tuple[list[dict], dict]:
     salary_currency = prefs.get("salary_currency")
     work_mode = prefs.get("work_mode") or []
     remote_countries = prefs.get("remote_countries") or []
+    seniority_levels = prefs.get("seniority_levels") or []
 
-    if not salary_min and "remote" not in work_mode:
+    if not salary_min and "remote" not in work_mode and not seniority_levels:
         return jobs, {"checked": len(jobs), "auto_rejected": 0}
 
     surviving = []
@@ -136,6 +175,8 @@ def apply_dealbreaker_filter(jobs: list[dict]) -> tuple[list[dict], dict]:
             reason = _remote_only_reason(structured, work_mode)
         if not reason:
             reason = _geo_reason(structured, work_mode, remote_countries)
+        if not reason:
+            reason = _seniority_reason(structured, seniority_levels)
 
         if reason:
             job_repository.update_score_and_status(job["id"], 0.0, reason, "auto_rejected")

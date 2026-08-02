@@ -14,7 +14,10 @@ def _job(job_id="job1", structured=None, **overrides):
 
 
 def _prefs(**overrides):
-    base = {"salary_min": None, "salary_currency": None, "work_mode": [], "remote_countries": []}
+    base = {
+        "salary_min": None, "salary_currency": None, "work_mode": [],
+        "remote_countries": [], "seniority_levels": [],
+    }
     base.update(overrides)
     return base
 
@@ -126,9 +129,47 @@ class TestSalaryFloor:
 
     @patch("evaluator.dealbreakers.job_repository.update_score_and_status")
     @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
-    def test_skips_on_currency_mismatch(self, mock_prefs, mock_update):
+    def test_currency_mismatch_now_converted_and_compared(self, mock_prefs, mock_update):
+        # Regression: a currency mismatch used to skip the check entirely
+        # rather than convert. 3000 EUR/month * 12 * 4.3 ~= 154,800 PLN/year,
+        # comfortably above a 15,000 PLN/year floor — passes, but now because
+        # it was genuinely compared, not because the check was bypassed.
         mock_prefs.return_value = _prefs(salary_min=15000, salary_currency="PLN")
         job = _job(structured={"salary_max": 3000, "salary_currency": "EUR", "salary_period": "monthly"})
+        surviving, stats = apply_dealbreaker_filter([job])
+        assert surviving == [job]
+        mock_update.assert_not_called()
+
+    @patch("evaluator.dealbreakers.job_repository.update_score_and_status")
+    @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
+    def test_low_foreign_currency_salary_now_rejected_after_conversion(self, mock_prefs, mock_update):
+        # Regression for the audit's exact finding: before this fix, this job
+        # would have silently skipped the floor check entirely (currency
+        # mismatch) instead of being conservatively converted and compared.
+        # 500 EUR/month * 12 * 4.3 ~= 25,800 PLN/year — below a 150,000 floor.
+        mock_prefs.return_value = _prefs(salary_min=150000, salary_currency="PLN")
+        job = _job(structured={"salary_max": 500, "salary_currency": "EUR", "salary_period": "monthly"})
+        surviving, stats = apply_dealbreaker_filter([job])
+        assert surviving == []
+        assert stats["auto_rejected"] == 1
+        assert "PLN" in mock_update.call_args[0][2]
+
+    @patch("evaluator.dealbreakers.job_repository.update_score_and_status")
+    @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
+    def test_candidate_salary_in_foreign_currency_also_converted(self, mock_prefs, mock_update):
+        # Candidate's own floor is in EUR, job pay is in PLN — both sides must
+        # convert, not just the job side.
+        mock_prefs.return_value = _prefs(salary_min=30000, salary_currency="EUR")  # ~129,000 PLN/year
+        job = _job(structured={"salary_max": 100000, "salary_currency": "PLN", "salary_period": "yearly"})
+        surviving, stats = apply_dealbreaker_filter([job])
+        assert surviving == []
+        assert stats["auto_rejected"] == 1
+
+    @patch("evaluator.dealbreakers.job_repository.update_score_and_status")
+    @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
+    def test_unsupported_currency_skips_rather_than_guesses(self, mock_prefs, mock_update):
+        mock_prefs.return_value = _prefs(salary_min=150000, salary_currency="PLN")
+        job = _job(structured={"salary_max": 100, "salary_currency": "JPY", "salary_period": "hourly"})
         surviving, stats = apply_dealbreaker_filter([job])
         assert surviving == [job]
         mock_update.assert_not_called()
@@ -319,6 +360,56 @@ class TestGeoRestriction:
         # specific remote posting's geo restriction excludes them.
         mock_prefs.return_value = _prefs(work_mode=["remote", "hybrid"], remote_countries=["Poland"])
         job = _job(structured={"remote": True, "remote_regions": ["United States"]})
+        surviving, stats = apply_dealbreaker_filter([job])
+        assert surviving == []
+        assert stats["auto_rejected"] == 1
+
+
+class TestSeniorityMismatch:
+    @patch("evaluator.dealbreakers.job_repository.update_score_and_status")
+    @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
+    def test_rejects_job_outside_selected_levels(self, mock_prefs, mock_update):
+        mock_prefs.return_value = _prefs(seniority_levels=["senior", "lead"])
+        job = _job(structured={"seniority": "junior"})
+        surviving, stats = apply_dealbreaker_filter([job])
+        assert surviving == []
+        assert stats["auto_rejected"] == 1
+        assert "junior" in mock_update.call_args[0][2]
+
+    @patch("evaluator.dealbreakers.job_repository.update_score_and_status")
+    @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
+    def test_passes_job_within_selected_levels(self, mock_prefs, mock_update):
+        mock_prefs.return_value = _prefs(seniority_levels=["senior", "lead"])
+        job = _job(structured={"seniority": "senior"})
+        surviving, stats = apply_dealbreaker_filter([job])
+        assert surviving == [job]
+        mock_update.assert_not_called()
+
+    @patch("evaluator.dealbreakers.job_repository.update_score_and_status")
+    @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
+    def test_unknown_job_seniority_never_rejects(self, mock_prefs, mock_update):
+        mock_prefs.return_value = _prefs(seniority_levels=["senior"])
+        job = _job(structured={"seniority": None})
+        surviving, stats = apply_dealbreaker_filter([job])
+        assert surviving == [job]
+        mock_update.assert_not_called()
+
+    @patch("evaluator.dealbreakers.job_repository.update_score_and_status")
+    @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
+    def test_no_candidate_seniority_preference_never_filters(self, mock_prefs, mock_update):
+        mock_prefs.return_value = _prefs(seniority_levels=[])
+        job = _job(structured={"seniority": "junior"})
+        surviving, stats = apply_dealbreaker_filter([job])
+        assert surviving == [job]
+        mock_update.assert_not_called()
+
+    @patch("evaluator.dealbreakers.job_repository.update_score_and_status")
+    @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
+    def test_seniority_check_runs_even_with_no_salary_or_work_mode_preference(self, mock_prefs, mock_update):
+        # Regression: the early-exit skip must also consider seniority_levels
+        # on its own, not just salary_min/work_mode.
+        mock_prefs.return_value = _prefs(seniority_levels=["lead"])
+        job = _job(structured={"seniority": "junior"})
         surviving, stats = apply_dealbreaker_filter([job])
         assert surviving == []
         assert stats["auto_rejected"] == 1
