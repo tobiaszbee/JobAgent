@@ -35,6 +35,13 @@ RANKING = {
 WOULD_APPLY = {
     # Phase 1 of auto-apply: flag-and-validate only, not a live auto-apply threshold yet.
     "score_floor": 7.0,
+    # A job's score alone used to be the whole gate — a job scoring just above the
+    # floor but ranked deep in the listwise pool (weaker on the holistic judgment
+    # Opus/debate apply — stack fit, growth potential, company quality, and any
+    # overrated/underrated nudge) is a weaker candidate than the score suggests on
+    # its own. top_n_listwise itself is the outer bound (every ranked job already
+    # has rank <= top_n_listwise); this is a tighter inner bound on top of that.
+    "rank_ceiling": 10,
 }
 
 # Pricing — verified live against docs.anthropic.com / docs.voyageai.com, July 2026.

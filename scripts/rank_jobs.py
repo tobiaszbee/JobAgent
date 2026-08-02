@@ -22,7 +22,7 @@ from ranker.reranker import rerank_jobs
 from ranker.listwise import listwise_rank
 from ranker.debate import debate_rank
 from ranker.rank_cache import reuse_if_unchanged
-from ranker.would_apply import compute_would_apply
+from ranker.would_apply import compute_revocations, compute_would_apply
 from evaluator.profile import load_active_profile, load_questionnaire_preferences, build_hyde_query
 from config import RANKING
 
@@ -120,13 +120,31 @@ else:
 would_apply_items = []
 would_apply_count = 0
 for job in ranked:
-    flagged, reason = compute_would_apply(job.get("score"), job.get("debate_flag"))
+    flagged, reason = compute_would_apply(job.get("score"), job.get("debate_flag"), job.get("listwise_rank"))
     would_apply_count += flagged
     would_apply_items.append({"job_id": job["id"], "would_apply": flagged, "reason": reason})
 if would_apply_items:
     job_repository.update_would_apply_batch(would_apply_items)
 if would_apply_count:
     print(f"\nWould-apply: flagged {would_apply_count}/{len(ranked)} job(s) for validation")
+
+# Revoke would_apply for jobs that dropped out of this run's would-apply set (e.g.
+# fell out of the top-N, or a rescore/new debate flag disqualified them) — this used
+# to only ever ADD flags, so once True a job stayed flagged forever even after it
+# no longer qualified. Guarded on `ranked` being non-empty: an empty ranked list
+# happens when ranker/rank_cache.py's reuse_if_unchanged finds zero jobs eligible
+# for listwise ranking at all this run (e.g. every job filtered out by min_score) —
+# that's a "nothing was actually re-evaluated" state, not "every previously-flagged
+# job genuinely stopped qualifying", so a mass revocation there would be acting on
+# an absence of evidence rather than a real result. Scoped to `jobs` (the pool
+# already fetched this run, would_apply column included) — a job outside that pool
+# (changed status, or aged out past RANKING_POOL_LIMIT) is left untouched.
+if ranked:
+    still_flagged_ids = {item["job_id"] for item in would_apply_items if item["would_apply"]}
+    revocations = compute_revocations(jobs, still_flagged_ids)
+    if revocations:
+        job_repository.update_would_apply_batch(revocations)
+        print(f"\nWould-apply: revoked {len(revocations)} job(s) no longer in this run's would-apply set")
 
 # Step 5: Save ranking results — one batched request for the whole pool (ranked
 # jobs plus everything outside the listwise pool) instead of one PATCH per job.
