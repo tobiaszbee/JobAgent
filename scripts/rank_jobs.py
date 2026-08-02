@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 import api_client
 from db.repositories import job_repository, preference_repository
 from embeddings.indexer import build_ideal_vector, score_by_similarity, index_jobs
+from ranker.fusion import fuse_by_rrf
 from ranker.reranker import rerank_jobs
 from ranker.listwise import listwise_rank
 from ranker.debate import debate_rank
@@ -83,7 +84,13 @@ excluded_low_score = len(jobs_by_sim) - len(ranking_eligible)
 if excluded_low_score:
     print(f"\nExcluding {excluded_low_score} job(s) with score <= {min_score} from the rerank/listwise pool")
 
-rerank_pool = ranking_eligible[:RANKING["top_n_rerank"]]
+# RRF instead of pure embedding-rank truncation: a job the LLM scorer rated
+# highly (e.g. 9/10) but with only average cosine similarity used to never
+# surface here — the min_score exclusion above was the ONLY place the
+# scorer's score ever affected this pool; ordering into the top-N was 100%
+# cosine similarity until now.
+fused = fuse_by_rrf(ranking_eligible)
+rerank_pool = fused[:RANKING["top_n_rerank"]]
 if len(rerank_pool) > 1:
     print(f"\nReranking top-{len(rerank_pool)} with Voyage cross-encoder...")
     rerank_pool = rerank_jobs(rerank_pool, retrieval_query, top_k=RANKING["top_n_listwise"])
