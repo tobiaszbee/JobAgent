@@ -145,6 +145,7 @@ def listwise_rank(jobs: list[dict], candidate_profile: str, preferences: list[di
 
 {questionnaire_text}{prefs_text}Your task: rank ALL {len(jobs)} jobs from best (rank 1) to worst fit. Consider:
 - Overall match with candidate profile and experience
+- Each job's "Scorer's rating" (if shown) is a per-job first pass made WITHOUT seeing the other jobs in this batch — treat it as one data point to weigh against everything else below, not a target ordering to reproduce. Your job is the comparative judgment the scorer couldn't make.
 - The candidate's own stated questionnaire preferences (if given above) — direct and current, outranks the inferred preference profile when they conflict
 - Preference signals (strong signals = heavy weight)
 - Role quality, growth potential, company type

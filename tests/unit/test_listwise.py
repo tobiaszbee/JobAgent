@@ -233,6 +233,26 @@ def test_system_prompt_forbids_deliberation_in_reason(mock_anthropic):
 
 
 @patch("ranker.listwise.anthropic.Anthropic")
+def test_system_prompt_frames_scorers_rating_as_one_data_point(mock_anthropic):
+    # Regression: adding "Scorer's rating: X/10" to each job's text (a
+    # directly-comparable ordinal) without framing it risks Opus just sorting
+    # by that number — the exact positional-anchoring failure #29 already
+    # shuffled presentation order to avoid, just via a numeric signal instead
+    # of a positional one. The comparative judgment across the whole batch is
+    # what listwise ranking is for; a per-job score can't provide that.
+    jobs = [_job("j1")]
+    mock_anthropic.return_value.messages.create.return_value = _make_ranking_response(
+        [{"job_id": "j1", "reason": "Good match"}]
+    )
+
+    listwise_rank(jobs, "", [])
+
+    system_prompt = mock_anthropic.return_value.messages.create.call_args.kwargs["system"]
+    assert "Scorer's rating" in system_prompt
+    assert "not a target ordering" in system_prompt
+
+
+@patch("ranker.listwise.anthropic.Anthropic")
 def test_questionnaire_included_in_system_prompt_when_given(mock_anthropic):
     jobs = [_job("j1")]
     mock_anthropic.return_value.messages.create.return_value = _make_ranking_response(
