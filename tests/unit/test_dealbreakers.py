@@ -17,6 +17,7 @@ def _prefs(**overrides):
     base = {
         "salary_min": None, "salary_currency": None, "work_mode": [],
         "remote_countries": [], "seniority_levels": [], "show_jobs_without_salary": None,
+        "preferred_company_types": [],
     }
     base.update(overrides)
     return base
@@ -466,6 +467,114 @@ class TestNoSalaryDisclosed:
         surviving, stats = apply_dealbreaker_filter([job])
         assert surviving == []
         assert stats["auto_rejected"] == 1
+
+
+class TestCompanyTypeFilter:
+    # Regression: questionnaire.html promises "Selecting anything here filters
+    # out every other type" for the company-type chips — previously saved and
+    # never read anywhere.
+
+    @patch("evaluator.dealbreakers.job_repository.update_score_and_status")
+    @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
+    def test_no_preference_never_checked(self, mock_prefs, mock_update):
+        mock_prefs.return_value = _prefs(preferred_company_types=[])
+        job = _job(structured={"company_type": "agency"})
+        surviving, stats = apply_dealbreaker_filter([job])
+        assert surviving == [job]
+        mock_update.assert_not_called()
+
+    @patch("evaluator.dealbreakers.job_repository.update_score_and_status")
+    @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
+    def test_rejects_confirmed_mismatch_via_company_type_axis(self, mock_prefs, mock_update):
+        mock_prefs.return_value = _prefs(preferred_company_types=["startup"])
+        job = _job(structured={"company_type": "enterprise"})
+        surviving, stats = apply_dealbreaker_filter([job])
+        assert surviving == []
+        assert stats["auto_rejected"] == 1
+        assert "company type" in mock_update.call_args[0][2]
+
+    @patch("evaluator.dealbreakers.job_repository.update_score_and_status")
+    @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
+    def test_matching_company_type_survives(self, mock_prefs, mock_update):
+        mock_prefs.return_value = _prefs(preferred_company_types=["startup"])
+        job = _job(structured={"company_type": "startup"})
+        surviving, stats = apply_dealbreaker_filter([job])
+        assert surviving == [job]
+        mock_update.assert_not_called()
+
+    @patch("evaluator.dealbreakers.job_repository.update_score_and_status")
+    @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
+    def test_or_semantics_any_selected_type_matching_survives(self, mock_prefs, mock_update):
+        mock_prefs.return_value = _prefs(preferred_company_types=["startup", "enterprise"])
+        job = _job(structured={"company_type": "enterprise"})
+        surviving, stats = apply_dealbreaker_filter([job])
+        assert surviving == [job]
+        mock_update.assert_not_called()
+
+    @patch("evaluator.dealbreakers.job_repository.update_score_and_status")
+    @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
+    def test_unknown_company_type_skipped_not_rejected(self, mock_prefs, mock_update):
+        mock_prefs.return_value = _prefs(preferred_company_types=["startup"])
+        job = _job(structured={"company_type": "unknown"})
+        surviving, stats = apply_dealbreaker_filter([job])
+        assert surviving == [job]
+        mock_update.assert_not_called()
+
+    @patch("evaluator.dealbreakers.job_repository.update_score_and_status")
+    @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
+    def test_missing_structured_data_skipped_not_rejected(self, mock_prefs, mock_update):
+        mock_prefs.return_value = _prefs(preferred_company_types=["startup"])
+        job = _job(structured={})
+        surviving, stats = apply_dealbreaker_filter([job])
+        assert surviving == [job]
+        mock_update.assert_not_called()
+
+    @patch("evaluator.dealbreakers.job_repository.update_score_and_status")
+    @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
+    def test_product_maps_to_product_vs_outsourcing_axis(self, mock_prefs, mock_update):
+        mock_prefs.return_value = _prefs(preferred_company_types=["product"])
+        job = _job(structured={"product_vs_outsourcing": "product"})
+        surviving, stats = apply_dealbreaker_filter([job])
+        assert surviving == [job]
+        mock_update.assert_not_called()
+
+    @patch("evaluator.dealbreakers.job_repository.update_score_and_status")
+    @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
+    def test_product_preference_rejects_confirmed_outsourcing_job(self, mock_prefs, mock_update):
+        mock_prefs.return_value = _prefs(preferred_company_types=["product"])
+        job = _job(structured={"product_vs_outsourcing": "outsourcing"})
+        surviving, stats = apply_dealbreaker_filter([job])
+        assert surviving == []
+        assert stats["auto_rejected"] == 1
+
+    @patch("evaluator.dealbreakers.job_repository.update_score_and_status")
+    @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
+    def test_product_preference_unknown_outsourcing_axis_skipped(self, mock_prefs, mock_update):
+        # company_type known as "startup" (not directly relevant to the "product"
+        # axis) but product_vs_outsourcing is unstated — can't confirm a mismatch.
+        mock_prefs.return_value = _prefs(preferred_company_types=["product"])
+        job = _job(structured={"company_type": "startup"})
+        surviving, stats = apply_dealbreaker_filter([job])
+        assert surviving == [job]
+        mock_update.assert_not_called()
+
+    @patch("evaluator.dealbreakers.job_repository.update_score_and_status")
+    @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
+    def test_consulting_matches_agency_company_type(self, mock_prefs, mock_update):
+        mock_prefs.return_value = _prefs(preferred_company_types=["consulting"])
+        job = _job(structured={"company_type": "agency"})
+        surviving, stats = apply_dealbreaker_filter([job])
+        assert surviving == [job]
+        mock_update.assert_not_called()
+
+    @patch("evaluator.dealbreakers.job_repository.update_score_and_status")
+    @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
+    def test_consulting_matches_outsourcing_axis(self, mock_prefs, mock_update):
+        mock_prefs.return_value = _prefs(preferred_company_types=["consulting"])
+        job = _job(structured={"product_vs_outsourcing": "outsourcing"})
+        surviving, stats = apply_dealbreaker_filter([job])
+        assert surviving == [job]
+        mock_update.assert_not_called()
 
 
 class TestMultipleJobs:

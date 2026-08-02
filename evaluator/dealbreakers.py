@@ -147,6 +147,54 @@ def _seniority_reason(job_structured: dict, seniority_levels: list[str]) -> str 
     )
 
 
+# Maps a questionnaire preferred_company_types chip value (web/templates/questionnaire.html's
+# "company-group") to the job-side structured-data axis that can confirm/deny it. The two
+# vocabularies don't line up 1:1: the questionnaire's "product" and "consulting" chips are
+# really asking about extractor/runner.py's product_vs_outsourcing axis, not its separate
+# company_type enum (startup/scaleup/enterprise/agency/unknown) — "consulting" has no exact
+# company_type match either, so it's treated as either an agency or an outsourcing engagement.
+def _matches_preferred_company_type(preferred_type: str, company_type: str | None, outsourcing: str | None) -> bool | None:
+    """True/False if the relevant axis has enough info to decide, None if unknown."""
+    if preferred_type == "product":
+        if not outsourcing or outsourcing == "unknown":
+            return None
+        return outsourcing == "product"
+    if preferred_type == "consulting":
+        if (not company_type or company_type == "unknown") and (not outsourcing or outsourcing == "unknown"):
+            return None
+        return company_type == "agency" or outsourcing == "outsourcing"
+    # startup / scaleup / enterprise map directly onto company_type
+    if not company_type or company_type == "unknown":
+        return None
+    return company_type == preferred_type
+
+
+def _company_type_reason(job_structured: dict, preferred_company_types: list[str]) -> str | None:
+    """questionnaire.html tells the candidate "Selecting anything here filters out every
+    other type" — a real hard filter, not the soft scoring signal preferred_company_types
+    also feeds into (evaluator/profile.py's questionnaire block). This was previously
+    saved and never read anywhere, making that UI copy a false promise.
+
+    Conservative like every other check here: rejects only when at least one selected
+    type's relevant axis is positively known and doesn't match — if EVERY selected type
+    is unknown/unconfirmable for this job, skip rather than guess. A job matching ANY
+    one of multiple selected types survives (chip selection is OR, not AND)."""
+    if not preferred_company_types:
+        return None
+    company_type = job_structured.get("company_type")
+    outsourcing = job_structured.get("product_vs_outsourcing")
+
+    results = [_matches_preferred_company_type(t, company_type, outsourcing) for t in preferred_company_types]
+    if True in results:
+        return None
+    if all(r is None for r in results):
+        return None  # no axis had enough info to confirm a mismatch for any selected type
+    return (
+        f"Dealbreaker: company type doesn't match your selected preference(s) "
+        f"({', '.join(preferred_company_types)})"
+    )
+
+
 def _no_salary_disclosed_reason(job_structured: dict, show_jobs_without_salary: bool) -> str | None:
     """The questionnaire checkbox ("Also show postings with no salary listed",
     checked/True by default) was saved but never read anywhere — unchecking it
@@ -173,6 +221,7 @@ def apply_dealbreaker_filter(jobs: list[dict]) -> tuple[list[dict], dict]:
     work_mode = prefs.get("work_mode") or []
     remote_countries = prefs.get("remote_countries") or []
     seniority_levels = prefs.get("seniority_levels") or []
+    preferred_company_types = prefs.get("preferred_company_types") or []
     # Unset (predates this field) defaults to True, matching the questionnaire
     # checkbox's own default (checked) — never surprise an existing candidate
     # with newly-hidden postings just because this key doesn't exist yet.
@@ -181,7 +230,7 @@ def apply_dealbreaker_filter(jobs: list[dict]) -> tuple[list[dict], dict]:
 
     if (
         not salary_min and "remote" not in work_mode and not seniority_levels
-        and show_jobs_without_salary
+        and not preferred_company_types and show_jobs_without_salary
     ):
         return jobs, {"checked": len(jobs), "auto_rejected": 0}
 
@@ -197,6 +246,8 @@ def apply_dealbreaker_filter(jobs: list[dict]) -> tuple[list[dict], dict]:
             reason = _geo_reason(structured, work_mode, remote_countries)
         if not reason:
             reason = _seniority_reason(structured, seniority_levels)
+        if not reason:
+            reason = _company_type_reason(structured, preferred_company_types)
         if not reason:
             reason = _no_salary_disclosed_reason(structured, show_jobs_without_salary)
 
