@@ -1,5 +1,6 @@
 import json
 import logging
+import random
 import re
 import anthropic
 
@@ -34,7 +35,7 @@ _RANKING_TOOL = {
 }
 
 
-def _format_job(job: dict, position: int) -> str:
+def _format_job(job: dict) -> str:
     structured = {}
     raw = job.get("structured_data")
     if raw:
@@ -43,7 +44,7 @@ def _format_job(job: dict, position: int) -> str:
         except Exception:
             pass
 
-    parts = [f"[Job #{position + 1} | ID: {job['id']}]"]
+    parts = [f"[ID: {job['id']}]"]
     parts.append(f"Title: {job['title']} @ {job['company']}")
     if job.get("location"):
         parts.append(f"Location: {job['location']}")
@@ -74,6 +75,19 @@ def _format_job(job: dict, position: int) -> str:
     return "\n".join(parts)
 
 
+# Sentinel rank_reason for the 3 fallback paths below (API error, no text
+# block, unparseable JSON) — without this, a fallback batch that just echoes
+# rerank order back with rank_reason="" was indistinguishable anywhere in the
+# stored data from a genuine (if terse) Opus ranking, which corrupts anything
+# that later reads listwise_rank as a real signal (calibration/precision
+# metrics, dashboard display).
+FALLBACK_RANK_REASON = "[unranked — Opus ranking unavailable this run, showing rerank order]"
+
+
+def _fallback_ranking(jobs: list[dict]) -> list[dict]:
+    return [{**job, "listwise_rank": i + 1, "rank_reason": FALLBACK_RANK_REASON} for i, job in enumerate(jobs)]
+
+
 def _parse_ranking_json(text: str) -> list[dict]:
     m = re.search(r"<ranking>(.*?)</ranking>", text, re.DOTALL)
     if m:
@@ -96,7 +110,17 @@ def listwise_rank(jobs: list[dict], candidate_profile: str, preferences: list[di
         if scored:
             prefs_text = f"PREFERENCE PROFILE:\n{render_signals(scored)}\n\n"
 
-    jobs_text = "\n\n---\n\n".join(_format_job(job, i) for i, job in enumerate(jobs))
+    # Shuffled presentation order: a listwise ranker shown jobs best-first (the
+    # reranker's own order) with sequential "[Job #N]" labels tends to mostly
+    # echo that input order back — position becomes a stronger signal than the
+    # actual content, paying full Opus cost for little new information. Only
+    # the prompt's presentation order changes here; job_by_id/seen-based
+    # result assembly below is keyed by job_id, not position, so this has no
+    # other effect. `jobs` itself (and its original order) is left untouched
+    # for the safety-net loop and every caller.
+    presented = jobs[:]
+    random.shuffle(presented)
+    jobs_text = "\n\n---\n\n".join(_format_job(job) for job in presented)
 
     system = f"""You are ranking job listings for a candidate. Analyze every job carefully and produce a definitive ranking.
 
@@ -134,20 +158,20 @@ Include ALL {len(jobs)} jobs. No text after the closing </ranking> tag."""
         )
     except Exception as e:
         logger.error(f"Listwise ranking failed: {e}")
-        return [{**job, "listwise_rank": i + 1, "rank_reason": ""} for i, job in enumerate(jobs)]
+        return _fallback_ranking(jobs)
 
     log_anthropic(response, "ranker", CLAUDE_RANK_MODEL)
 
     text_block = next((b for b in response.content if b.type == "text"), None)
     if not text_block:
         logger.error("No text block in Opus listwise response")
-        return [{**job, "listwise_rank": i + 1, "rank_reason": ""} for i, job in enumerate(jobs)]
+        return _fallback_ranking(jobs)
 
     try:
         ranking = _parse_ranking_json(text_block.text)
     except Exception as e:
         logger.error(f"Failed to parse ranking JSON: {e}\nResponse: {text_block.text[:500]}")
-        return [{**job, "listwise_rank": i + 1, "rank_reason": ""} for i, job in enumerate(jobs)]
+        return _fallback_ranking(jobs)
 
     job_by_id = {job["id"]: job for job in jobs}
     result = []

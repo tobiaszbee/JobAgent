@@ -1,7 +1,7 @@
 import json
 from unittest.mock import MagicMock, patch
 
-from ranker.listwise import _format_job, listwise_rank
+from ranker.listwise import FALLBACK_RANK_REASON, _format_job, listwise_rank
 
 
 def _job(id="j1", title="Senior Dev", company="Acme", location="Remote", description="Good job", structured_data=None):
@@ -33,22 +33,45 @@ def _make_empty_response():
 
 class TestFormatJob:
     def test_includes_title_company(self):
-        text = _format_job(_job(title="Engineer", company="Corp"), 0)
+        text = _format_job(_job(title="Engineer", company="Corp"))
         assert "Engineer" in text
         assert "Corp" in text
 
     def test_includes_description_excerpt(self):
-        text = _format_job(_job(description="We use Python and Django"), 0)
+        text = _format_job(_job(description="We use Python and Django"))
         assert "Python" in text
 
     def test_structured_data_tags_appear(self):
         sd = {"remote": True, "seniority": "senior", "company_type": "startup",
               "product_vs_outsourcing": "product", "stack": ["Python"],
               "hybrid": False, "salary_min": None, "salary_max": None, "salary_currency": None}
-        text = _format_job(_job(structured_data=sd), 0)
+        text = _format_job(_job(structured_data=sd))
         assert "remote" in text.lower()
         assert "senior" in text.lower()
         assert "startup" in text.lower()
+
+    def test_no_positional_label_in_output(self):
+        # Regression: a "[Job #N]" label matching presentation order let Opus
+        # anchor on position instead of content — only the job's own id
+        # identifies it now.
+        text = _format_job(_job(id="j1"))
+        assert "Job #" not in text
+        assert "[ID: j1]" in text
+
+
+@patch("ranker.listwise.random.shuffle")
+@patch("ranker.listwise.anthropic.Anthropic")
+def test_listwise_rank_shuffles_presentation_order(mock_anthropic, mock_shuffle):
+    # Regression: jobs used to be presented to Opus in the reranker's own
+    # best-first order with sequential labels, which a listwise ranker tends
+    # to mostly echo back — shuffling breaks that positional anchor.
+    jobs = [_job("j1"), _job("j2"), _job("j3")]
+    ranking = [{"job_id": j["id"], "reason": "x"} for j in jobs]
+    mock_anthropic.return_value.messages.create.return_value = _make_ranking_response(ranking)
+
+    listwise_rank(jobs, "", [])
+
+    mock_shuffle.assert_called_once()
 
 
 @patch("ranker.listwise.anthropic.Anthropic")
@@ -132,6 +155,10 @@ def test_listwise_rank_fallback_on_api_error(mock_anthropic):
     assert len(result) == 2
     assert result[0]["listwise_rank"] == 1
     assert result[1]["listwise_rank"] == 2
+    # Regression: fallback used to write rank_reason="", indistinguishable
+    # anywhere in the data from a genuine (if terse) Opus ranking.
+    assert result[0]["rank_reason"] == FALLBACK_RANK_REASON
+    assert result[1]["rank_reason"] == FALLBACK_RANK_REASON
 
 
 @patch("ranker.listwise.anthropic.Anthropic")
@@ -141,6 +168,22 @@ def test_listwise_rank_fallback_on_no_tool_block(mock_anthropic):
 
     result = listwise_rank(jobs, "", [])
     assert result[0]["listwise_rank"] == 1
+    assert result[0]["rank_reason"] == FALLBACK_RANK_REASON
+
+
+@patch("ranker.listwise.anthropic.Anthropic")
+def test_listwise_rank_fallback_on_unparseable_json(mock_anthropic):
+    jobs = [_job("j1")]
+    block = MagicMock(type="text", text="<ranking>\n[{not valid json, missing quotes}]\n</ranking>")
+    response = MagicMock(
+        content=[block],
+        usage=MagicMock(input_tokens=1, output_tokens=1, cache_creation_input_tokens=0, cache_read_input_tokens=0),
+    )
+    mock_anthropic.return_value.messages.create.return_value = response
+
+    result = listwise_rank(jobs, "", [])
+    assert result[0]["listwise_rank"] == 1
+    assert result[0]["rank_reason"] == FALLBACK_RANK_REASON
 
 
 def test_listwise_rank_empty_input():
