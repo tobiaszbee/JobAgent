@@ -20,6 +20,7 @@ import httpx
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 
 from collector.base import JobSource, RawJob
+from collector.location import workplace_suffix
 
 logger = logging.getLogger(__name__)
 
@@ -174,8 +175,11 @@ class JustJoinSource(JobSource):
         days = days_back if days_back is not None else self._days_back
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
+        # No "workplace" filter: justjoin.it is routed for hybrid/onsite Polish-city
+        # candidates too (see collector/runner.py's _POLAND_ONLY_SOURCES routing),
+        # so hardcoding remote-only here silently returned nothing relevant for them.
         try:
-            resp = self._client.get(_SEARCH_URL, params={"keyword": title, "workplace": "remote"})
+            resp = self._client.get(_SEARCH_URL, params={"keyword": title})
         except Exception as e:
             logger.warning(f"justjoin.it request failed: {e}")
             return []
@@ -208,10 +212,11 @@ class JustJoinSource(JobSource):
                 continue
 
             city = offer.get("city") or "Poland"
+            modes = {offer.get("workplaceType")} if offer.get("workplaceType") else set()
             results.append(RawJob(
                 title=offer.get("title", ""),
                 company=offer.get("companyName", ""),
-                location=f"{city}, Poland (Remote)",
+                location=f"{city}, Poland{workplace_suffix(modes)}",
                 url=url,
                 source=self.name,
                 source_id=offer.get("guid"),

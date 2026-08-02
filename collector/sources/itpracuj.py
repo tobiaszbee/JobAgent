@@ -28,11 +28,21 @@ from urllib.parse import quote
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 
 from collector.base import JobSource, RawJob
+from collector.location import workplace_suffix
 
 logger = logging.getLogger(__name__)
 
-_SEARCH_URL = "https://it.pracuj.pl/praca/{kw};kw/praca%20zdalna;wm,home-office"
+# No "praca%20zdalna;wm,home-office" (remote-only) URL segment: it.pracuj.pl is
+# routed for hybrid/onsite Polish-city candidates too (see collector/runner.py's
+# _POLAND_ONLY_SOURCES routing), so hardcoding remote-only here silently
+# returned nothing relevant for them.
+_SEARCH_URL = "https://it.pracuj.pl/praca/{kw};kw"
 _POLAND_ALIASES = {"poland", "polska", "pl"}
+_WORK_MODE_TOKENS = {
+    "praca zdalna": "remote",
+    "praca hybrydowa": "hybrid",
+    "praca stacjonarna": "onsite",
+}
 
 
 def _read_next_data(page) -> dict | None:
@@ -145,7 +155,9 @@ class ItPracujSource(JobSource):
                 continue
 
             city = offers[0].get("displayWorkplace")
-            location_str = f"{city}, Poland (Remote)" if city else "Poland (Remote)"
+            modes = {_WORK_MODE_TOKENS.get(m.lower()) for m in (group.get("workModes") or [])}
+            modes.discard(None)
+            location_str = f"{city}, Poland{workplace_suffix(modes)}" if city else f"Poland{workplace_suffix(modes)}"
 
             results.append(RawJob(
                 title=group.get("jobTitle", ""),

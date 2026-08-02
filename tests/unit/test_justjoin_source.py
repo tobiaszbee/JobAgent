@@ -36,6 +36,7 @@ def _offer(
     city="Warszawa",
     guid="abc-123",
     days_ago=0,
+    workplace_type="remote",
 ):
     published = (datetime.now(timezone.utc) - timedelta(days=days_ago)).strftime("%Y-%m-%dT%H:%M:%SZ")
     return {
@@ -46,6 +47,7 @@ def _offer(
         "guid": guid,
         "publishedAt": published,
         "employmentTypes": [{"currency": "PLN"}],
+        "workplaceType": workplace_type,
     }
 
 
@@ -142,6 +144,40 @@ class TestJustJoinSourceSearch:
         src._client.get.return_value = MagicMock(status_code=200, text=_offers_html(offers))
         results = src.search("PHP Developer", "Poland", max_results=2)
         assert len(results) == 2
+
+    def test_search_does_not_restrict_to_remote_workplace(self):
+        # Regression: justjoin.it is routed for hybrid/onsite Polish-city candidates
+        # too (collector/runner.py's _POLAND_ONLY_SOURCES), so a hardcoded
+        # workplace=remote param silently returned nothing relevant for them.
+        src = _make_source()
+        src._client.get.return_value = MagicMock(status_code=200, text=_offers_html([_offer()]))
+        src.search("PHP Developer", "Poland")
+        _, kwargs = src._client.get.call_args
+        assert "workplace" not in kwargs.get("params", {})
+
+    def test_remote_offer_location_labeled_remote(self):
+        src = _make_source()
+        src._client.get.return_value = MagicMock(
+            status_code=200, text=_offers_html([_offer(city="Warszawa", workplace_type="remote")])
+        )
+        results = src.search("PHP Developer", "Poland")
+        assert results[0].location == "Warszawa, Poland (Remote)"
+
+    def test_hybrid_offer_location_labeled_hybrid(self):
+        src = _make_source()
+        src._client.get.return_value = MagicMock(
+            status_code=200, text=_offers_html([_offer(city="Krakow", workplace_type="hybrid")])
+        )
+        results = src.search("PHP Developer", "Poland")
+        assert results[0].location == "Krakow, Poland (Hybrid)"
+
+    def test_office_offer_location_has_no_suffix(self):
+        src = _make_source()
+        src._client.get.return_value = MagicMock(
+            status_code=200, text=_offers_html([_offer(city="Gdansk", workplace_type="office")])
+        )
+        results = src.search("PHP Developer", "Poland")
+        assert results[0].location == "Gdansk, Poland"
 
     def test_non_200_response_returns_empty(self):
         src = _make_source()

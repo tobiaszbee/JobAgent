@@ -25,6 +25,7 @@ from datetime import datetime, timedelta, timezone
 import httpx
 
 from collector.base import JobSource, RawJob
+from collector.location import workplace_suffix
 from collector.utils import strip_html
 
 logger = logging.getLogger(__name__)
@@ -39,9 +40,18 @@ _HEADERS = {
                   "(KHTML, like Gecko) Chrome/120.0 Safari/537.36",
 }
 _POLAND_ALIASES = {"poland", "polska", "pl"}
-# "Hybrydowo" (hybrid) and "Możliwa częściowo" (partially possible) are deliberately
-# excluded — remote-only, matching every other Polish source in this collector.
-_REMOTE_VALUES = {"w całości", "możliwa w całości", "dowolnie", "stacjonarnie lub zdalnie"}
+# solid.jobs is routed for hybrid/onsite Polish-city candidates too (see
+# collector/runner.py's _POLAND_ONLY_SOURCES routing) — a remote-only filter
+# here silently returned nothing relevant for them (verified live: "Hybrydowo"
+# and "Możliwa częściowo" alone account for more offers than the old
+# remote-only allowlist). Every remotePossible value observed live is mapped
+# below instead of filtering any of them out.
+_REMOTE_MODE_TOKENS = {
+    "w całości": "remote", "możliwa w całości": "remote",
+    "dowolnie": "remote", "stacjonarnie lub zdalnie": "remote",
+    "hybrydowo": "hybrid", "możliwa częściowo": "hybrid",
+    "brak": "onsite",
+}
 
 
 class SolidJobsSource(JobSource):
@@ -144,9 +154,6 @@ class SolidJobsSource(JobSource):
             if keyword not in haystack:
                 continue
 
-            if (offer.get("remotePossible") or "").strip().lower() not in _REMOTE_VALUES:
-                continue
-
             valid_from = offer.get("validFrom")
             try:
                 valid_dt = datetime.fromisoformat(valid_from) if valid_from else None
@@ -165,7 +172,9 @@ class SolidJobsSource(JobSource):
                 continue
 
             city = offer.get("companyCity")
-            location_str = f"{city}, Poland (Remote)" if city else "Poland (Remote)"
+            mode = _REMOTE_MODE_TOKENS.get((offer.get("remotePossible") or "").strip().lower())
+            modes = {mode} if mode else set()
+            location_str = f"{city}, Poland{workplace_suffix(modes)}" if city else f"Poland{workplace_suffix(modes)}"
 
             results.append(RawJob(
                 title=job_title,

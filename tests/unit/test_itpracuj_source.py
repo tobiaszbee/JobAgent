@@ -28,6 +28,7 @@ def _group(
     partition_id=1,
     days_ago=0,
     description="Krótki opis stanowiska...",
+    work_modes=None,
 ):
     published = (datetime.now(timezone.utc) - timedelta(days=days_ago)).strftime("%Y-%m-%dT%H:%M:%SZ")
     return {
@@ -36,6 +37,7 @@ def _group(
         "lastPublicated": published,
         "groupId": f"group-{partition_id}",
         "jobDescription": description,
+        "workModes": work_modes if work_modes is not None else ["Praca zdalna"],
         "offers": [{"offerAbsoluteUri": offer_url, "displayWorkplace": city, "partitionId": partition_id}],
     }
 
@@ -96,6 +98,39 @@ class TestItPracujSourceSearch:
         src.search("Symfony Developer", "Poland")
         called_url = src._page.goto.call_args[0][0]
         assert "Symfony%20Developer" in called_url
+
+    def test_search_url_does_not_restrict_to_remote_workmode(self):
+        # Regression: it.pracuj.pl is routed for hybrid/onsite Polish-city
+        # candidates too (collector/runner.py's _POLAND_ONLY_SOURCES), so a
+        # hardcoded "praca zdalna;wm,home-office" URL segment silently
+        # returned nothing relevant for them.
+        src = _make_source()
+        src._page.eval_on_selector.return_value = json.dumps(_search_payload([_group()]))
+        src.search("PHP", "Poland")
+        called_url = src._page.goto.call_args[0][0]
+        assert "zdalna" not in called_url
+        assert "home-office" not in called_url
+
+    def test_remote_workmode_labeled_remote(self):
+        src = _make_source()
+        group = _group(city="Warszawa", work_modes=["Praca zdalna"])
+        src._page.eval_on_selector.return_value = json.dumps(_search_payload([group]))
+        results = src.search("PHP", "Poland")
+        assert results[0].location == "Warszawa, Poland (Remote)"
+
+    def test_hybrid_workmode_labeled_hybrid(self):
+        src = _make_source()
+        group = _group(city="Krakow", work_modes=["Praca hybrydowa"])
+        src._page.eval_on_selector.return_value = json.dumps(_search_payload([group]))
+        results = src.search("PHP", "Poland")
+        assert results[0].location == "Krakow, Poland (Hybrid)"
+
+    def test_onsite_workmode_has_no_suffix(self):
+        src = _make_source()
+        group = _group(city="Gdansk", work_modes=["Praca stacjonarna"])
+        src._page.eval_on_selector.return_value = json.dumps(_search_payload([group]))
+        results = src.search("PHP", "Poland")
+        assert results[0].location == "Gdansk, Poland"
 
     def test_description_taken_from_search_payload(self):
         # No second (detail-page) fetch is made — a cross-subdomain navigation in the

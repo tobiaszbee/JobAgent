@@ -8,8 +8,16 @@ logger = logging.getLogger(__name__)
 
 def _contains_keyword(text: str, keyword: str) -> bool:
     """Whole-word match so short acronyms (e.g. 'php') don't false-positive on
-    substrings inside unrelated words or other acronyms (e.g. clinical 'IOP/PHP')."""
-    return re.search(rf"\b{re.escape(keyword)}\b", text) is not None
+    substrings inside unrelated words or other acronyms (e.g. clinical 'IOP/PHP').
+
+    Uses an explicit non-alphanumeric lookaround rather than \\b: \\b only fires
+    between a \\w char and a non-\\w char, so a keyword ending in a symbol (c++,
+    c#, .net) followed by whitespace has non-word characters on *both* sides of
+    the trailing \\b and it never matches — silently making these keywords
+    inert everywhere they're used (rejected-keyword bans and required-keyword
+    gates alike)."""
+    pattern = rf"(?<![A-Za-z0-9]){re.escape(keyword)}(?![A-Za-z0-9])"
+    return re.search(pattern, text) is not None
 
 
 def title_banned_reason(title: str, rejected_kw: list[str]) -> str | None:

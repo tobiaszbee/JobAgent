@@ -1,7 +1,7 @@
 import uuid
 
 from db.repositories import criteria_repository, job_repository
-from collector.filters import apply_keyword_filter, title_banned_reason
+from collector.filters import apply_keyword_filter, title_banned_reason, _contains_keyword
 
 
 def _insert_job(title="PHP Developer", company="Acme", description="Symfony expertise required.", url=None):
@@ -150,3 +150,43 @@ class TestTitleBannedReason:
     def test_whole_word_match_no_false_positive_on_substring(self):
         # "php" should not match inside an unrelated word like "phpstorm-integration"... but should match standalone
         assert title_banned_reason("Graphics Designer", ["php"]) is None
+
+
+class TestContainsKeywordSymbolBoundaries:
+    # Regression for the audit's "\b never matches symbol-suffixed keywords"
+    # finding: plain \b{kw}\b requires a \w/non-\w transition on *both* sides,
+    # but "c++" followed by a space has a non-word char on both sides of that
+    # trailing boundary, so \b never fires there — silently making c++/c#/.net
+    # inert in both the required and rejected keyword lists.
+    def test_plain_word_still_matches_as_whole_word(self):
+        assert _contains_keyword("senior php developer", "php") is True
+
+    def test_plain_word_still_rejects_substring_match(self):
+        assert _contains_keyword("phpunit specialist", "php") is False
+
+    def test_cpp_matches_before_a_space(self):
+        assert _contains_keyword("senior c++ developer", "c++") is True
+
+    def test_cpp_matches_at_end_of_string(self):
+        assert _contains_keyword("looking for a c++ engineer", "c++") is True
+
+    def test_csharp_matches(self):
+        assert _contains_keyword("c# backend developer", "c#") is True
+
+    def test_dotnet_matches(self):
+        assert _contains_keyword(".net developer wanted", ".net") is True
+
+    def test_csharp_does_not_match_inside_a_longer_alnum_run(self):
+        assert _contains_keyword("c#hello backend developer", "c#") is False
+
+    def test_required_cpp_keyword_end_to_end(self):
+        criteria_repository.insert("required", "c++")
+        _insert_job(title="Senior C++ Developer", description="Embedded systems role")
+        apply_keyword_filter()
+        assert job_repository.search()[0]["status"] == "new"
+
+    def test_rejected_dotnet_keyword_end_to_end(self):
+        criteria_repository.insert("rejected", ".net")
+        _insert_job(title="Backend Developer", description="We use .NET and C#")
+        apply_keyword_filter()
+        assert job_repository.search()[0]["status"] == "auto_rejected"

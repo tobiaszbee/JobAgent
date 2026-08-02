@@ -22,6 +22,7 @@ from urllib.parse import quote
 import httpx
 
 from collector.base import JobSource, RawJob
+from collector.location import workplace_suffix
 from collector.utils import strip_html
 
 logger = logging.getLogger(__name__)
@@ -113,9 +114,13 @@ class NoFluffJobsSource(JobSource):
         days = days_back if days_back is not None else self._days_back
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
+        # No "remote=remote" criteria: NoFluffJobs is routed for hybrid/onsite
+        # Polish-city candidates too (see collector/runner.py's
+        # _POLAND_ONLY_SOURCES routing), so a hardcoded remote-only filter
+        # silently returned nothing relevant for them.
         url = _SEARCH_URL.format(kw=quote(title.strip()))
         try:
-            resp = self._client.get(url, params={"criteria": "remote=remote"})
+            resp = self._client.get(url)
         except Exception as e:
             logger.warning(f"NoFluffJobs search request failed: {e}")
             return []
@@ -151,10 +156,23 @@ class NoFluffJobsSource(JobSource):
             if known_urls and job_url in known_urls:
                 continue
 
+            # "places" mixes a "Remote" pseudo-city with real cities and, for a
+            # nationwide remote posting, every Polish province as separate
+            # entries — take the real city (if any) for the label and treat
+            # a "Remote" entry as the remote-mode signal. NoFluffJobs' listing
+            # payload doesn't distinguish hybrid from onsite, so a posting with
+            # a real city and no "Remote" entry is labeled with no suffix
+            # rather than guessing.
+            places = (posting.get("location") or {}).get("places") or []
+            cities = [p.get("city") for p in places if p.get("city")]
+            modes = {"remote"} if "Remote" in cities else set()
+            real_city = next((c for c in cities if c != "Remote"), None)
+            location = f"{real_city}, Poland{workplace_suffix(modes)}" if real_city else f"Poland{workplace_suffix(modes)}"
+
             results.append(RawJob(
                 title=posting.get("title", ""),
                 company=posting.get("name", ""),
-                location="Poland (Remote)",
+                location=location,
                 url=job_url,
                 source=self.name,
                 source_id=posting.get("id"),

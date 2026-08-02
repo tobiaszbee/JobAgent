@@ -66,29 +66,46 @@ class TestSolidJobsSearch:
         results = src.search("PHP", "Poland")
         assert results == []
 
-    def test_hybrid_excluded(self):
+    def test_hybrid_included_and_labeled_hybrid(self):
+        # Regression: solid.jobs is routed for hybrid/onsite Polish-city
+        # candidates too (collector/runner.py's _POLAND_ONLY_SOURCES) — these
+        # used to be silently dropped entirely by a remote-only allowlist.
         src = _make_source()
-        src._client.get.return_value = MagicMock(status_code=200, json=lambda: [_offer(remote="Hybrydowo")])
-        results = src.search("PHP", "Poland")
-        assert results == []
-
-    def test_partial_remote_excluded(self):
-        src = _make_source()
-        src._client.get.return_value = MagicMock(status_code=200, json=lambda: [_offer(remote="Możliwa częściowo")])
-        results = src.search("PHP", "Poland")
-        assert results == []
-
-    def test_no_remote_option_excluded(self):
-        src = _make_source()
-        src._client.get.return_value = MagicMock(status_code=200, json=lambda: [_offer(remote="Brak")])
-        results = src.search("PHP", "Poland")
-        assert results == []
-
-    def test_stationary_or_remote_included(self):
-        src = _make_source()
-        src._client.get.return_value = MagicMock(status_code=200, json=lambda: [_offer(remote="Stacjonarnie lub zdalnie")])
+        src._client.get.return_value = MagicMock(status_code=200, json=lambda: [_offer(city="Krakow", remote="Hybrydowo")])
         results = src.search("PHP", "Poland")
         assert len(results) == 1
+        assert results[0].location == "Krakow, Poland (Hybrid)"
+
+    def test_partial_remote_included_and_labeled_hybrid(self):
+        src = _make_source()
+        src._client.get.return_value = MagicMock(
+            status_code=200, json=lambda: [_offer(city="Warszawa", remote="Możliwa częściowo")]
+        )
+        results = src.search("PHP", "Poland")
+        assert len(results) == 1
+        assert results[0].location == "Warszawa, Poland (Hybrid)"
+
+    def test_no_remote_option_included_with_no_suffix(self):
+        src = _make_source()
+        src._client.get.return_value = MagicMock(status_code=200, json=lambda: [_offer(city="Gdansk", remote="Brak")])
+        results = src.search("PHP", "Poland")
+        assert len(results) == 1
+        assert results[0].location == "Gdansk, Poland"
+
+    def test_stationary_or_remote_included_and_labeled_remote(self):
+        src = _make_source()
+        src._client.get.return_value = MagicMock(
+            status_code=200, json=lambda: [_offer(city="Poznan", remote="Stacjonarnie lub zdalnie")]
+        )
+        results = src.search("PHP", "Poland")
+        assert len(results) == 1
+        assert results[0].location == "Poznan, Poland (Remote)"
+
+    def test_fully_remote_labeled_remote(self):
+        src = _make_source()
+        src._client.get.return_value = MagicMock(status_code=200, json=lambda: [_offer(city="Warszawa", remote="W całości")])
+        results = src.search("PHP", "Poland")
+        assert results[0].location == "Warszawa, Poland (Remote)"
 
     def test_url_built_from_id_and_slug(self):
         src = _make_source()

@@ -25,10 +25,20 @@ from urllib.parse import quote
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 
 from collector.base import JobSource, RawJob
+from collector.location import workplace_suffix
 
 logger = logging.getLogger(__name__)
 
-_SEARCH_URL = "https://theprotocol.it/filtry/{tag};t/zdalna;rw"
+# No ";t/zdalna;rw" (remote-only) URL segment: theprotocol.it is routed for
+# hybrid/onsite Polish-city candidates too (see collector/runner.py's
+# _POLAND_ONLY_SOURCES routing), so hardcoding remote-only here silently
+# returned nothing relevant for them.
+_SEARCH_URL = "https://theprotocol.it/filtry/{tag}"
+_WORK_MODE_TOKENS = {
+    "zdalna": "remote", "remote": "remote",
+    "hybrydowa": "hybrid", "hybrid": "hybrid",
+    "stacjonarna": "onsite", "full office": "onsite",
+}
 _DETAIL_URL = "https://theprotocol.it/praca/{offer_url_name}"
 _POLAND_ALIASES = {"poland", "polska", "pl"}
 
@@ -182,7 +192,9 @@ class TheProtocolSource(JobSource):
 
             workplace = offer.get("workplace") or []
             city = workplace[0].get("city") if workplace else None
-            location_str = f"{city}, Poland (Remote)" if city else "Poland (Remote)"
+            modes = {_WORK_MODE_TOKENS.get(m.lower()) for m in (offer.get("workModes") or [])}
+            modes.discard(None)
+            location_str = f"{city}, Poland{workplace_suffix(modes)}" if city else f"Poland{workplace_suffix(modes)}"
 
             results.append(RawJob(
                 title=offer.get("title", ""),

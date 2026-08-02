@@ -47,9 +47,12 @@ class TestFindDescription:
         assert _find_description({"SOME_KEY": {}}) is None
 
 
-def _posting(slug="php-developer-remote", title="PHP Developer", company="Acme", posting_id="abc-1", days_ago=0):
+def _posting(slug="php-developer-remote", title="PHP Developer", company="Acme", posting_id="abc-1", days_ago=0, places=None):
     posted_ms = int((datetime.now(timezone.utc) - timedelta(days=days_ago)).timestamp() * 1000)
-    return {"id": posting_id, "name": company, "title": title, "url": slug, "posted": posted_ms}
+    posting = {"id": posting_id, "name": company, "title": title, "url": slug, "posted": posted_ms}
+    if places is not None:
+        posting["location"] = {"places": places}
+    return posting
 
 
 def _search_html(postings: list[dict]) -> str:
@@ -119,6 +122,44 @@ class TestNoFluffJobsSearch:
         src._client.get.return_value = MagicMock(status_code=200, text=_search_html(postings))
         results = src.search("PHP", "Poland", max_results=2)
         assert len(results) == 2
+
+    def test_search_does_not_restrict_to_remote_criteria(self):
+        # Regression: NoFluffJobs is routed for hybrid/onsite Polish-city
+        # candidates too (collector/runner.py's _POLAND_ONLY_SOURCES), so a
+        # hardcoded remote=remote criteria silently returned nothing relevant
+        # for them.
+        src = _make_source()
+        src._client.get.return_value = MagicMock(status_code=200, text=_search_html([_posting()]))
+        src.search("PHP", "Poland")
+        args, kwargs = src._client.get.call_args
+        assert "params" not in kwargs
+
+    def test_remote_place_labeled_remote_with_no_real_city(self):
+        src = _make_source()
+        posting = _posting(places=[{"city": "Remote"}])
+        src._client.get.return_value = MagicMock(status_code=200, text=_search_html([posting]))
+        results = src.search("PHP", "Poland")
+        assert results[0].location == "Poland (Remote)"
+
+    def test_remote_place_with_a_real_city_uses_the_city_and_remote_suffix(self):
+        src = _make_source()
+        posting = _posting(places=[{"city": "Remote"}, {"city": "Krakow"}])
+        src._client.get.return_value = MagicMock(status_code=200, text=_search_html([posting]))
+        results = src.search("PHP", "Poland")
+        assert results[0].location == "Krakow, Poland (Remote)"
+
+    def test_real_city_without_remote_place_has_no_suffix(self):
+        src = _make_source()
+        posting = _posting(places=[{"city": "Poznan"}])
+        src._client.get.return_value = MagicMock(status_code=200, text=_search_html([posting]))
+        results = src.search("PHP", "Poland")
+        assert results[0].location == "Poznan, Poland"
+
+    def test_no_location_data_falls_back_to_bare_poland(self):
+        src = _make_source()
+        src._client.get.return_value = MagicMock(status_code=200, text=_search_html([_posting()]))
+        results = src.search("PHP", "Poland")
+        assert results[0].location == "Poland"
 
     def test_non_200_response_returns_empty(self):
         src = _make_source()
