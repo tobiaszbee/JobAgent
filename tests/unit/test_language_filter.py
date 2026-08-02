@@ -137,6 +137,103 @@ class TestDetectionBehavior:
         assert call_args[3] == "auto_rejected"
 
 
+class TestCEFRThreshold:
+    # Regression for the audit's exact finding: the level was collected but
+    # never read anywhere, so selecting a language at A1 counted identically
+    # to selecting it at C2 — a German posting sailed through for a candidate
+    # who listed German only at A1 (barely beginner).
+
+    @patch("collector.language_filter.job_repository")
+    @patch("collector.language_filter.candidate_preferences_repository.get_active")
+    @patch("collector.language_filter.detect_langs")
+    def test_a1_language_does_not_count_as_usable(self, mock_detect, mock_prefs, mock_jr):
+        # A second, qualifying language (English C1) keeps the filter active
+        # (avoids the separate "no usable language at all" skip path below) so
+        # this isolates whether A1 German specifically counts as usable.
+        mock_prefs.return_value = _prefs([
+            {"language": "german", "level": "A1"},
+            {"language": "english", "level": "C1"},
+        ])
+        mock_jr.get_new.return_value = [_job()]
+        mock_detect.return_value = [Language("de", 0.95)]
+
+        result = apply_language_filter()
+        assert result == {"checked": 1, "auto_rejected": 1, "rejected_ids": ["job1"]}
+
+    @patch("collector.language_filter.job_repository")
+    @patch("collector.language_filter.candidate_preferences_repository.get_active")
+    @patch("collector.language_filter.detect_langs")
+    def test_b1_language_does_not_count_as_usable(self, mock_detect, mock_prefs, mock_jr):
+        mock_prefs.return_value = _prefs([
+            {"language": "german", "level": "B1"},
+            {"language": "english", "level": "C1"},
+        ])
+        mock_jr.get_new.return_value = [_job()]
+        mock_detect.return_value = [Language("de", 0.95)]
+
+        result = apply_language_filter()
+        assert result["auto_rejected"] == 1
+
+    @patch("collector.language_filter.job_repository")
+    @patch("collector.language_filter.candidate_preferences_repository.get_active")
+    @patch("collector.language_filter.detect_langs")
+    def test_b2_language_counts_as_usable(self, mock_detect, mock_prefs, mock_jr):
+        mock_prefs.return_value = _prefs([{"language": "german", "level": "B2"}])
+        mock_jr.get_new.return_value = [_job()]
+        mock_detect.return_value = [Language("de", 0.95)]
+
+        result = apply_language_filter()
+        assert result == {"checked": 1, "auto_rejected": 0, "rejected_ids": []}
+
+    @patch("collector.language_filter.job_repository")
+    @patch("collector.language_filter.candidate_preferences_repository.get_active")
+    @patch("collector.language_filter.detect_langs")
+    def test_native_language_counts_as_usable(self, mock_detect, mock_prefs, mock_jr):
+        mock_prefs.return_value = _prefs([{"language": "german", "level": "Native"}])
+        mock_jr.get_new.return_value = [_job()]
+        mock_detect.return_value = [Language("de", 0.95)]
+
+        result = apply_language_filter()
+        assert result["auto_rejected"] == 0
+
+    @patch("collector.language_filter.job_repository")
+    @patch("collector.language_filter.candidate_preferences_repository.get_active")
+    @patch("collector.language_filter.detect_langs")
+    def test_missing_level_key_counts_as_usable_for_backward_compat(self, mock_detect, mock_prefs, mock_jr):
+        # Preferences saved before the level field existed — never treat a
+        # missing/unrecognized signal as a violation.
+        mock_prefs.return_value = _prefs([{"language": "german"}])
+        mock_jr.get_new.return_value = [_job()]
+        mock_detect.return_value = [Language("de", 0.95)]
+
+        result = apply_language_filter()
+        assert result["auto_rejected"] == 0
+
+    @patch("collector.language_filter.job_repository")
+    @patch("collector.language_filter.candidate_preferences_repository.get_active")
+    @patch("collector.language_filter.detect_langs")
+    def test_sub_b2_language_ignored_but_other_qualifying_language_still_passes(self, mock_detect, mock_prefs, mock_jr):
+        mock_prefs.return_value = _prefs([
+            {"language": "german", "level": "A1"},
+            {"language": "english", "level": "C1"},
+        ])
+        mock_jr.get_new.return_value = [_job()]
+        mock_detect.return_value = [Language("en", 0.95)]
+
+        result = apply_language_filter()
+        assert result["auto_rejected"] == 0
+
+    @patch("collector.language_filter.job_repository")
+    @patch("collector.language_filter.candidate_preferences_repository.get_active")
+    def test_only_sub_b2_languages_configured_skips_everything(self, mock_prefs, mock_jr):
+        # No language clears the working-proficiency bar — same as having
+        # configured no languages at all, skip rather than reject everything.
+        mock_prefs.return_value = _prefs([{"language": "german", "level": "A1"}])
+        result = apply_language_filter()
+        assert result == {"checked": 0, "auto_rejected": 0, "rejected_ids": []}
+        mock_jr.get_new.assert_not_called()
+
+
 class TestRealDetection:
     """A handful of cases against the real langdetect library, not mocked —
     guards against the library's API or default behavior changing under us."""

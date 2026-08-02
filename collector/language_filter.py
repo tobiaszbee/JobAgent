@@ -34,6 +34,15 @@ _LANGUAGE_CODES = {
 
 _MIN_TEXT_LEN = 20  # shorter text is unreliable for language detection — skip, don't reject
 
+# CEFR proficiency ordering, low to high — questionnaire.js's LEVEL_OPTIONS.
+_CEFR_RANK = {"a1": 0, "a2": 1, "b1": 2, "b2": 3, "c1": 4, "c2": 5, "native": 6}
+# B2 ("professional working proficiency") is the conventional minimum for being
+# able to actually work in a language, not just read a posting written in it —
+# selecting German at A1 shouldn't count as "I can work in German" and let
+# German-language postings through, which is exactly what happened before this
+# threshold existed (the level was collected but never read anywhere).
+_MIN_WORKING_LEVEL = _CEFR_RANK["b2"]
+
 
 def _candidate_language_codes() -> set[str]:
     prefs = candidate_preferences_repository.get_active()
@@ -41,6 +50,12 @@ def _candidate_language_codes() -> set[str]:
         return set()
     codes = set()
     for entry in prefs.get("languages") or []:
+        level_rank = _CEFR_RANK.get((entry.get("level") or "").strip().lower())
+        # Unrecognized/missing level (e.g. saved before this field existed) is
+        # never treated as a violation — only an explicit sub-B2 level excludes
+        # a language from counting as "usable for work".
+        if level_rank is not None and level_rank < _MIN_WORKING_LEVEL:
+            continue
         code = _LANGUAGE_CODES.get((entry.get("language") or "").strip().lower())
         if code:
             codes.add(code)
