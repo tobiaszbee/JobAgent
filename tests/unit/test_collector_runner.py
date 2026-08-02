@@ -218,6 +218,62 @@ class TestCollectJobCardsQueryExclusion:
         assert searched_titles == ["Query A", "Query B"]
 
 
+class TestCollectJobCardsBudgetAllocation:
+    # Regression for the audit's exact finding: max_jobs used to be one global
+    # counter consumed in source-registration order, so the first source (and
+    # within it, the first query) could exhaust the whole budget before the
+    # rest of the run ever contributed anything.
+
+    @patch("collector.runner.search_stats_repository")
+    @patch("collector.runner.job_repository")
+    @patch("collector.runner.make_source")
+    def test_max_jobs_split_fairly_across_sources(self, mock_make_source, mock_jobs, mock_stats):
+        def _source_with_jobs(n, source_name):
+            source = _mock_source()
+            source.search.return_value = [
+                RawJob(title=f"Dev {i}", company="Acme", location="Poland",
+                       url=f"https://{source_name}.com/{i}", source=source_name, description="desc")
+                for i in range(n)
+            ]
+            return source
+
+        remotive_source = _source_with_jobs(10, "remotive")
+        remoteok_source = _source_with_jobs(10, "remoteok")
+        mock_make_source.side_effect = lambda source_id, **kw: {
+            "remotive": remotive_source, "remoteok": remoteok_source,
+        }[source_id]
+        mock_jobs.insert.side_effect = lambda **kw: kw["url"]
+
+        _collect_job_cards(
+            ["remotive", "remoteok"], ["PHP Developer"], ["Remote"],
+            days_back=1, max_jobs=4, known_urls=set(), rejected_kw=[], session_id=1,
+        )
+
+        # Each source's search() call should be capped to its fair share (2 of
+        # the total 4) — under the old shared-counter logic, the second
+        # source would have seen 0 (or a near-zero) remaining budget instead.
+        assert remotive_source.search.call_args.kwargs["max_results"] == 2
+        assert remoteok_source.search.call_args.kwargs["max_results"] == 2
+
+    @patch("collector.runner._MAX_TOTAL_SEARCHES", 2)
+    @patch("collector.runner.search_stats_repository")
+    @patch("collector.runner.job_repository")
+    @patch("collector.runner.make_source")
+    def test_total_search_count_is_capped(self, mock_make_source, mock_jobs, mock_stats):
+        # Regression: no upper limit on total searches meant a broad location
+        # selection ("+Add all EU countries") times several search-query
+        # criteria could run into the hundreds with no cap at all.
+        source = _mock_source()
+        mock_make_source.return_value = source
+
+        _collect_job_cards(
+            ["remotive"], ["PHP Developer"], ["Poland", "Germany", "France", "Spain"],
+            days_back=1, max_jobs=None, known_urls=set(), rejected_kw=[], session_id=1,
+        )
+
+        assert source.search.call_count == 2
+
+
 class TestCollectJobCardsSearchQueryAttribution:
     @patch("collector.runner.search_stats_repository")
     @patch("collector.runner.job_repository")

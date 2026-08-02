@@ -167,6 +167,16 @@ def _search_pause_seconds(new_count: int) -> float:
     return glance + reading
 
 
+# Hard ceiling on total search calls in one run, independent of max_jobs — a
+# job-count budget doesn't help when searches simply find nothing new (e.g. a
+# niche framework query repeated across many countries), so a long-tail
+# combination like "+Add all EU countries" × several search-query criteria
+# could previously rack up hundreds of stealth-paced searches with no cap at
+# all. This is deliberately generous (most real runs use a handful of
+# sources/queries/locations) — it's a safety rail, not a normal-case limit.
+_MAX_TOTAL_SEARCHES = 150
+
+
 def _collect_job_cards(
     selected_sources: list[str],
     search_queries: list[str],
@@ -181,8 +191,13 @@ def _collect_job_cards(
     jobs_new = 0
     jobs_pending_description: list[tuple[str, str, str]] = []
     jobs_prefiltered = 0
+    total_searches = 0
+    search_cap_hit = False
 
     for source_id in selected_sources:
+        if search_cap_hit:
+            break
+
         locations_for_source = _locations_for_source(source_id, locations)
         if not locations_for_source:
             logger.info(f"\n[{source_id}] Skipping — none of the candidate's selected countries apply to this source.")
@@ -204,13 +219,37 @@ def _collect_job_cards(
                                 logger.info(f"  [prune] Skipping LinkedIn query {q!r} (auto-excluded: {excluded[q]})")
                         queries_for_source = [q for q in search_queries if q not in excluded]
 
+                # Fair-share budgets instead of first-come-first-served: without
+                # this, the first source (and within it, the first query) could
+                # consume the entire max_jobs budget before anything else ever
+                # got a chance to contribute — later sources/queries silently
+                # ran for nothing.
+                source_budget = max(1, max_jobs // max(1, len(selected_sources))) if max_jobs else None
+                query_budget = (
+                    max(1, source_budget // len(queries_for_source))
+                    if source_budget and queries_for_source else None
+                )
+                jobs_new_this_source = 0
+
                 first_search = True
                 pending_pause = 0.0
                 for title in queries_for_source:
-                    if max_jobs and jobs_new >= max_jobs:
+                    if source_budget and jobs_new_this_source >= source_budget:
                         break
+                    if search_cap_hit:
+                        break
+                    jobs_new_this_query = 0
                     for location in locations_for_source:
-                        if max_jobs and jobs_new >= max_jobs:
+                        if source_budget and jobs_new_this_source >= source_budget:
+                            break
+                        if query_budget and jobs_new_this_query >= query_budget:
+                            break
+                        if total_searches >= _MAX_TOTAL_SEARCHES:
+                            logger.warning(
+                                f"\n[search-cap] Reached the {_MAX_TOTAL_SEARCHES}-search limit for this run — "
+                                "stopping early rather than continuing unbounded."
+                            )
+                            search_cap_hit = True
                             break
 
                         if not first_search and source.requires_stealth_pauses:
@@ -220,13 +259,18 @@ def _collect_job_cards(
                         first_search = False
 
                         logger.info(f"\nSearching: {title!r} in {location!r}")
-                        remaining = (max_jobs - jobs_new) if max_jobs else None
+                        total_searches += 1
+                        remaining = None
+                        if query_budget:
+                            remaining = min(query_budget - jobs_new_this_query, source_budget - jobs_new_this_source)
                         raw_jobs = source.search(title, location, max_results=remaining, known_urls=known_urls)
                         jobs_found += len(raw_jobs)
 
                         new_this_search = 0
                         for raw in raw_jobs:
-                            if max_jobs and jobs_new >= max_jobs:
+                            if source_budget and jobs_new_this_source >= source_budget:
+                                break
+                            if query_budget and jobs_new_this_query >= query_budget:
                                 break
                             try:
                                 job_id = job_repository.insert(
@@ -252,6 +296,8 @@ def _collect_job_cards(
                                 continue
 
                             jobs_new += 1
+                            jobs_new_this_source += 1
+                            jobs_new_this_query += 1
                             new_this_search += 1
                             known_urls.add(raw.url)
                             if not raw.description:
