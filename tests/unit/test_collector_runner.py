@@ -15,12 +15,18 @@ class TestLocationsForSource:
         countries = ["Poland", "Germany", "United Kingdom"]
         assert _locations_for_source("linkedin", countries) == countries
 
-    def test_worldwide_remote_sources_always_get_a_single_remote_search(self):
+    def test_worldwide_remote_sources_search_once_per_candidate_location(self):
+        # Regression: a single "Remote" search used to be an optimization, but
+        # collector/location.py's matching treats "Remote" as matching
+        # everything unconditionally — that made country selection a no-op
+        # for these 4 sources, silently letting e.g. "Remote — US only"
+        # through for a candidate who only selected Poland.
         for source_id in ("remotive", "remoteok", "workingnomads", "weworkremotely"):
-            assert _locations_for_source(source_id, ["Poland", "Germany", "Canada"]) == ["Remote"]
+            assert _locations_for_source(source_id, ["Poland", "Germany", "Canada"]) == ["Poland", "Germany", "Canada"]
 
-    def test_worldwide_remote_source_ignores_empty_country_list(self):
-        # These sources don't depend on the candidate's country list at all.
+    def test_worldwide_remote_source_falls_back_to_remote_when_no_countries_selected(self):
+        # No candidate country to check a job's disclosed location against —
+        # fall back to the unrestricted single "Remote" search.
         assert _locations_for_source("remotive", []) == ["Remote"]
 
     def test_poland_only_source_returns_poland_when_selected(self):

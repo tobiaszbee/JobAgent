@@ -118,9 +118,15 @@ def _fetch_descriptions_in_batches(jobs_pending_description: list[tuple[str, str
 # - LinkedIn: one search per selected location (its own per-term search semantics),
 #   accepts both countries and cities.
 # - Remotive/RemoteOK/WorkingNomads/WeWorkRemotely: single global remote-job boards, not
-#   segmented by country. Their shared collector/location.py matching already treats the
-#   literal "Remote" search term as matching everything, so searching once with "Remote"
-#   covers every candidate location in one call instead of N near-duplicate ones.
+#   segmented by country — one search per candidate location instead of a single "Remote"
+#   search. Each source caches its one HTTP fetch per run, so this is a cheap in-memory
+#   refilter per location, not N HTTP calls. A single "Remote" search term used to be used
+#   here as an optimization, but collector/location.py's matching treats "Remote" as
+#   matching *everything* unconditionally (see _REMOTE_TERMS) — that made every candidate
+#   country selection a no-op for these 4 sources, silently letting e.g. "Remote — US only"
+#   through for a candidate who only selected Poland. Falls back to a single "Remote"
+#   search only when the candidate didn't select any countries at all (no restriction to
+#   check a job's disclosed location against).
 # - The Poland-focused boards only ever return anything for a "Poland" search (see each
 #   source's own _POLAND_ALIASES gate) — only run them if the candidate actually wants
 #   Poland, either directly (remote_countries) or via a Polish hybrid/onsite city, and
@@ -138,7 +144,7 @@ _POLAND_CITIES = frozenset({
 
 def _locations_for_source(source_id: str, locations: list[str]) -> list[str]:
     if source_id in _WORLDWIDE_REMOTE_SOURCES:
-        return ["Remote"]
+        return locations if locations else ["Remote"]
     if source_id in _POLAND_ONLY_SOURCES:
         wants_poland = any(
             l.strip().lower() in _POLAND_ALIASES or l.strip().lower() in _POLAND_CITIES
