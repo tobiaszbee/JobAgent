@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 import anthropic
 import httpx
 
-from ranker.debate import debate_rank, _format_job_for_review, _parse_reviews
+from ranker.debate import DEBATE_UNAVAILABLE_FLAG, debate_rank, _format_job_for_review, _parse_reviews
 
 
 def _rate_limit_error():
@@ -118,6 +118,16 @@ class TestDebateRank:
         assert [j["id"] for j in result] == ["j1", "j2"]
 
     @patch("ranker.debate.anthropic.Anthropic")
+    def test_no_flags_does_not_get_the_unavailable_sentinel(self, mock_anthropic):
+        # A genuine review that found nothing to flag must stay indistinguishable
+        # from "no opinion" — only an actual failure should ever set
+        # DEBATE_UNAVAILABLE_FLAG.
+        jobs = [_job("j1", rank=1)]
+        mock_anthropic.return_value.messages.create.return_value = _debate_response([])
+        result = debate_rank(jobs, "profile")
+        assert result[0].get("debate_flag") != DEBATE_UNAVAILABLE_FLAG
+
+    @patch("ranker.debate.anthropic.Anthropic")
     def test_dealbreaker_risk_demotes_job_to_bottom(self, mock_anthropic):
         jobs = [_job("j1", rank=1), _job("j2", rank=2), _job("j3", rank=3)]
         mock_anthropic.return_value.messages.create.return_value = _debate_response([
@@ -203,11 +213,16 @@ class TestDebateRank:
         assert [j["listwise_rank"] for j in result] == [1, 2, 3]
 
     @patch("ranker.debate.anthropic.Anthropic")
-    def test_api_error_returns_original_ranking_unchanged(self, mock_anthropic):
+    def test_api_error_marks_jobs_unavailable_instead_of_looking_like_a_clean_review(self, mock_anthropic):
+        # Regression: this used to return ranked_jobs completely untouched —
+        # identical in the stored data to "the reviewer checked everything and
+        # flagged nothing", with no way to tell the two apart later.
         jobs = [_job("j1", rank=1), _job("j2", rank=2)]
         mock_anthropic.return_value.messages.create.side_effect = Exception("boom")
         result = debate_rank(jobs, "profile")
-        assert result == jobs
+        assert [j["id"] for j in result] == ["j1", "j2"]
+        assert all(j["debate_flag"] == DEBATE_UNAVAILABLE_FLAG for j in result)
+        assert all(j["debate_note"] for j in result)
 
     @patch("ranker.retry.time.sleep")
     @patch("ranker.debate.anthropic.Anthropic")
@@ -228,7 +243,7 @@ class TestDebateRank:
         assert result[-1]["debate_flag"] == "dealbreaker_risk"
 
     @patch("ranker.debate.anthropic.Anthropic")
-    def test_no_tool_use_block_returns_original_ranking(self, mock_anthropic):
+    def test_no_tool_use_block_marks_jobs_unavailable(self, mock_anthropic):
         text_block = MagicMock(type="text")
         response = MagicMock(
             content=[text_block], stop_reason="end_turn",
@@ -237,20 +252,23 @@ class TestDebateRank:
         mock_anthropic.return_value.messages.create.return_value = response
         jobs = [_job("j1", rank=1)]
         result = debate_rank(jobs, "profile")
-        assert result == jobs
+        assert result[0]["id"] == "j1"
+        assert result[0]["debate_flag"] == DEBATE_UNAVAILABLE_FLAG
 
     @patch("ranker.debate.anthropic.Anthropic")
-    def test_truncated_response_returns_original_ranking_unchanged(self, mock_anthropic):
+    def test_truncated_response_marks_jobs_unavailable_not_a_clean_review(self, mock_anthropic):
         # Regression: a truncated reviews array can still parse as valid-but-
         # partial JSON — without an explicit stop_reason check, a partial
-        # critique could apply flags based on an incomplete review.
+        # critique could apply flags based on an incomplete review. Separately,
+        # this used to return ranked_jobs untouched (no debate_flag at all),
+        # indistinguishable from a genuine "nothing to flag" review.
         jobs = [_job("j1", rank=1), _job("j2", rank=2)]
         mock_anthropic.return_value.messages.create.return_value = _debate_response(
             [{"job_id": "j1", "flag": "dealbreaker_risk", "note": "x"}], stop_reason="max_tokens"
         )
         result = debate_rank(jobs, "profile")
-        assert result == jobs
-        assert "debate_flag" not in result[0]
+        assert [j["id"] for j in result] == ["j1", "j2"]
+        assert result[0]["debate_flag"] == DEBATE_UNAVAILABLE_FLAG  # not "dealbreaker_risk" — that flag must be ignored
 
     @patch("ranker.debate.anthropic.Anthropic")
     def test_questionnaire_included_in_system_prompt_when_given(self, mock_anthropic):

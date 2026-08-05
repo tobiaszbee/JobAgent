@@ -12,6 +12,20 @@ logger = logging.getLogger(__name__)
 
 _VALID_FLAGS = {"dealbreaker_risk", "overrated", "underrated"}
 
+# Written by this module itself on failure, never by the LLM (not in
+# _VALID_FLAGS/the tool schema) — so "debate ran and flagged nothing" and
+# "debate didn't run at all" are no longer stored identically. Before this,
+# every failure path here (API error even after retry, a truncated response,
+# a missing tool_use block) just returned ranked_jobs untouched — the exact
+# same shape as a genuine clean review, with nothing in the data to tell them
+# apart. Read by ranker/rank_cache.py so a run whose debate failed doesn't get
+# silently reused as "unchanged" on a future run with the same candidate pool.
+DEBATE_UNAVAILABLE_FLAG = "review_unavailable"
+
+
+def _mark_unavailable(ranked_jobs: list[dict], reason: str) -> list[dict]:
+    return [{**job, "debate_flag": DEBATE_UNAVAILABLE_FLAG, "debate_note": reason} for job in ranked_jobs]
+
 # How many positions an overrated/underrated flag shifts a job — modest by design:
 # debate is a secondary check, not a second full ranking pass, so it nudges the
 # primary listwise ranking rather than overriding its overall judgment. Naturally
@@ -164,7 +178,7 @@ Use the submit_debate_review tool to report your findings."""
         )
     except Exception as e:
         logger.error(f"Debate review failed: {e}")
-        return ranked_jobs
+        return _mark_unavailable(ranked_jobs, f"Debate review unavailable this run: {e}")
 
     log_anthropic(response, "debate", CLAUDE_MODEL)
 
@@ -174,12 +188,12 @@ Use the submit_debate_review tool to report your findings."""
         # the same as "no tool_use block" below: apply no flags rather than
         # risk acting on a partial critique.
         logger.error("Debate response truncated (max_tokens) — no flags applied.")
-        return ranked_jobs
+        return _mark_unavailable(ranked_jobs, "Debate review unavailable this run: response truncated (max_tokens).")
 
     tool_block = next((b for b in response.content if b.type == "tool_use"), None)
     if not tool_block:
         logger.error("No tool_use block in debate response")
-        return ranked_jobs
+        return _mark_unavailable(ranked_jobs, "Debate review unavailable this run: no tool_use block in response.")
 
     reviews = _parse_reviews(tool_block.input)
     if not reviews:
