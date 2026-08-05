@@ -13,12 +13,13 @@ def _rate_limit_error():
 
 
 def _job(id="j1", title="Senior Dev", company="Acme", location="Remote", description="Good job",
-         structured_data=None, score=None, score_reason=None, posted_at=None):
+         structured_data=None, score=None, score_reason=None, posted_at=None, score_breakdown=None):
     return {
         "id": id, "title": title, "company": company,
         "location": location, "description": description,
         "structured_data": json.dumps(structured_data) if structured_data else None,
         "score": score, "score_reason": score_reason, "posted_at": posted_at,
+        "score_breakdown": json.dumps(score_breakdown) if score_breakdown else None,
     }
 
 
@@ -62,6 +63,19 @@ class TestFormatJob:
     def test_full_description_does_not_get_incomplete_note(self):
         text = _format_job(_job(description="x" * 5000))
         assert "short preview" not in text
+
+    def test_sub_scores_shown_when_present(self):
+        # Regression: sub_scores (stack_fit/seniority_fit/...) were computed by
+        # evaluator/scorer.py and stored on every scored job, but the per-dimension
+        # breakdown behind the single overall_score never reached this prompt.
+        breakdown = {"sub_scores": {"stack_fit": 9, "seniority_fit": 4}, "pros": [], "cons": []}
+        text = _format_job(_job(score=7.0, score_breakdown=breakdown))
+        assert "stack_fit=9" in text
+        assert "seniority_fit=4" in text
+
+    def test_no_sub_scores_line_when_breakdown_absent(self):
+        text = _format_job(_job(score=7.0))
+        assert "sub-scores" not in text.lower()
 
     def test_structured_data_tags_appear(self):
         sd = {"remote": True, "seniority": "senior", "company_type": "startup",

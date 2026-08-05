@@ -81,6 +81,21 @@ def _format_job(job: dict) -> str:
         reason = f" — {job['score_reason']}" if job.get("score_reason") else ""
         parts.append(f"Scorer's rating: {job['score']}/10{reason}")
 
+    # sub_scores (stack_fit/seniority_fit/company_fit/compensation_fit) are
+    # computed by evaluator/scorer.py and stored on every scored job, but were
+    # never surfaced to any downstream prompt — the per-dimension breakdown
+    # behind the single overall_score above, silently discarded.
+    score_breakdown = job.get("score_breakdown")
+    if score_breakdown:
+        try:
+            breakdown = json.loads(score_breakdown) if isinstance(score_breakdown, str) else score_breakdown
+        except Exception:
+            breakdown = None
+        sub_scores = breakdown.get("sub_scores") if breakdown else None
+        if sub_scores:
+            dims = ", ".join(f"{dim}={val}" for dim, val in sub_scores.items())
+            parts.append(f"Scorer's sub-scores (0-10): {dims}")
+
     if structured:
         tags = []
         if structured.get("remote"):

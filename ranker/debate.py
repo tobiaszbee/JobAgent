@@ -1,5 +1,6 @@
 import json
 import logging
+import random
 import anthropic
 
 from config import ANTHROPIC_API_KEY, CLAUDE_MODEL
@@ -53,8 +54,12 @@ _DEBATE_TOOL = {
 }
 
 
-def _format_job_for_review(job: dict, position: int) -> str:
-    parts = [f"[Rank #{position + 1} | ID: {job['id']}]"]
+def _format_job_for_review(job: dict) -> str:
+    # Rank comes from the job's own listwise_rank, not presentation position —
+    # presentation is shuffled below (see debate_rank) so the rank number shown
+    # here must stay tied to the real ranking, not to wherever this job landed
+    # in the shuffled prompt order.
+    parts = [f"[Rank #{job.get('listwise_rank')} | ID: {job['id']}]"]
     parts.append(f"Title: {job['title']} @ {job['company']}")
     reason = job.get("rank_reason") or ""
     if reason:
@@ -67,6 +72,13 @@ def _format_job_for_review(job: dict, position: int) -> str:
         except Exception:
             b = None
         if b:
+            # Exactly the per-dimension signal this reviewer's own brief (below)
+            # asks it to check for — seniority mismatch, wrong company type —
+            # computed by the scorer but never previously shown here at all.
+            sub_scores = b.get("sub_scores")
+            if sub_scores:
+                dims = ", ".join(f"{dim}={val}" for dim, val in sub_scores.items())
+                parts.append(f"Scorer's sub-scores (0-10): {dims}")
             if b.get("pros"):
                 parts.append(f"Pros: {'; '.join(b['pros'])}")
             if b.get("cons"):
@@ -109,15 +121,26 @@ def debate_rank(ranked_jobs: list[dict], candidate_profile: str, preferences: li
         if scored:
             prefs_text = f"PREFERENCE PROFILE:\n{render_signals(scored)}\n\n"
 
-    jobs_text = "\n\n---\n\n".join(_format_job_for_review(job, i) for i, job in enumerate(ranked_jobs))
+    # Shuffled presentation order, same reasoning as ranker/listwise.py's own
+    # shuffle: jobs shown in a fixed best-to-worst order (rank_reason already
+    # frames it that way) risk anchoring the reviewer toward confirming
+    # whatever's presented first — exactly the top-ranked jobs where a missed
+    # dealbreaker matters most (WOULD_APPLY["rank_ceiling"] gates on a job
+    # staying near the top of this exact list). Each job still carries its own
+    # [Rank #N] label (_format_job_for_review), so the reviewer always knows
+    # the real rank — only the order it's read in changes.
+    presented = ranked_jobs[:]
+    random.shuffle(presented)
+    jobs_text = "\n\n---\n\n".join(_format_job_for_review(job) for job in presented)
     questionnaire_text = f"{questionnaire}\n\n" if questionnaire else ""
 
     system = f"""You are a second, independent reviewer checking another model's job ranking for this candidate.
 
 {candidate_profile}
 
-{questionnaire_text}{prefs_text}The primary ranking below is already ordered best (rank #1) to worst. Your job is NOT to re-rank —
-it's to catch cases the primary ranking may have gotten wrong, especially where strong stack/keyword
+{questionnaire_text}{prefs_text}Each job below is labeled with its rank from the primary ranking (rank #1 = best). Jobs are listed in a
+shuffled order, not by rank — go by the label, not position. Your job is NOT to re-rank — it's to catch
+cases the primary ranking may have gotten wrong, especially where strong stack/keyword
 similarity could mask a real dealbreaker (seniority mismatch, wrong company type, an explicit
 requirement the candidate can't meet, etc.).
 

@@ -34,19 +34,42 @@ def _debate_response(reviews: list[dict], stop_reason="tool_use"):
 
 class TestFormatJobForReview:
     def test_includes_rank_reason(self):
-        text = _format_job_for_review(_job(rank_reason="Great Symfony match"), 0)
+        text = _format_job_for_review(_job(rank_reason="Great Symfony match"))
         assert "Great Symfony match" in text
 
     def test_includes_pros_cons_from_breakdown(self):
         import json
         breakdown = json.dumps({"pros": ["Strong stack"], "cons": ["No salary"]})
-        text = _format_job_for_review(_job(breakdown=breakdown), 0)
+        text = _format_job_for_review(_job(breakdown=breakdown))
         assert "Strong stack" in text
         assert "No salary" in text
 
     def test_missing_breakdown_does_not_crash(self):
-        text = _format_job_for_review(_job(breakdown=None), 0)
+        text = _format_job_for_review(_job(breakdown=None))
         assert "Dev" in text
+
+    def test_includes_rank_from_job_not_position(self):
+        # Rank shown must come from the job's own listwise_rank, not wherever it
+        # lands in a (now shuffled) presentation order — see debate_rank.
+        text = _format_job_for_review(_job(rank=7))
+        assert "Rank #7" in text
+
+    def test_includes_sub_scores_from_breakdown(self):
+        # Regression: sub_scores (stack_fit/seniority_fit/company_fit/
+        # compensation_fit) were computed by the scorer and stored, but never
+        # shown to this reviewer — despite its own brief explicitly asking it to
+        # check for exactly a seniority or company-type mismatch.
+        import json
+        breakdown = json.dumps({"sub_scores": {"seniority_fit": 3, "company_fit": 8}, "pros": [], "cons": []})
+        text = _format_job_for_review(_job(breakdown=breakdown))
+        assert "seniority_fit=3" in text
+        assert "company_fit=8" in text
+
+    def test_missing_sub_scores_does_not_crash_or_add_a_line(self):
+        import json
+        breakdown = json.dumps({"pros": ["Strong stack"], "cons": []})
+        text = _format_job_for_review(_job(breakdown=breakdown))
+        assert "sub-scores" not in text.lower()
 
 
 class TestParseReviews:
@@ -66,6 +89,26 @@ class TestParseReviews:
 class TestDebateRank:
     def test_empty_input_returns_empty(self):
         assert debate_rank([], "profile") == []
+
+    @patch("ranker.debate.random.shuffle")
+    @patch("ranker.debate.anthropic.Anthropic")
+    def test_presentation_order_is_shuffled(self, mock_anthropic, mock_shuffle):
+        # Regression: jobs used to be sent to the reviewer in a fixed best-to-
+        # worst order (matching listwise_rank) — exactly the anchoring risk
+        # ranker/listwise.py already shuffles against for the primary ranking.
+        jobs = [_job("j1", rank=1), _job("j2", rank=2), _job("j3", rank=3)]
+        mock_anthropic.return_value.messages.create.return_value = _debate_response([])
+        debate_rank(jobs, "profile")
+        mock_shuffle.assert_called_once()
+
+    @patch("ranker.debate.anthropic.Anthropic")
+    def test_rank_label_sent_to_reviewer_reflects_listwise_rank_not_presentation_order(self, mock_anthropic):
+        jobs = [_job("j1", rank=5), _job("j2", rank=1)]
+        mock_anthropic.return_value.messages.create.return_value = _debate_response([])
+        debate_rank(jobs, "profile")
+        sent_text = mock_anthropic.return_value.messages.create.call_args.kwargs["messages"][0]["content"]
+        assert "[Rank #5 | ID: j1]" in sent_text
+        assert "[Rank #1 | ID: j2]" in sent_text
 
     @patch("ranker.debate.anthropic.Anthropic")
     def test_no_flags_preserves_order(self, mock_anthropic):

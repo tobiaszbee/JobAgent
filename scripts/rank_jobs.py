@@ -11,8 +11,10 @@ import sys
 import logging
 
 sys.stdout.reconfigure(line_buffering=True)
+# No local logger — this script prints its own output directly, but still
+# needs this so log messages from imported modules (e.g. ranker/retry.py's
+# retry warnings) actually reach stdout instead of going nowhere.
 logging.basicConfig(level=logging.INFO, stream=sys.stdout, format="%(message)s")
-logger = logging.getLogger(__name__)
 
 import api_client
 from db.repositories import job_repository, preference_repository
@@ -30,8 +32,13 @@ from config import RANKING, EXPLORATION
 try:
     candidate_profile = load_active_profile()
 except ValueError as e:
-    logger.warning(f"No CV profile: {e} — ranking without candidate context")
-    candidate_profile = ""
+    # Matches evaluator/runner.py's own no-CV behavior: stop, don't score/rank
+    # anything, rather than silently proceeding with candidate_profile="" — a
+    # ranking built with zero candidate context used to produce real-looking
+    # listwise_rank/rank_reason output indistinguishable from a genuinely
+    # personalized run. Jobs stay visible as 'new'/unranked instead.
+    print(f"{e} Skipping ranking.")
+    sys.exit(0)
 
 latest_pref = preference_repository.get_latest()
 preferences = latest_pref["signals"] if latest_pref else []
