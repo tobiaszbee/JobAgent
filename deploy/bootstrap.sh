@@ -25,7 +25,7 @@ echo "== base packages =="
 # every new Python version (e.g. 3.14 at the time of writing) and falls back to
 # compiling from source.
 apt-get install -y git curl ca-certificates gnupg python3 python3-venv python3-dev \
-    postgresql wireguard build-essential libpq-dev
+    postgresql wireguard build-essential libpq-dev restic
 
 echo "== Caddy (official apt repo) =="
 # Verify these URLs still match https://caddyserver.com/docs/install#debian-ubuntu-raspbian
@@ -87,4 +87,20 @@ cat <<'EOF'
   5. cp deploy/jobagentweb.service /etc/systemd/system/ && systemctl enable --now jobagentweb
   6. Fill in your real domain in deploy/Caddyfile, then:
      cp deploy/Caddyfile /etc/caddy/Caddyfile && systemctl reload caddy
+  7. Set up nightly backups (Postgres dump + .env, restic-encrypted):
+     a. Generate a repo password and save it in your password manager NOW — it's
+        the only way to ever read a backup back, and it must NOT live only on
+        this VPS (see deploy/backup.sh's own header for why):
+          openssl rand -base64 32 | tee /root/.restic-password
+          chmod 600 /root/.restic-password
+     b. cp deploy/backup.sh /usr/local/bin/jobagentweb-backup.sh && chmod +x /usr/local/bin/jobagentweb-backup.sh
+        cp deploy/jobagentweb-backup.service deploy/jobagentweb-backup.timer /etc/systemd/system/
+        systemctl enable --now jobagentweb-backup.timer
+     c. Run it once by hand to confirm it actually works before trusting the timer:
+          systemctl start jobagentweb-backup.service && journalctl -u jobagentweb-backup.service -n 50
+     d. From a machine that is NOT this VPS, pull the backup down on its own
+        schedule (see deploy/pull-backup.ps1 for a Windows example) — a restic
+        repo that only ever lives on this box protects against a bad UPDATE,
+        not against losing the VPS itself.
+     e. See deploy/restore.sh for disaster recovery.
 EOF
