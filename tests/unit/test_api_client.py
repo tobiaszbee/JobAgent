@@ -71,6 +71,48 @@ class TestRequestWithApiKey:
         assert sent_headers["X-JobAgent-Api-Key"] == "my-secret-key"
 
 
+class TestApiKeyFallbackToCookie:
+    # Regression: a freshly re-provisioned server whose .env is missing the key
+    # used to mean every call 401s forever, even if this installation still has
+    # a valid, unexpired session cookie on disk from before the key was set up.
+
+    def test_falls_back_to_cookie_and_succeeds(self, monkeypatch):
+        monkeypatch.setattr(api_client, "JOBAGENT_API_KEY", "my-secret-key")
+        api_client._save_cookie("saved-cookie-value")
+        responses = [_mock_response(status_code=401), _mock_response(status_code=200, json_body={"ok": True})]
+        with patch.object(api_client._client, "request", side_effect=responses) as mock_request:
+            resp = api_client.request("GET", "/api/jobs/stats")
+        assert resp.status_code == 200
+        assert mock_request.call_count == 2
+
+    def test_fallback_retry_drops_the_api_key_header(self, monkeypatch):
+        monkeypatch.setattr(api_client, "JOBAGENT_API_KEY", "my-secret-key")
+        api_client._save_cookie("saved-cookie-value")
+        responses = [_mock_response(status_code=401), _mock_response(status_code=200)]
+        with patch.object(api_client._client, "request", side_effect=responses) as mock_request:
+            api_client.request("GET", "/api/jobs/stats")
+        retry_headers = mock_request.call_args_list[1].kwargs["headers"]
+        assert "X-JobAgent-Api-Key" not in retry_headers
+
+    def test_fallback_retry_also_401_raises_combined_message(self, monkeypatch):
+        monkeypatch.setattr(api_client, "JOBAGENT_API_KEY", "my-secret-key")
+        api_client._save_cookie("saved-cookie-value")
+        responses = [_mock_response(status_code=401), _mock_response(status_code=401)]
+        with patch.object(api_client._client, "request", side_effect=responses):
+            with pytest.raises(api_client.NotLoggedInError, match="JOBAGENT_API_KEY") as exc_info:
+                api_client.request("GET", "/api/jobs/stats")
+        assert "also tried" in str(exc_info.value)
+
+    def test_no_cookie_to_fall_back_to_raises_immediately(self, monkeypatch):
+        # No session file at all (the _clean_client_state fixture's default
+        # state) — same behavior as before this fix, single attempt.
+        monkeypatch.setattr(api_client, "JOBAGENT_API_KEY", "my-secret-key")
+        with patch.object(api_client._client, "request", return_value=_mock_response(status_code=401)) as mock_request:
+            with pytest.raises(api_client.NotLoggedInError, match="JOBAGENT_API_KEY"):
+                api_client.request("GET", "/api/jobs/stats")
+        assert mock_request.call_count == 1
+
+
 class TestRequestWithSessionCookie:
     def test_no_cookie_no_key_raises_not_logged_in(self):
         with pytest.raises(api_client.NotLoggedInError):

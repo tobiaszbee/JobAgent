@@ -37,6 +37,16 @@ class ApiError(Exception):
         super().__init__(f"{status_code}: {detail}")
 
 
+def _raise_for_status(resp: httpx.Response) -> httpx.Response:
+    if resp.status_code >= 400:
+        try:
+            detail = resp.json().get("detail", resp.text)
+        except json.JSONDecodeError:
+            detail = resp.text
+        raise ApiError(resp.status_code, detail)
+    return resp
+
+
 def _load_cookie() -> str | None:
     if not _SESSION_FILE.exists():
         return None
@@ -139,18 +149,29 @@ def request(method: str, path: str, **kwargs):
 
     if resp.status_code == 401:
         if JOBAGENT_API_KEY:
+            # The key path failed — this is the one dead end fixed here: a
+            # freshly re-provisioned server whose .env is missing the key
+            # (bootstrap.sh's own env.example didn't even list it until this
+            # fix) used to mean every call 401s forever, with no way back to
+            # the session-cookie flow this installation might still have a
+            # valid, unexpired cookie for. Try it once before giving up.
+            cookie = _load_cookie()
+            if cookie:
+                fallback_headers = dict(kwargs.get("headers") or {})
+                fallback_headers.pop("X-JobAgent-Api-Key", None)
+                kwargs["headers"] = fallback_headers
+                _client.cookies.clear()
+                _client.cookies.set("session", cookie)
+                resp = _client.request(method, path, **kwargs)
+                if resp.status_code != 401:
+                    return _raise_for_status(resp)
             raise NotLoggedInError(
                 "JobAgentWeb rejected JOBAGENT_API_KEY — check it matches JOBAGENT_API_KEY "
                 "in JobAgentWeb's own .env on the server."
+                + (" (A stored session cookie was also tried as a fallback and rejected too.)" if cookie else "")
             )
         raise NotLoggedInError("Session expired or invalid — run `python scripts/login.py` again.")
-    if resp.status_code >= 400:
-        try:
-            detail = resp.json().get("detail", resp.text)
-        except json.JSONDecodeError:
-            detail = resp.text
-        raise ApiError(resp.status_code, detail)
-    return resp
+    return _raise_for_status(resp)
 
 
 def get(path: str, **kwargs) -> httpx.Response:
