@@ -100,6 +100,7 @@ Edit `.env`:
 ANTHROPIC_API_KEY=sk-ant-...
 VOYAGE_API_KEY=pa-...
 JOBAGENTWEB_BASE_URL=http://10.66.0.1:8000   # only if different from the default
+JOBAGENT_API_KEY=...                         # optional — see .env.example
 ```
 
 `ANTHROPIC_API_KEY` and `VOYAGE_API_KEY` are required at import time — `config.py` raises immediately if either is missing, so nothing (not even the dashboard) starts without both set.

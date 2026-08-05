@@ -54,6 +54,24 @@ sudo -u "$APP_USER" python3 -m venv "$APP_DIR/.venv"
 sudo -u "$APP_USER" "$APP_DIR/.venv/bin/pip" install --upgrade pip
 sudo -u "$APP_USER" "$APP_DIR/.venv/bin/pip" install -r "$APP_DIR/requirements.txt"
 
+echo "== firewall: keep :8000 off the public internet =="
+# jobagentweb.service binds 0.0.0.0:8000, not 127.0.0.1 — Caddy needs to reach
+# it locally AND JobAgent needs to reach it over the WireGuard tunnel, and
+# --host 127.0.0.1 would cut off the tunnel too (JobAgent's default base URL
+# is the wg0 address, not localhost). ufw is what actually keeps :8000 off the
+# public internet instead: allowed on loopback and the tunnel interface only,
+# denied everywhere else. Safe to run before WireGuard is configured (step 2
+# below) — a rule naming an interface that doesn't exist yet just has no
+# effect until it does, it doesn't error.
+apt-get install -y ufw
+ufw allow OpenSSH
+ufw allow 80/tcp
+ufw allow 443/tcp
+ufw allow 51820/udp          # WireGuard's own listening port (deploy/wg-server.conf.example)
+ufw allow in on lo to any port 8000 proto tcp
+ufw allow in on wg0 to any port 8000 proto tcp
+ufw --force enable
+
 cat <<'EOF'
 
 == bootstrap done — remaining manual steps ==
@@ -64,7 +82,8 @@ cat <<'EOF'
   3. Point Postgres at the WireGuard interface only (see chat for the exact
      listen_addresses / pg_hba.conf lines — depends on your Postgres version's config path)
   4. cp deploy/env.example /opt/jobagentweb/.env   and fill in the real Postgres password,
-     SECRET_KEY and INVITE_CODE
+     SECRET_KEY and INVITE_CODE (JOBAGENT_API_KEY / JOBAGENT_API_KEY_USER_ID are optional —
+     see the comments in env.example; leave blank to skip the static-key login bypass)
   5. cp deploy/jobagentweb.service /etc/systemd/system/ && systemctl enable --now jobagentweb
   6. Fill in your real domain in deploy/Caddyfile, then:
      cp deploy/Caddyfile /etc/caddy/Caddyfile && systemctl reload caddy
