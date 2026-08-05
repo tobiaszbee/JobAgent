@@ -88,6 +88,54 @@ def _parse_rsc_offers(html: str) -> list[dict]:
     return []
 
 
+# extractor/runner.py's schema — same keys/enums, so this can be overlaid
+# directly onto Haiku's output with no translation step.
+_SALARY_UNIT_TO_PERIOD = {"month": "monthly", "hour": "hourly", "year": "yearly"}
+_KNOWN_SALARY_CURRENCIES = {"PLN", "EUR", "USD", "GBP"}
+_KNOWN_SENIORITY_LEVELS = {"junior", "mid", "senior", "lead", "director"}
+
+
+def _extract_source_structured_data(offer: dict) -> dict:
+    """Fields justjoin.it's own API already discloses structurally (verified
+    live against the real site) — salary and skills are collected here as
+    UI-driven fields, not prose, so there's no reason to make Haiku re-guess
+    them from the description later. Conservative like every dealbreaker
+    check: skip a field entirely rather than write a value outside the
+    extraction schema's own enum (e.g. an unsupported currency, or a
+    non-standard salary unit)."""
+    data: dict = {}
+
+    seniority = offer.get("experienceLevel")
+    if seniority in _KNOWN_SENIORITY_LEVELS:
+        data["seniority"] = seniority
+
+    employment_types = offer.get("employmentTypes") or []
+    # Multiple entries exist per posting: one "original" (what the company
+    # actually typed in) plus several currency-converted duplicates — only the
+    # original is a real disclosed figure, not justjoin's own FX estimate.
+    contract = next((e for e in employment_types if e.get("currencySource") == "original"), None)
+    if contract is None and employment_types:
+        contract = employment_types[0]
+    if contract:
+        period = _SALARY_UNIT_TO_PERIOD.get(contract.get("unit"))
+        currency = contract.get("currency")
+        salary_from, salary_to = contract.get("from"), contract.get("to")
+        if period and currency in _KNOWN_SALARY_CURRENCIES and salary_from and salary_to:
+            data["salary_min"] = round(salary_from)
+            data["salary_max"] = round(salary_to)
+            data["salary_currency"] = currency
+            data["salary_period"] = period
+
+    required = offer.get("requiredSkills") or []
+    if required:
+        data["stack_required"] = required
+    preferred = offer.get("niceToHaveSkills") or []
+    if preferred:
+        data["stack_preferred"] = preferred
+
+    return data
+
+
 class JustJoinSource(JobSource):
     def __init__(self, days_back: int = 7, **_):
         self._days_back = days_back
@@ -222,6 +270,7 @@ class JustJoinSource(JobSource):
                 source_id=offer.get("guid"),
                 description=self.fetch_description(url),
                 posted_at=pub_dt.isoformat() if pub_dt else None,
+                source_structured_data=_extract_source_structured_data(offer) or None,
             ))
 
         return results

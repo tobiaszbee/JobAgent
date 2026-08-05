@@ -3,7 +3,7 @@ import json
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
-from collector.sources.justjoin import JustJoinSource, _parse_rsc_offers
+from collector.sources.justjoin import JustJoinSource, _parse_rsc_offers, _extract_source_structured_data
 
 
 def _push_script(payload: str) -> str:
@@ -197,6 +197,30 @@ class TestJustJoinSourceSearch:
         results = src.search("PHP Developer", "Poland")
         assert results == []
 
+    def test_source_structured_data_captures_salary_and_skills(self):
+        # Regression: justjoin.it discloses salary/skills as structured API
+        # fields (verified live against the real site) — Haiku shouldn't have
+        # to re-guess them from the description text later.
+        offer = _offer()
+        offer["experienceLevel"] = "senior"
+        offer["employmentTypes"] = [
+            {"from": 15000, "to": 25000, "currency": "PLN", "currencySource": "original", "unit": "month"},
+            {"from": 3500, "to": 5800, "currency": "EUR", "currencySource": "conversion", "unit": "month"},
+        ]
+        offer["requiredSkills"] = ["PHP", "Symfony"]
+        offer["niceToHaveSkills"] = ["Docker"]
+        src = _make_source()
+        src._client.get.return_value = MagicMock(status_code=200, text=_offers_html([offer]))
+        results = src.search("PHP Developer", "Poland")
+        ssd = results[0].source_structured_data
+        assert ssd["seniority"] == "senior"
+        assert ssd["salary_min"] == 15000
+        assert ssd["salary_max"] == 25000
+        assert ssd["salary_currency"] == "PLN"
+        assert ssd["salary_period"] == "monthly"
+        assert ssd["stack_required"] == ["PHP", "Symfony"]
+        assert ssd["stack_preferred"] == ["Docker"]
+
     def test_posted_at_captures_the_publication_date(self):
         # publishedAt was already parsed for the days_back cutoff, then
         # discarded — RawJob.posted_at carries it through instead.
@@ -206,6 +230,47 @@ class TestJustJoinSourceSearch:
         assert results[0].posted_at is not None
         posted = datetime.fromisoformat(results[0].posted_at)
         assert (datetime.now(timezone.utc) - posted).days == 3
+
+
+class TestExtractSourceStructuredData:
+    def test_extracts_salary_from_original_currency_entry(self):
+        offer = {
+            "experienceLevel": "senior",
+            "employmentTypes": [
+                {"from": 15000, "to": 25000, "currency": "PLN", "currencySource": "original", "unit": "month"},
+                {"from": 3500, "to": 5800, "currency": "EUR", "currencySource": "conversion", "unit": "month"},
+            ],
+        }
+        data = _extract_source_structured_data(offer)
+        assert data["salary_min"] == 15000
+        assert data["salary_currency"] == "PLN"
+
+    def test_unknown_seniority_value_skipped(self):
+        # justjoin.it's experienceLevel vocabulary doesn't necessarily line up
+        # 1:1 with extractor/runner.py's enum — never write a value outside it.
+        data = _extract_source_structured_data({"experienceLevel": "c-level"})
+        assert "seniority" not in data
+
+    def test_unsupported_currency_skips_salary_entirely(self):
+        offer = {"employmentTypes": [
+            {"from": 3200, "to": 5400, "currency": "CHF", "currencySource": "original", "unit": "month"},
+        ]}
+        assert "salary_min" not in _extract_source_structured_data(offer)
+
+    def test_unknown_unit_skips_salary_entirely(self):
+        offer = {"employmentTypes": [
+            {"from": 15000, "to": 25000, "currency": "PLN", "currencySource": "original", "unit": "sprint"},
+        ]}
+        assert "salary_min" not in _extract_source_structured_data(offer)
+
+    def test_no_employment_types_returns_no_salary(self):
+        assert _extract_source_structured_data({}) == {}
+
+    def test_empty_skills_omitted_not_written_as_empty_list(self):
+        offer = {"requiredSkills": [], "niceToHaveSkills": []}
+        data = _extract_source_structured_data(offer)
+        assert "stack_required" not in data
+        assert "stack_preferred" not in data
 
 
 class TestFetchDescription:

@@ -283,6 +283,7 @@ def _collect_job_cards(
                                     description=raw.description,
                                     search_query=title,
                                     posted_at=raw.posted_at,
+                                    source_structured_data=raw.source_structured_data,
                                 )
                             except Exception as e:
                                 # A single job's insert failing (e.g. a brief DB

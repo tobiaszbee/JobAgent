@@ -152,6 +152,22 @@ def extract_job(description: str, source: str | None = None) -> dict:
     return {}
 
 
+def _merge_source_structured_data(data: dict, job: dict) -> dict:
+    """A source's own native fields (e.g. justjoin.it's salary/skills API fields —
+    see collector/sources/justjoin.py) are ground truth, not a guess from the
+    description text — they override whatever Haiku extracted for the same keys.
+    Only overlays what the source actually provided; every field a source doesn't
+    disclose still comes from Haiku untouched."""
+    raw = job.get("source_structured_data")
+    if not raw:
+        return data
+    try:
+        source_data = json.loads(raw) if isinstance(raw, str) else raw
+    except Exception:
+        return data
+    return {**data, **source_data}
+
+
 def run_extraction(jobs: list[dict]) -> int:
     """Extract structured data for jobs that don't have it yet. Returns count updated."""
     to_extract = [j for j in jobs if j.get("description") and not j.get("structured_data")]
@@ -162,6 +178,7 @@ def run_extraction(jobs: list[dict]) -> int:
     for job in to_extract:
         data = extract_job(job["description"], job.get("source"))
         if data:
+            data = _merge_source_structured_data(data, job)
             job_repository.update_structured_data(job["id"], data)
             logger.info(f"  Extracted: {job['title']} @ {job['company']} → {json.dumps(data, ensure_ascii=False)[:120]}")
             updated += 1

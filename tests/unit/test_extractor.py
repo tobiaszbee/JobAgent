@@ -1,6 +1,7 @@
+import json
 from unittest.mock import MagicMock, patch
 
-from extractor.runner import _EXTRACT_TOOL, extract_job, run_extraction
+from extractor.runner import _EXTRACT_TOOL, _merge_source_structured_data, extract_job, run_extraction
 
 
 def _make_tool_response(data: dict, stop_reason="tool_use"):
@@ -180,3 +181,51 @@ def test_run_extraction_returns_zero_when_extract_returns_empty(mock_extract, mo
     jobs = [{"id": "j1", "title": "Dev", "company": "Co", "description": "desc", "structured_data": None}]
     count = run_extraction(jobs)
     assert count == 0
+
+
+class TestMergeSourceStructuredData:
+    # A source's own native fields (e.g. justjoin.it's salary/skills API
+    # fields) are ground truth, not a guess from the description text.
+
+    def test_no_source_data_returns_haiku_data_unchanged(self):
+        data = {"remote": True, "salary_min": 15000}
+        job = {"source_structured_data": None}
+        assert _merge_source_structured_data(data, job) == data
+
+    def test_source_data_overrides_matching_keys(self):
+        data = {"remote": True, "salary_min": None, "salary_max": None}
+        job = {"source_structured_data": json.dumps({"salary_min": 15000, "salary_max": 20000})}
+        result = _merge_source_structured_data(data, job)
+        assert result["salary_min"] == 15000
+        assert result["salary_max"] == 20000
+        assert result["remote"] is True  # untouched Haiku field survives
+
+    def test_source_data_as_dict_not_json_string_also_works(self):
+        # job dicts fresh from a collector run (not yet round-tripped through
+        # the API) carry source_structured_data as a real dict already.
+        data = {"remote": True}
+        job = {"source_structured_data": {"salary_min": 15000}}
+        result = _merge_source_structured_data(data, job)
+        assert result["salary_min"] == 15000
+
+    def test_unparseable_source_data_falls_back_to_haiku_only(self):
+        data = {"remote": True}
+        job = {"source_structured_data": "not json"}
+        assert _merge_source_structured_data(data, job) == data
+
+
+@patch("extractor.runner.job_repository")
+@patch("extractor.runner.extract_job")
+def test_run_extraction_merges_source_structured_data_over_haiku_output(mock_extract, mock_repo):
+    # Regression: justjoin.it discloses salary as a structured API field —
+    # Haiku's own guess from the description text must not win over it.
+    mock_extract.return_value = {"remote": True, "salary_min": None, "salary_max": None}
+    jobs = [{
+        "id": "j1", "title": "Dev", "company": "Co", "description": "desc", "structured_data": None,
+        "source_structured_data": json.dumps({"salary_min": 15000, "salary_max": 20000, "salary_currency": "PLN"}),
+    }]
+    run_extraction(jobs)
+    saved = mock_repo.update_structured_data.call_args[0][1]
+    assert saved["salary_min"] == 15000
+    assert saved["salary_max"] == 20000
+    assert saved["remote"] is True

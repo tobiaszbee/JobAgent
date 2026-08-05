@@ -67,6 +67,27 @@ def _find_description(state: dict) -> str | None:
     return None
 
 
+_KNOWN_SALARY_CURRENCIES = {"PLN", "EUR", "USD", "GBP"}
+
+
+def _extract_source_structured_data(posting: dict) -> dict:
+    """NoFluffJobs' own search-result payload already discloses salary as a
+    structured field (verified live against the real site), not prose — no
+    reason to make Haiku re-guess it from the description later. NoFluffJobs
+    quotes are always monthly regardless of contract type (b2b/permanent) —
+    a site-wide convention, not a per-posting field, unlike justjoin.it which
+    states its own unit explicitly."""
+    data: dict = {}
+    salary = posting.get("salary") or {}
+    salary_from, salary_to, currency = salary.get("from"), salary.get("to"), salary.get("currency")
+    if salary_from and salary_to and currency in _KNOWN_SALARY_CURRENCIES:
+        data["salary_min"] = salary_from
+        data["salary_max"] = salary_to
+        data["salary_currency"] = currency
+        data["salary_period"] = "monthly"
+    return data
+
+
 class NoFluffJobsSource(JobSource):
     def __init__(self, days_back: int = 7, **_):
         self._days_back = days_back
@@ -178,6 +199,7 @@ class NoFluffJobsSource(JobSource):
                 source_id=posting.get("id"),
                 description=self.fetch_description(job_url),
                 posted_at=posted_dt.isoformat() if posted_dt else None,
+                source_structured_data=_extract_source_structured_data(posting) or None,
             ))
 
         return results
