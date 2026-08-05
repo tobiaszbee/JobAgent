@@ -417,6 +417,12 @@ h1,h2,h3 { text-wrap: balance; }
 .since-toggle input { width: 17px; height: 17px; accent-color: var(--signal); margin-top: 1px; flex: none; }
 .since-toggle .st-tx .t { font-size: 0.84rem; font-weight: 600; }
 .since-toggle .st-tx .d { font-size: 0.75rem; color: var(--ink-soft); margin-top: 2px; }
+
+.qs-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+.qs-item { display: flex; align-items: flex-start; gap: 10px; background: var(--paper-sunk); border: 1px solid var(--line-soft); border-radius: 10px; padding: 11px 13px; cursor: pointer; }
+.qs-item input { width: 17px; height: 17px; accent-color: var(--flag-red); margin-top: 1px; flex: none; }
+.qs-item .st-tx .t { font-size: 0.84rem; font-weight: 600; font-family: var(--font-mono); }
+.qs-item .st-tx .d { font-size: 0.75rem; color: var(--ink-soft); margin-top: 2px; }
 .run-log { font-family: var(--font-mono); font-size: 0.74rem; line-height: 1.55; background: var(--paper-sunk); border: 1px solid var(--line-soft); border-radius: 10px; padding: 12px 14px; height: 180px; overflow-y: auto; color: var(--ink-soft); white-space: pre-wrap; }
 .run-log .ok { color: var(--signal); }
 .run-log .dim { color: var(--ink-faint); }

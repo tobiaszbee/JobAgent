@@ -6,11 +6,13 @@ import subprocess
 import sys
 import threading
 from datetime import datetime
-from flask import Blueprint
+from flask import Blueprint, request
 from flask_sock import Sock
 
 import api_client
-from db.repositories import session_repository, usage_repository
+from config import QUERY_PRUNING
+from collector.query_pruning import suggest_queries_for_review
+from db.repositories import session_repository, usage_repository, excluded_search_queries_repository
 
 bp = Blueprint("runner", __name__)
 sock = Sock()
@@ -107,6 +109,24 @@ def _start_session_or_none(ws) -> int | None:
 @bp.get("/api/agent/status")
 def agent_status():
     return {"running": _is_run_active()}
+
+
+@bp.get("/api/agent/query-suggestions")
+def agent_query_suggestions():
+    """Checked at the start of Run Agent, before the pipeline starts — see
+    collector.query_pruning.suggest_queries_for_review for what qualifies."""
+    return {"suggestions": suggest_queries_for_review()}
+
+
+@bp.post("/api/agent/query-suggestions/apply")
+def agent_query_suggestions_apply():
+    """Excludes exactly the queries the user checked, no more — 'none' is a valid,
+    explicit choice, so this is never called implicitly on the pipeline's behalf."""
+    queries = (request.get_json(force=True) or {}).get("queries", [])
+    source = QUERY_PRUNING["source"]
+    for query in queries:
+        excluded_search_queries_repository.exclude(source, query, "excluded by user from Run Agent suggestions")
+    return {"excluded": queries}
 
 
 def _kill_process_tree(proc: subprocess.Popen) -> None:

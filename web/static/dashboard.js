@@ -1425,6 +1425,50 @@ async function openRunModal() {
   document.getElementById('run-modal').classList.add('open');
   document.getElementById('run-log').textContent = '';
   checkAgentStatus();
+  await _loadQuerySuggestions();
+}
+
+// Fetched once per modal-open, before the run starts — never mid-run, so a run
+// left unattended for hours never blocks on this (see the run-agent auto-cleanup
+// discussion: suggestions are advisory, "none" is a first-class choice, and the
+// user is definitionally present right now since they just opened this modal).
+async function _loadQuerySuggestions() {
+  const panel = document.getElementById('query-suggestions');
+  const list = document.getElementById('qs-list');
+  list.innerHTML = '';
+  panel.style.display = 'none';
+  try {
+    const r = await fetch('/api/agent/query-suggestions');
+    const { suggestions } = await r.json();
+    if (!suggestions || !suggestions.length) return;
+    for (const s of suggestions) {
+      const label = document.createElement('label');
+      label.className = 'qs-item';
+      label.innerHTML = `
+        <input type="checkbox" data-query="${s.search_query.replace(/"/g, '&quot;')}">
+        <span class="st-tx"><span class="t">${s.search_query}</span><span class="d">${s.reason}</span></span>`;
+      list.appendChild(label);
+    }
+    panel.style.display = '';
+  } catch (e) {
+    // Suggestions are a nice-to-have, not a gate — a failed fetch here should
+    // never block starting a real run.
+  }
+}
+
+async function _applyCheckedQuerySuggestions() {
+  const checked = [...document.querySelectorAll('#qs-list input:checked')].map(el => el.dataset.query);
+  if (!checked.length) return;
+  try {
+    await fetch('/api/agent/query-suggestions/apply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ queries: checked }),
+    });
+  } catch (e) {
+    // Best-effort — a failed exclude here shouldn't block the run either;
+    // the same queries will be suggested again next time.
+  }
 }
 
 function closeRunModal() {
@@ -1476,7 +1520,10 @@ function pollAgentStatus() {
 // server-side protocol change needed.
 const _AGENT_STAGE_COUNT = 6;
 
-function startAgent() {
+async function startAgent() {
+  await _applyCheckedQuerySuggestions();
+  document.getElementById('query-suggestions').style.display = 'none';
+
   const sinceLast = document.getElementById('run-since-last').checked;
   const days = document.getElementById('run-days').value || 1;
   const log = document.getElementById('run-log');

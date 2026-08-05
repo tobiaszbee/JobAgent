@@ -2,7 +2,7 @@ import itertools
 
 import config
 from db.repositories import job_repository, search_stats_repository, excluded_search_queries_repository, session_repository
-from collector.query_pruning import prune_queries
+from collector.query_pruning import prune_queries, suggest_queries_for_review
 
 _counter = itertools.count()
 
@@ -127,3 +127,65 @@ class TestPruneQueriesZeroYield:
 
         assert len(result) == 1
         assert len(excluded_search_queries_repository.get_all()) == 1
+
+
+class TestSuggestQueriesForReview:
+    def test_flags_zero_applied_high_reject_query(self, monkeypatch):
+        monkeypatch.setitem(config.QUERY_PRUNING, "min_terminal_sample", 10)
+        monkeypatch.setitem(config.QUERY_PRUNING, "suggestion_reject_rate_threshold", 0.7)
+        _terminal_jobs("Senior Developer", rejected=17, auto_rejected=15, reviewed=2)  # 94% reject, 0 applied
+
+        result = suggest_queries_for_review("linkedin")
+
+        assert [s["search_query"] for s in result] == ["Senior Developer"]
+        assert "0 applied" in result[0]["reason"]
+
+    def test_any_applied_job_excludes_from_suggestions(self, monkeypatch):
+        # This is the gap prune_queries' max_success_rate protects: a query that
+        # still converts, even rarely, shouldn't be silently suggested for removal.
+        monkeypatch.setitem(config.QUERY_PRUNING, "min_terminal_sample", 10)
+        monkeypatch.setitem(config.QUERY_PRUNING, "suggestion_reject_rate_threshold", 0.7)
+        _terminal_jobs("Python", rejected=30, applied=1, reviewed=5)  # high reject, but has converted once
+
+        assert suggest_queries_for_review("linkedin") == []
+
+    def test_below_reject_threshold_not_suggested(self, monkeypatch):
+        monkeypatch.setitem(config.QUERY_PRUNING, "min_terminal_sample", 10)
+        monkeypatch.setitem(config.QUERY_PRUNING, "suggestion_reject_rate_threshold", 0.7)
+        _terminal_jobs("Kubernetes", rejected=6, reviewed=4)  # 60% reject
+
+        assert suggest_queries_for_review("linkedin") == []
+
+    def test_below_min_sample_not_suggested(self, monkeypatch):
+        monkeypatch.setitem(config.QUERY_PRUNING, "min_terminal_sample", 10)
+        monkeypatch.setitem(config.QUERY_PRUNING, "suggestion_reject_rate_threshold", 0.7)
+        _terminal_jobs("Too New", rejected=5)  # 100% reject but too small a sample
+
+        assert suggest_queries_for_review("linkedin") == []
+
+    def test_already_excluded_query_not_suggested_again(self, monkeypatch):
+        monkeypatch.setitem(config.QUERY_PRUNING, "min_terminal_sample", 10)
+        monkeypatch.setitem(config.QUERY_PRUNING, "suggestion_reject_rate_threshold", 0.7)
+        _terminal_jobs("Already Gone", rejected=10)
+        excluded_search_queries_repository.exclude("linkedin", "Already Gone", "manually excluded earlier")
+
+        assert suggest_queries_for_review("linkedin") == []
+
+    def test_never_excludes_anything_itself(self, monkeypatch):
+        monkeypatch.setitem(config.QUERY_PRUNING, "min_terminal_sample", 10)
+        monkeypatch.setitem(config.QUERY_PRUNING, "suggestion_reject_rate_threshold", 0.7)
+        _terminal_jobs("Senior Developer", rejected=17, auto_rejected=15, reviewed=2)
+
+        suggest_queries_for_review("linkedin")
+
+        assert excluded_search_queries_repository.get_excluded("linkedin") == {}
+
+    def test_sorted_worst_reject_rate_first(self, monkeypatch):
+        monkeypatch.setitem(config.QUERY_PRUNING, "min_terminal_sample", 10)
+        monkeypatch.setitem(config.QUERY_PRUNING, "suggestion_reject_rate_threshold", 0.7)
+        _terminal_jobs("Backend Developer", rejected=8, reviewed=3)   # 8/11 = 72.7%
+        _terminal_jobs("Lead Developer", rejected=13, reviewed=1)     # 13/14 = 92.9%
+
+        result = suggest_queries_for_review("linkedin")
+
+        assert [s["search_query"] for s in result] == ["Lead Developer", "Backend Developer"]

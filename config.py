@@ -24,6 +24,11 @@ QUERY_PRUNING = {
     "reject_rate_threshold": 0.95,  # LinkedIn's baseline reject rate is already ~0.65
     "max_success_rate": 0.05,  # above this share applied/reviewed, protected regardless of reject rate
     "min_searches_for_zero_yield": 5,  # never excluded if it's produced any applied/reviewed job
+    # Lower, human-reviewed bar: a query with zero applied jobs and a reject rate at or
+    # above this is surfaced as a suggestion when Run Agent starts, even though its
+    # reviewed jobs keep max_success_rate from auto-excluding it (see
+    # collector.query_pruning.suggest_queries_for_review).
+    "suggestion_reject_rate_threshold": 0.70,
 }
 
 RANKING = {

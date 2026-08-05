@@ -184,6 +184,10 @@
   <div class="modal">
     <div class="modal-hd"><h2 id="run-modal-title">Run agent</h2><button class="modal-close" onclick="closeRunModal()">✕</button></div>
     <div class="modal-bd">
+      <div id="query-suggestions" style="display:none">
+        <p class="modal-hint">These LinkedIn search queries have a high reject rate and have never produced an applied job — but some still produce reviewable jobs (see each note). Nothing is removed unless you check it.</p>
+        <div class="qs-list" id="qs-list"></div>
+      </div>
       <div id="run-modal-params">
         <label class="since-toggle">
           <input type="checkbox" id="run-since-last" checked onchange="_onSinceLastToggle()">
