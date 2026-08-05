@@ -197,14 +197,26 @@ Use the submit_debate_review tool to report your findings."""
 
     reviews = _parse_reviews(tool_block.input)
     if not reviews:
-        return ranked_jobs
+        # A genuinely clean review (nothing to flag, for anyone in the pool) must
+        # still clear any stale flag left over from a previous run — same reasoning
+        # as the loop below. Without this, a fully clean debate result left every
+        # previously-flagged job flagged forever, since returning ranked_jobs
+        # untouched here skipped even them.
+        return [{**job, "debate_flag": None, "debate_note": None} for job in ranked_jobs]
 
     demoted = []
     kept = []
     for job in ranked_jobs:
         review = reviews.get(job["id"])
-        if review:
-            job = {**job, "debate_flag": review["flag"], "debate_note": review["note"]}
+        # Always set debate_flag/debate_note explicitly this run, never leave them
+        # as whatever the job dict already carried (fetched from the DB) — a job
+        # not in `reviews` was reviewed and found clean, not skipped, so None is
+        # the correct, fresh result, not "no opinion". Before this, a job flagged
+        # dealbreaker_risk (or overrated/underrated) once kept that flag on every
+        # future run regardless of new evidence: would_apply.compute_would_apply
+        # stayed permanently blocked, and _nudge_key below kept re-applying the
+        # same rank nudge indefinitely.
+        job = {**job, "debate_flag": review["flag"] if review else None, "debate_note": review["note"] if review else None}
         if review and review["flag"] == "dealbreaker_risk":
             demoted.append(job)
         else:

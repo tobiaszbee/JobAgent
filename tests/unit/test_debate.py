@@ -128,6 +128,34 @@ class TestDebateRank:
         assert result[0].get("debate_flag") != DEBATE_UNAVAILABLE_FLAG
 
     @patch("ranker.debate.anthropic.Anthropic")
+    def test_stale_flag_cleared_when_this_job_is_not_reflagged(self, mock_anthropic):
+        # Regression: a job carrying a stale debate_flag/debate_note from a
+        # previous run (fetched straight from the DB row) used to keep it forever
+        # once no fresh review mentioned that specific job again — permanently
+        # blocking would_apply (dealbreaker_risk) or re-applying the same rank
+        # nudge (overrated/underrated) with no new evidence.
+        jobs = [
+            _job("j1", rank=1, debate_flag="dealbreaker_risk", debate_note="Old note from weeks ago"),
+            _job("j2", rank=2),
+        ]
+        mock_anthropic.return_value.messages.create.return_value = _debate_response([
+            {"job_id": "j2", "flag": "overrated", "note": "fresh flag on a different job"},
+        ])
+        result = debate_rank(jobs, "profile")
+        j1 = next(j for j in result if j["id"] == "j1")
+        assert j1["debate_flag"] is None
+        assert j1["debate_note"] is None
+
+    @patch("ranker.debate.anthropic.Anthropic")
+    def test_stale_flag_cleared_when_the_whole_review_is_clean(self, mock_anthropic):
+        # Same regression as above, for the "reviews entirely empty" early return.
+        jobs = [_job("j1", rank=1, debate_flag="overrated", debate_note="Stale")]
+        mock_anthropic.return_value.messages.create.return_value = _debate_response([])
+        result = debate_rank(jobs, "profile")
+        assert result[0]["debate_flag"] is None
+        assert result[0]["debate_note"] is None
+
+    @patch("ranker.debate.anthropic.Anthropic")
     def test_dealbreaker_risk_demotes_job_to_bottom(self, mock_anthropic):
         jobs = [_job("j1", rank=1), _job("j2", rank=2), _job("j3", rank=3)]
         mock_anthropic.return_value.messages.create.return_value = _debate_response([
