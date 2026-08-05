@@ -21,24 +21,45 @@ def run(force_rescore: bool = False, jobs: list[dict] | None = None) -> dict:
     instead of this function re-fetching it — only meaningful with
     force_rescore=True, since that's the mode that shares get_new_with_descriptions()
     with a typical caller."""
+    # rescore_all: whether every surviving job gets sent to the LLM regardless of
+    # whether it already has a score (force_rescore, or an explicit `jobs` list —
+    # existing callers like scripts/rescore_new.py rely on getting back exactly
+    # what they passed in), vs. the normal path, which only scores score IS NULL.
     if jobs is not None:
-        unscored_jobs = jobs
+        full_pool = jobs
+        rescore_all = True
     elif force_rescore:
-        unscored_jobs = job_repository.get_new_with_descriptions()
-        if unscored_jobs:
-            logger.info(f"Force-rescore mode: {len(unscored_jobs)} job(s) will be re-scored.")
+        full_pool = job_repository.get_new_with_descriptions()
+        if full_pool:
+            logger.info(f"Force-rescore mode: {len(full_pool)} job(s) will be re-scored.")
+        rescore_all = True
     else:
-        unscored_jobs = job_repository.get_unscored()
+        # The whole 'new' pool, not just get_unscored() — the dealbreaker filter is
+        # free (no LLM call), so there's no reason to only ever run it once per job.
+        # Two ways a job used to escape it forever: extraction failed on the first
+        # pass (so it got scored with no structured_data to check), or the
+        # questionnaire changed after it was scored (a tightened salary floor, a
+        # newly-added seniority restriction) — get_unscored()'s score IS NULL filter
+        # meant neither case was ever re-evaluated. This only re-runs the free
+        # filter over everyone; the LLM-scoring loop below still only processes
+        # jobs that genuinely have no score yet.
+        full_pool = job_repository.get_new_with_descriptions()
+        rescore_all = False
 
-    if not unscored_jobs:
+    if not full_pool:
         logger.info("No jobs to evaluate.")
         return {"jobs_scored": 0}
 
-    unscored_jobs, dealbreaker_stats = apply_dealbreaker_filter(unscored_jobs)
+    surviving, dealbreaker_stats = apply_dealbreaker_filter(full_pool)
     if dealbreaker_stats["auto_rejected"]:
         logger.info(f"Dealbreaker filter: auto-rejected {dealbreaker_stats['auto_rejected']}/{dealbreaker_stats['checked']} job(s) before scoring")
-    if not unscored_jobs:
+    if not surviving:
         logger.info("No jobs left to evaluate after dealbreaker filter.")
+        return {"jobs_scored": 0, "jobs_auto_rejected": dealbreaker_stats["auto_rejected"]}
+
+    unscored_jobs = surviving if rescore_all else [j for j in surviving if j.get("score") is None]
+    if not unscored_jobs:
+        logger.info("No jobs left to score after dealbreaker filter.")
         return {"jobs_scored": 0, "jobs_auto_rejected": dealbreaker_stats["auto_rejected"]}
 
     try:

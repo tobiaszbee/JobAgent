@@ -17,7 +17,7 @@ def _prefs(**overrides):
     base = {
         "salary_min": None, "salary_currency": None, "work_mode": [],
         "remote_countries": [], "seniority_levels": [], "show_jobs_without_salary": None,
-        "preferred_company_types": [],
+        "preferred_company_types": [], "languages": [],
     }
     base.update(overrides)
     return base
@@ -600,6 +600,101 @@ class TestCompanyTypeFilter:
         surviving, stats = apply_dealbreaker_filter([job])
         assert surviving == [job]
         mock_update.assert_not_called()
+
+
+class TestWorkingLanguageMismatch:
+    # Closes the hole collector/language_filter.py can't: that filter only detects
+    # the POSTING TEXT's language, so an English-language posting at a company that
+    # actually works in Polish sails through untouched.
+
+    @patch("evaluator.dealbreakers.job_repository.update_score_and_status")
+    @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
+    def test_rejects_polish_only_company_for_non_polish_speaker(self, mock_prefs, mock_update):
+        mock_prefs.return_value = _prefs(languages=[{"language": "english", "level": "c1"}])
+        job = _job(structured={"working_language": "polish"})
+        surviving, stats = apply_dealbreaker_filter([job])
+        assert surviving == []
+        assert stats["auto_rejected"] == 1
+        assert "polish" in mock_update.call_args[0][2]
+
+    @patch("evaluator.dealbreakers.job_repository.update_score_and_status")
+    @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
+    def test_passes_polish_only_company_for_polish_speaker(self, mock_prefs, mock_update):
+        mock_prefs.return_value = _prefs(languages=[{"language": "polish", "level": "native"}])
+        job = _job(structured={"working_language": "polish"})
+        surviving, stats = apply_dealbreaker_filter([job])
+        assert surviving == [job]
+        mock_update.assert_not_called()
+
+    @patch("evaluator.dealbreakers.job_repository.update_score_and_status")
+    @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
+    def test_rejects_english_only_company_for_non_english_speaker(self, mock_prefs, mock_update):
+        mock_prefs.return_value = _prefs(languages=[{"language": "polish", "level": "native"}])
+        job = _job(structured={"working_language": "english"})
+        surviving, stats = apply_dealbreaker_filter([job])
+        assert surviving == []
+        assert stats["auto_rejected"] == 1
+
+    @patch("evaluator.dealbreakers.job_repository.update_score_and_status")
+    @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
+    def test_below_working_level_does_not_count_as_covering_the_language(self, mock_prefs, mock_update):
+        # B2 is the minimum "usable for work" threshold, same as
+        # collector/language_filter.py — A1 Polish shouldn't count, even though
+        # English (present, at working level) doesn't help for a Polish-only job.
+        mock_prefs.return_value = _prefs(languages=[
+            {"language": "english", "level": "c1"}, {"language": "polish", "level": "a1"},
+        ])
+        job = _job(structured={"working_language": "polish"})
+        surviving, stats = apply_dealbreaker_filter([job])
+        assert surviving == []
+        assert stats["auto_rejected"] == 1
+
+    @patch("evaluator.dealbreakers.job_repository.update_score_and_status")
+    @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
+    def test_both_never_rejects(self, mock_prefs, mock_update):
+        mock_prefs.return_value = _prefs(languages=[{"language": "english", "level": "c1"}])
+        job = _job(structured={"working_language": "both"})
+        surviving, stats = apply_dealbreaker_filter([job])
+        assert surviving == [job]
+        mock_update.assert_not_called()
+
+    @patch("evaluator.dealbreakers.job_repository.update_score_and_status")
+    @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
+    def test_unknown_never_rejects(self, mock_prefs, mock_update):
+        mock_prefs.return_value = _prefs(languages=[{"language": "english", "level": "c1"}])
+        job = _job(structured={"working_language": "unknown"})
+        surviving, stats = apply_dealbreaker_filter([job])
+        assert surviving == [job]
+        mock_update.assert_not_called()
+
+    @patch("evaluator.dealbreakers.job_repository.update_score_and_status")
+    @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
+    def test_missing_working_language_field_never_rejects(self, mock_prefs, mock_update):
+        mock_prefs.return_value = _prefs(languages=[{"language": "english", "level": "c1"}])
+        job = _job(structured={})
+        surviving, stats = apply_dealbreaker_filter([job])
+        assert surviving == [job]
+        mock_update.assert_not_called()
+
+    @patch("evaluator.dealbreakers.job_repository.update_score_and_status")
+    @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
+    def test_no_candidate_languages_configured_never_rejects(self, mock_prefs, mock_update):
+        mock_prefs.return_value = _prefs(languages=[])
+        job = _job(structured={"working_language": "polish"})
+        surviving, stats = apply_dealbreaker_filter([job])
+        assert surviving == [job]
+        mock_update.assert_not_called()
+
+    @patch("evaluator.dealbreakers.job_repository.update_score_and_status")
+    @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
+    def test_check_runs_even_with_no_other_preference(self, mock_prefs, mock_update):
+        # Regression: the early-exit skip must also consider languages on its
+        # own, not just salary_min/work_mode/seniority/company_type.
+        mock_prefs.return_value = _prefs(languages=[{"language": "english", "level": "c1"}])
+        job = _job(structured={"working_language": "polish"})
+        surviving, stats = apply_dealbreaker_filter([job])
+        assert surviving == []
+        assert stats["auto_rejected"] == 1
 
 
 class TestMultipleJobs:

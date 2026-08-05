@@ -1,7 +1,7 @@
 import uuid
 from contextlib import contextmanager
 from unittest.mock import patch
-from db.repositories import job_repository
+from db.repositories import job_repository, candidate_preferences_repository
 from evaluator.runner import run
 
 
@@ -151,6 +151,41 @@ class TestEvaluatorRunner:
                     with patch("evaluator.runner.score_job", return_value=_good_score()):
                         run()
         assert mock_prompt.call_args.kwargs["divergence_cases"] == fake_cases
+
+    def test_previously_scored_job_rejected_when_it_now_violates_a_dealbreaker(self):
+        # Regression: the dealbreaker filter used to run only once, at first
+        # scoring (get_unscored()'s score IS NULL filter excluded it from ever
+        # being checked again) — a job that was fine when first scored but now
+        # violates a tightened/newly-added criterion (or was scored
+        # dealbreaker-blind because extraction hadn't succeeded yet) used to sit
+        # in the pool forever.
+        job_id = _insert_scoreable()
+        job_repository.update_structured_data(job_id, {"seniority": "junior"})
+        job_repository.update_score(job_id, 6.0, "scored before this seniority preference existed")
+        candidate_preferences_repository.insert(None, {"seniority_levels": ["senior"]})
+
+        with _patched_run() as mock_score:
+            result = run()
+
+        mock_score.assert_not_called()  # dealbreaker catches it before any LLM call
+        assert result["jobs_auto_rejected"] == 1
+        job = next(j for j in job_repository.get_by_status("auto_rejected") if j["id"] == job_id)
+        assert job["score"] == 0.0
+
+    def test_previously_scored_job_left_alone_when_still_dealbreaker_clean(self):
+        job_id = _insert_scoreable()
+        job_repository.update_structured_data(job_id, {"seniority": "senior"})
+        job_repository.update_score(job_id, 6.0, "still a fine match")
+        candidate_preferences_repository.insert(None, {"seniority_levels": ["senior"]})
+
+        with _patched_run() as mock_score:
+            result = run()
+
+        mock_score.assert_not_called()  # already scored, not re-sent to the LLM
+        assert result == {"jobs_scored": 0, "jobs_auto_rejected": 0}
+        job = next(j for j in job_repository.search(status="all") if j["id"] == job_id)
+        assert job["status"] == "new"
+        assert job["score"] == 6.0
 
     def test_divergence_cases_capped_at_limit(self):
         _insert_scoreable()

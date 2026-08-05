@@ -2,6 +2,11 @@ import json
 import logging
 
 from db.repositories import candidate_preferences_repository, job_repository
+# Reused rather than duplicated: this is exactly the candidate's working-level
+# language codes (>=B2), the same computation collector/language_filter.py already
+# does to filter by *posting* language. _working_language_reason below needs the
+# same set to check the *company's* working language instead.
+from collector.language_filter import _candidate_language_codes
 
 logger = logging.getLogger(__name__)
 
@@ -212,6 +217,30 @@ def _company_type_reason(job_structured: dict, preferred_company_types: list[str
     )
 
 
+# extractor/runner.py's working_language enum -> collector/language_filter.py's
+# language codes. Only the two unambiguous single-language values are enforced;
+# "both" and "unknown" skip, same fail-open rule as everywhere else in this file.
+_WORKING_LANGUAGE_CODES = {"polish": "pl", "english": "en"}
+
+
+def _working_language_reason(job_structured: dict, candidate_codes: set[str]) -> str | None:
+    """Closes a hole collector/language_filter.py can't: that filter only detects the
+    POSTING TEXT's language, so an English-language posting at a company that actually
+    works in Polish sails through untouched — working_language is extracted from the
+    description (extractor/runner.py) precisely to capture this, but was never read
+    anywhere. A candidate with no configured languages (candidate_codes empty) is
+    never rejected — nothing to compare against."""
+    if not candidate_codes:
+        return None
+    working_language = job_structured.get("working_language")
+    code = _WORKING_LANGUAGE_CODES.get(working_language)
+    if not code:
+        return None  # "both", "unknown", or missing — nothing to enforce
+    if code in candidate_codes:
+        return None
+    return f"Dealbreaker: company works in {working_language}, which isn't among your working-level languages"
+
+
 def _no_salary_disclosed_reason(job_structured: dict, show_jobs_without_salary: bool) -> str | None:
     """The questionnaire checkbox ("Also show postings with no salary listed",
     checked/True by default) was saved but never read anywhere — unchecking it
@@ -244,10 +273,11 @@ def apply_dealbreaker_filter(jobs: list[dict]) -> tuple[list[dict], dict]:
     # with newly-hidden postings just because this key doesn't exist yet.
     raw_show_no_salary = prefs.get("show_jobs_without_salary")
     show_jobs_without_salary = True if raw_show_no_salary is None else bool(raw_show_no_salary)
+    candidate_language_codes = _candidate_language_codes()
 
     if (
         not salary_min and "remote" not in work_mode and not seniority_levels
-        and not preferred_company_types and show_jobs_without_salary
+        and not preferred_company_types and show_jobs_without_salary and not candidate_language_codes
     ):
         return jobs, {"checked": len(jobs), "auto_rejected": 0}
 
@@ -265,6 +295,8 @@ def apply_dealbreaker_filter(jobs: list[dict]) -> tuple[list[dict], dict]:
             reason = _seniority_reason(structured, seniority_levels)
         if not reason:
             reason = _company_type_reason(structured, preferred_company_types)
+        if not reason:
+            reason = _working_language_reason(structured, candidate_language_codes)
         if not reason:
             reason = _no_salary_disclosed_reason(structured, show_jobs_without_salary)
 
