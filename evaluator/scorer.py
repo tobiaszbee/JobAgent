@@ -3,7 +3,7 @@ import time
 import anthropic
 
 from config import ANTHROPIC_API_KEY, CLAUDE_MODEL
-from collector.utils import build_excerpt
+from collector.utils import build_excerpt, excerpt_looks_incomplete, INCOMPLETE_DESCRIPTION_NOTE
 from db.repositories.usage_repository import log_anthropic
 from db.types import ScoreResult
 from preference_agent.profile import render_signals
@@ -156,12 +156,13 @@ Use the submit_score tool to return your evaluation."""
 
 def _build_user_message(job: dict) -> str:
     excerpt = build_excerpt(job.get("description"), job.get("source"))
+    note = INCOMPLETE_DESCRIPTION_NOTE if excerpt_looks_incomplete(excerpt) else ""
     return (
         f"Evaluate this job:\n\n"
         f"Title: {job['title']}\n"
         f"Company: {job['company']}\n"
         f"Location: {job['location']}\n"
-        f"Description: {excerpt}"
+        f"Description: {excerpt}{note}"
     )
 
 

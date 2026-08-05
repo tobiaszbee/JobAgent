@@ -1,4 +1,4 @@
-from collector.utils import strip_description_junk, build_excerpt
+from collector.utils import strip_description_junk, build_excerpt, excerpt_looks_incomplete
 
 
 class TestStripDescriptionJunk:
@@ -53,3 +53,40 @@ class TestBuildExcerpt:
         desc = "Real content." + "\n\nSet alert for similar jobs\n\n" + ("y" * 10000)
         result = build_excerpt(desc, "linkedin")
         assert result == "Real content."
+
+    def test_linkedin_caps_at_8000_not_6000(self):
+        # Regression: a sample of 100 recent LinkedIn postings found 20% still over
+        # 6000 chars even after junk-stripping — real content (once, an entire
+        # "Benefits found in job post" section) silently cut, not junk. LinkedIn's
+        # own fetch_description() never returns more than 8000 chars to begin with
+        # (collector/sources/linkedin.py), so capping here at 8000 instead just stops
+        # re-trimming what was already fetched.
+        desc = "x" * 10000
+        result = build_excerpt(desc, "linkedin")
+        assert len(result) == 8000
+
+    def test_non_linkedin_source_still_caps_at_6000(self):
+        desc = "x" * 10000
+        result = build_excerpt(desc, "justjoin")
+        assert len(result) == 6000
+
+
+class TestExcerptLooksIncomplete:
+    def test_empty_excerpt_is_not_incomplete(self):
+        # A missing description is a different, already-handled case (build_excerpt
+        # already returns "" for it) — not this function's concern.
+        assert excerpt_looks_incomplete("") is False
+
+    def test_short_excerpt_is_incomplete(self):
+        # itpracuj's search-result preview (its only description source) measured
+        # 113-250 chars in practice.
+        assert excerpt_looks_incomplete("x" * 200) is True
+
+    def test_excerpt_at_threshold_is_not_incomplete(self):
+        assert excerpt_looks_incomplete("x" * 400) is False
+
+    def test_excerpt_just_under_threshold_is_incomplete(self):
+        assert excerpt_looks_incomplete("x" * 399) is True
+
+    def test_long_excerpt_is_not_incomplete(self):
+        assert excerpt_looks_incomplete("x" * 3000) is False

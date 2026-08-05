@@ -43,6 +43,18 @@ class TestFormatJob:
         text = _format_job(_job(description="We use Python and Django"))
         assert "Python" in text
 
+    def test_short_description_gets_incomplete_note(self):
+        # Regression: itpracuj's search-result preview (its only description source —
+        # see collector/sources/itpracuj.py) runs 113-250 chars in practice. Opus used
+        # to have no way to tell that apart from a genuinely short but complete
+        # posting, and nothing here stops it reading a stub as the whole ad.
+        text = _format_job(_job(description="x" * 200))
+        assert "short preview" in text
+
+    def test_full_description_does_not_get_incomplete_note(self):
+        text = _format_job(_job(description="x" * 5000))
+        assert "short preview" not in text
+
     def test_structured_data_tags_appear(self):
         sd = {"remote": True, "seniority": "senior", "company_type": "startup",
               "product_vs_outsourcing": "product", "stack": ["Python"],

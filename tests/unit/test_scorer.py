@@ -192,3 +192,25 @@ class TestBuildUserMessage:
         job = _ex(description="")
         msg = _build_user_message(job)
         assert "Company: Acme Corp" in msg
+
+    def test_short_description_gets_incomplete_note(self):
+        # Regression: itpracuj's search-result preview (its only description source —
+        # see collector/sources/itpracuj.py) runs 113-250 chars in practice, and the
+        # scorer used to have no way to tell that apart from a genuinely short but
+        # complete posting, silently judging a stub as if it were the whole ad.
+        job = _ex(description="x" * 200)
+        msg = _build_user_message(job)
+        assert "short preview" in msg
+        assert "treat them as unknown, not as a negative signal" in msg
+
+    def test_full_description_does_not_get_incomplete_note(self):
+        job = _ex(description="x" * 5000)
+        msg = _build_user_message(job)
+        assert "short preview" not in msg
+
+    def test_empty_description_does_not_get_incomplete_note(self):
+        # A missing description is a different, already-handled case — flagging it
+        # as "incomplete" too would be redundant noise on top of just having nothing.
+        job = _ex(description="")
+        msg = _build_user_message(job)
+        assert "short preview" not in msg
