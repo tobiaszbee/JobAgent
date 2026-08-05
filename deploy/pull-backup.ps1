@@ -9,6 +9,11 @@
 #
 # Requires: Windows' built-in OpenSSH client (ssh.exe/scp.exe - already present
 # on this machine), and an SSH key already authorized on the VPS for $VpsUser.
+# Windows' scp does NOT reliably fall back to ~/.ssh/config the way a plain
+# `ssh` invocation does when the key file isn't one of the default names
+# (id_rsa/id_ed25519 etc.) - pass -IdentityFile explicitly rather than relying
+# on that, even though this machine also has a jobagent-vps Host alias in
+# ~/.ssh/config.
 #
 # Uses plain scp -r rather than rsync (not installed here) - it re-copies the
 # whole repo directory every run rather than transferring only what changed.
@@ -19,6 +24,7 @@
 param(
     [string]$VpsHost = "CHANGE_ME.example.com",   # or the WireGuard address, e.g. 10.66.0.1
     [string]$VpsUser = "root",
+    [string]$IdentityFile = "$env:USERPROFILE\.ssh\jobagent_vps",
     [string]$RemoteRepo = "/var/backups/jobagentweb-restic",
     [string]$LocalDest = "$env:USERPROFILE\Backups\jobagentweb-restic"
 )
@@ -33,7 +39,7 @@ $parent = Split-Path -Parent $LocalDest
 New-Item -ItemType Directory -Force -Path $parent | Out-Null
 
 Write-Host "Pulling $VpsUser@${VpsHost}:$RemoteRepo -> $LocalDest ..."
-& scp -r "${VpsUser}@${VpsHost}:${RemoteRepo}" $parent
+& scp -i $IdentityFile -r "${VpsUser}@${VpsHost}:${RemoteRepo}" $parent
 if ($LASTEXITCODE -ne 0) {
     Write-Error "scp failed (exit $LASTEXITCODE) - is the VPS reachable and is your SSH key authorized?"
 }
