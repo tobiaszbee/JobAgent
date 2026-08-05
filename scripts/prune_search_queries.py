@@ -1,6 +1,6 @@
 """Evaluate LinkedIn search queries against config.QUERY_PRUNING's thresholds and
-auto-exclude any that have proven reject-heavy with zero positive yield, or that
-consistently find nothing new. Reversible — see
+auto-exclude any that have proven reject-heavy with a vanishing positive-yield rate,
+or that consistently find nothing new. Reversible — see
 db.repositories.excluded_search_queries_repository.reinstate()."""
 import logging
 import sys

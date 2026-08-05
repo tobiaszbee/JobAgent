@@ -22,6 +22,7 @@ QUERY_PRUNING = {
     "source": "linkedin",  # only source slow/paced enough for wasted queries to matter
     "min_terminal_sample": 20,  # terminally-decided jobs needed before a reject rate is trusted
     "reject_rate_threshold": 0.95,  # LinkedIn's baseline reject rate is already ~0.65
+    "max_success_rate": 0.05,  # above this share applied/reviewed, protected regardless of reject rate
     "min_searches_for_zero_yield": 5,  # never excluded if it's produced any applied/reviewed job
 }
 

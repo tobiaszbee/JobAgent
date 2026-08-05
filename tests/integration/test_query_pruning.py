@@ -39,7 +39,7 @@ class TestPruneQueriesRejectRate:
 
         assert [r["search_query"] for r in result] == ["Bad Query"]
         assert excluded_search_queries_repository.get_excluded("linkedin") == {
-            "Bad Query": "reject rate 100% over 10 jobs, 0 applied/reviewed"
+            "Bad Query": "reject rate 100% over 10 jobs, 0% applied/reviewed"
         }
 
     def test_below_min_sample_not_excluded(self, monkeypatch):
@@ -57,17 +57,27 @@ class TestPruneQueriesRejectRate:
 
         assert prune_queries("linkedin") == []
 
-    def test_any_applied_job_prevents_exclusion_even_at_high_reject_rate(self, monkeypatch):
+    def test_low_success_rate_no_longer_blocks_exclusion(self, monkeypatch):
+        # Regression test: this used to be a one-time boolean (any applied/reviewed
+        # job, ever, blocked pruning forever), which meant a single early hit could
+        # permanently immunize a query even after its success rate collapsed. 1/40
+        # applied is 2.5% — below max_success_rate — so it should no longer protect.
         monkeypatch.setitem(config.QUERY_PRUNING, "min_terminal_sample", 10)
         monkeypatch.setitem(config.QUERY_PRUNING, "reject_rate_threshold", 0.9)
-        _terminal_jobs("Good But Noisy", rejected=19, applied=1)  # 95% reject rate
+        monkeypatch.setitem(config.QUERY_PRUNING, "max_success_rate", 0.05)
+        _terminal_jobs("Mostly Noise", rejected=39, applied=1)  # 97.5% reject, 2.5% applied
 
-        assert prune_queries("linkedin") == []
+        result = prune_queries("linkedin")
 
-    def test_any_reviewed_job_prevents_exclusion(self, monkeypatch):
+        assert [r["search_query"] for r in result] == ["Mostly Noise"]
+
+    def test_success_rate_above_threshold_still_blocks_exclusion(self, monkeypatch):
+        # A meaningfully non-trivial applied/reviewed share (15%, well above
+        # max_success_rate) should still protect the query even at a high reject rate.
         monkeypatch.setitem(config.QUERY_PRUNING, "min_terminal_sample", 10)
-        monkeypatch.setitem(config.QUERY_PRUNING, "reject_rate_threshold", 0.9)
-        _terminal_jobs("Reviewed Query", rejected=19, reviewed=1)
+        monkeypatch.setitem(config.QUERY_PRUNING, "reject_rate_threshold", 0.8)
+        monkeypatch.setitem(config.QUERY_PRUNING, "max_success_rate", 0.05)
+        _terminal_jobs("Good But Noisy", rejected=17, applied=2, reviewed=1)  # 85% reject, 15% applied/reviewed
 
         assert prune_queries("linkedin") == []
 

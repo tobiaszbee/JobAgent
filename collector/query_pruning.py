@@ -7,19 +7,25 @@ logger = logging.getLogger(__name__)
 
 
 def _reject_rate_reason(stats: dict) -> str | None:
-    """A query is only judged once it has enough terminally-decided jobs, and never
-    while it has produced any applied/reviewed job — see config.QUERY_PRUNING for why
-    (the baseline reject rate is already high, so raw reject-rate alone would prune
-    the queries that occasionally surface a real fit along with a lot of chaff)."""
+    """A query is only judged once it has enough terminally-decided jobs, and stays
+    protected while its applied/reviewed share stays above max_success_rate — see
+    config.QUERY_PRUNING for why (the baseline reject rate is already high, so raw
+    reject-rate alone would prune queries that occasionally surface a real fit along
+    with a lot of chaff). This used to be a one-time boolean (any applied/reviewed job,
+    ever, blocked pruning forever) — that let a single early hit permanently immunize a
+    query even after its success rate collapsed to near-zero over hundreds more jobs, so
+    generic broad-match queries were never pruned no matter how reject-heavy they got."""
     terminal_total = stats["terminal_total"]
     if terminal_total < QUERY_PRUNING["min_terminal_sample"]:
         return None
-    if stats["applied_total"] or stats["reviewed_total"]:
+    success_total = stats["applied_total"] + stats["reviewed_total"]
+    success_rate = success_total / terminal_total
+    if success_rate > QUERY_PRUNING["max_success_rate"]:
         return None
     reject_rate = stats["reject_total"] / terminal_total
     if reject_rate < QUERY_PRUNING["reject_rate_threshold"]:
         return None
-    return f"reject rate {reject_rate:.0%} over {terminal_total} jobs, 0 applied/reviewed"
+    return f"reject rate {reject_rate:.0%} over {terminal_total} jobs, {success_rate:.0%} applied/reviewed"
 
 
 def prune_queries(source: str | None = None) -> list[dict]:
