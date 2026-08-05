@@ -11,6 +11,11 @@ class RawJob:
     source: str
     source_id: str | None = None
     description: str | None = None
+    # ISO 8601 string, not a datetime — every source that parses one already does
+    # so to apply days_back, and isoformat() is what job_repository.insert sends
+    # over the API as-is. None for sources with no reliable per-posting date
+    # (LinkedIn shows only relative text like "2 days ago" in its UI).
+    posted_at: str | None = None
 
 
 class JobSource(ABC):

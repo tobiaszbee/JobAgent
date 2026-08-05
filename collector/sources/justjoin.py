@@ -221,6 +221,7 @@ class JustJoinSource(JobSource):
                 source=self.name,
                 source_id=offer.get("guid"),
                 description=self.fetch_description(url),
+                posted_at=pub_dt.isoformat() if pub_dt else None,
             ))
 
         return results

@@ -204,6 +204,7 @@ class TheProtocolSource(JobSource):
                 source=self.name,
                 source_id=offer.get("id"),
                 description=self.fetch_description(job_url),
+                posted_at=pub_dt.isoformat() if pub_dt else None,
             ))
 
         return results

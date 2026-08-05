@@ -2,6 +2,7 @@ import json
 import logging
 import random
 import re
+from datetime import datetime, timezone
 import anthropic
 
 from config import ANTHROPIC_API_KEY, CLAUDE_RANK_MODEL
@@ -35,6 +36,21 @@ _RANKING_TOOL = {
 }
 
 
+def _posting_age_days(posted_at: str | None) -> int | None:
+    """None (not "unknown"/0) when posted_at is absent — LinkedIn and pre-migration
+    postings have no reliable per-posting date, and treating that as "just posted"
+    would be worse than not mentioning age at all."""
+    if not posted_at:
+        return None
+    try:
+        posted_dt = datetime.fromisoformat(posted_at)
+    except ValueError:
+        return None
+    if posted_dt.tzinfo is None:
+        posted_dt = posted_dt.replace(tzinfo=timezone.utc)
+    return max(0, (datetime.now(timezone.utc) - posted_dt).days)
+
+
 def _format_job(job: dict) -> str:
     structured = {}
     raw = job.get("structured_data")
@@ -48,6 +64,14 @@ def _format_job(job: dict) -> str:
     parts.append(f"Title: {job['title']} @ {job['company']}")
     if job.get("location"):
         parts.append(f"Location: {job['location']}")
+
+    # Posting age was parsed by every collector source (to apply --days), then
+    # discarded — nothing downstream could tell a 5-week-old posting from one
+    # collected this morning. None (not "unknown") for sources with no reliable
+    # per-posting date (LinkedIn) — never state an age we don't actually have.
+    age_days = _posting_age_days(job.get("posted_at"))
+    if age_days is not None:
+        parts.append(f"Posted: {age_days} day{'s' if age_days != 1 else ''} ago")
 
     # The scorer's rating never reached this prompt before — RRF (ranker/fusion.py)
     # uses it to decide which jobs make the listwise pool at all, but Opus itself had
@@ -150,6 +174,7 @@ def listwise_rank(jobs: list[dict], candidate_profile: str, preferences: list[di
 - Preference signals (strong signals = heavy weight)
 - Role quality, growth potential, company type
 - Dealbreakers (REJECT[conf=ABSOLUTE/HIGH] signals)
+- Posting age ("Posted: N days ago", if shown) — an older posting is more likely to already be filled or to have gone quiet; let it count moderately against an otherwise-similar fresher posting, not as a hard cutoff
 
 Every job must appear exactly once in the ranking.
 

@@ -192,3 +192,12 @@ class TestRemotiveSourceSearch:
         src = _build_source([])
         src.search("React Developer", "Remote")
         src._fetch_jobs.assert_called_once_with("React Developer")
+
+    def test_posted_at_captures_the_publication_date(self):
+        # publication_date was already parsed for the days_back cutoff, then
+        # discarded — RawJob.posted_at carries it through instead.
+        src = _build_source([_make_job(job_id=1, days_ago=2)])
+        results = src.search("PHP Developer", "Remote")
+        assert results[0].posted_at is not None
+        posted = datetime.fromisoformat(results[0].posted_at)
+        assert (datetime.now(timezone.utc) - posted).days == 2

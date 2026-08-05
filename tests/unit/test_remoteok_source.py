@@ -193,3 +193,12 @@ class TestRemoteOKSourceSearch:
         src = _build_source([_make_job(company="GlobalTech")])
         results = src.search("PHP", "Remote")
         assert results[0].company == "GlobalTech"
+
+    def test_posted_at_captures_the_publication_date(self):
+        # "date" was already parsed for the days_back cutoff, then discarded —
+        # RawJob.posted_at carries it through instead.
+        src = _build_source([_make_job(days_ago=5)])
+        results = src.search("PHP", "Remote")
+        assert results[0].posted_at is not None
+        posted = datetime.fromisoformat(results[0].posted_at)
+        assert (datetime.now(timezone.utc) - posted).days == 5

@@ -167,6 +167,7 @@ class ItPracujSource(JobSource):
                 source=self.name,
                 source_id=str(offers[0].get("partitionId") or group.get("groupId") or ""),
                 description=group.get("jobDescription") or None,
+                posted_at=pub_dt.isoformat() if pub_dt else None,
             ))
 
         return results

@@ -154,13 +154,14 @@ class WWRSource(JobSource):
 
             # Date filter
             pub_date_str = item.findtext("pubDate") or ""
-            if cutoff and pub_date_str:
+            pub_dt = None
+            if pub_date_str:
                 try:
                     pub_dt = _parse_date(pub_date_str)
-                    if pub_dt < cutoff:
-                        continue
                 except Exception:
-                    pass
+                    pub_dt = None
+            if cutoff and pub_dt and pub_dt < cutoff:
+                continue
 
             # Title → split into company + job_title
             raw_title = (item.findtext("title") or "").strip()
@@ -190,6 +191,7 @@ class WWRSource(JobSource):
                 source=self.name,
                 source_id=link.rstrip("/").split("/")[-1],
                 description=description,
+                posted_at=pub_dt.isoformat() if pub_dt else None,
             ))
 
             if max_results and len(results) >= max_results:

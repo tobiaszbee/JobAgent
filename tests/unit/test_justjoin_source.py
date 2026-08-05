@@ -197,6 +197,16 @@ class TestJustJoinSourceSearch:
         results = src.search("PHP Developer", "Poland")
         assert results == []
 
+    def test_posted_at_captures_the_publication_date(self):
+        # publishedAt was already parsed for the days_back cutoff, then
+        # discarded — RawJob.posted_at carries it through instead.
+        src = _make_source()
+        src._client.get.return_value = MagicMock(status_code=200, text=_offers_html([_offer(days_ago=3)]))
+        results = src.search("PHP Developer", "Poland")
+        assert results[0].posted_at is not None
+        posted = datetime.fromisoformat(results[0].posted_at)
+        assert (datetime.now(timezone.utc) - posted).days == 3
+
 
 class TestFetchDescription:
     def test_uses_editor_paragraph_when_present(self):

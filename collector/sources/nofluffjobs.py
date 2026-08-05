@@ -177,6 +177,7 @@ class NoFluffJobsSource(JobSource):
                 source=self.name,
                 source_id=posting.get("id"),
                 description=self.fetch_description(job_url),
+                posted_at=posted_dt.isoformat() if posted_dt else None,
             ))
 
         return results

@@ -111,6 +111,7 @@ class RemoteOKSource(JobSource):
                 source="remoteok",
                 source_id=job.get("slug", ""),
                 description=strip_html(job.get("description", "")),
+                posted_at=pub_dt.isoformat(),
             ))
 
         return results

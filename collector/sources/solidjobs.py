@@ -184,6 +184,7 @@ class SolidJobsSource(JobSource):
                 source=self.name,
                 source_id=str(offer_id),
                 description=self.fetch_description(job_url),
+                posted_at=valid_dt.isoformat() if valid_dt else None,
             ))
 
         return results

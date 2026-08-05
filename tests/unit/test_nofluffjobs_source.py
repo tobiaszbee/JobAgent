@@ -185,6 +185,16 @@ class TestNoFluffJobsSearch:
         results = src.search("PHP", "Poland")
         assert results == []
 
+    def test_posted_at_captures_the_posted_timestamp(self):
+        # "posted" was already parsed for the days_back cutoff, then discarded —
+        # RawJob.posted_at carries it through instead.
+        src = _make_source()
+        src._client.get.return_value = MagicMock(status_code=200, text=_search_html([_posting(days_ago=4)]))
+        results = src.search("PHP", "Poland")
+        assert results[0].posted_at is not None
+        posted = datetime.fromisoformat(results[0].posted_at)
+        assert (datetime.now(timezone.utc) - posted).days == 4
+
 
 class TestNoFluffJobsFetchDescription:
     def test_returns_none_on_non_200(self):

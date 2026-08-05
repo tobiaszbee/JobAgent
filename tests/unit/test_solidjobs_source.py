@@ -169,6 +169,16 @@ class TestSolidJobsSearch:
         results = src.search("PHP", "Poland")
         assert results == []
 
+    def test_posted_at_captures_valid_from(self):
+        # validFrom was already parsed for the days_back cutoff, then discarded —
+        # RawJob.posted_at carries it through instead.
+        src = _make_source()
+        src._client.get.return_value = MagicMock(status_code=200, json=lambda: [_offer(days_ago=3)])
+        results = src.search("PHP", "Poland")
+        assert results[0].posted_at is not None
+        posted = datetime.fromisoformat(results[0].posted_at)
+        assert (datetime.now(timezone.utc) - posted).days == 3
+
 
 class TestSolidJobsFetchDescription:
     def test_joins_description_and_candidate_profile(self):

@@ -107,6 +107,7 @@ class RemotiveSource(JobSource):
                 source="remotive",
                 source_id=str(job.get("id", "")),
                 description=strip_html(job.get("description", "")),
+                posted_at=pub_dt.isoformat(),
             ))
 
         return results

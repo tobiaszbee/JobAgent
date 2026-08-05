@@ -5,12 +5,12 @@ from ranker.listwise import FALLBACK_RANK_REASON, OMITTED_RANK_REASON, _format_j
 
 
 def _job(id="j1", title="Senior Dev", company="Acme", location="Remote", description="Good job",
-         structured_data=None, score=None, score_reason=None):
+         structured_data=None, score=None, score_reason=None, posted_at=None):
     return {
         "id": id, "title": title, "company": company,
         "location": location, "description": description,
         "structured_data": json.dumps(structured_data) if structured_data else None,
-        "score": score, "score_reason": score_reason,
+        "score": score, "score_reason": score_reason, "posted_at": posted_at,
     }
 
 
@@ -75,6 +75,31 @@ class TestFormatJob:
     def test_scorer_rating_without_reason_does_not_crash(self):
         text = _format_job(_job(score=6.0, score_reason=None))
         assert "6.0/10" in text
+
+    def test_posting_age_shown_when_present(self):
+        # Regression: posting age was parsed by every collector source (to
+        # apply --days), then discarded — nothing downstream could tell a
+        # 5-week-old posting from one collected this morning.
+        from datetime import datetime, timedelta, timezone
+        posted = (datetime.now(timezone.utc) - timedelta(days=5)).isoformat()
+        text = _format_job(_job(posted_at=posted))
+        assert "Posted: 5 days ago" in text
+
+    def test_posting_age_singular_day(self):
+        from datetime import datetime, timedelta, timezone
+        posted = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+        text = _format_job(_job(posted_at=posted))
+        assert "Posted: 1 day ago" in text
+
+    def test_posting_age_omitted_when_absent(self):
+        # LinkedIn and pre-migration postings have no reliable per-posting
+        # date — never state an age we don't actually have.
+        text = _format_job(_job(posted_at=None))
+        assert "Posted:" not in text
+
+    def test_posting_age_omitted_on_unparseable_value(self):
+        text = _format_job(_job(posted_at="not-a-date"))
+        assert "Posted:" not in text
 
 
 @patch("ranker.listwise.random.shuffle")

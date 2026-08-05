@@ -257,6 +257,16 @@ class TestTheProtocolSourceSearch:
         assert results == []
         src._page.goto.assert_not_called()
 
+    def test_posted_at_captures_the_publication_date(self):
+        # publicationDateUtc was already parsed for the days_back cutoff, then
+        # discarded — RawJob.posted_at carries it through instead.
+        src = _make_source()
+        src._page.eval_on_selector.return_value = json.dumps(_search_payload([_offer(days_ago=2)]))
+        results = src.search("PHP", "Poland")
+        assert results[0].posted_at is not None
+        posted = datetime.fromisoformat(results[0].posted_at)
+        assert (datetime.now(timezone.utc) - posted).days == 2
+
 
 class TestFetchDescription:
     def test_returns_joined_sections(self):

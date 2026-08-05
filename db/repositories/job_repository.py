@@ -13,11 +13,12 @@ def insert(
     source_id: str | None = None,
     description: str | None = None,
     search_query: str | None = None,
+    posted_at: str | None = None,
 ) -> str | None:
     resp = api_client.post("/api/jobs", json={
         "title": title, "company": company, "location": location, "url": url,
         "source": source, "source_id": source_id, "description": description,
-        "search_query": search_query,
+        "search_query": search_query, "posted_at": posted_at,
     })
     return resp.json()["job_id"]
 

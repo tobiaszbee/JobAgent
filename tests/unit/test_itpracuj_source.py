@@ -192,3 +192,13 @@ class TestItPracujSourceSearch:
         src._page.goto.side_effect = PlaywrightTimeout("timeout")
         results = src.search("PHP", "Poland")
         assert results == []
+
+    def test_posted_at_captures_last_publicated(self):
+        # lastPublicated was already parsed for the days_back cutoff, then
+        # discarded — RawJob.posted_at carries it through instead.
+        src = _make_source()
+        src._page.eval_on_selector.return_value = json.dumps(_search_payload([_group(days_ago=1)]))
+        results = src.search("PHP Developer", "Poland")
+        assert results[0].posted_at is not None
+        posted = datetime.fromisoformat(results[0].posted_at)
+        assert (datetime.now(timezone.utc) - posted).days == 1
