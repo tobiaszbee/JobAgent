@@ -10,13 +10,14 @@ logger = logging.getLogger(__name__)
 _RRF_K = 60
 
 
-def fuse_by_rrf(jobs: list[dict], k: int = _RRF_K) -> list[dict]:
-    """Reciprocal Rank Fusion of two orderings over the same job list: embedding
-    similarity (_embedding_score, higher better) and the LLM scorer's score
-    (0-10, higher better, None = not yet scored). Returns jobs sorted by combined
-    RRF score, descending — stable relative to input order for exact ties.
+def fuse_by_rrf(jobs: list[dict], k: int = _RRF_K, extra_rank_field: str | None = None) -> list[dict]:
+    """Reciprocal Rank Fusion of orderings over the same job list: embedding
+    similarity (_embedding_score, higher better), the LLM scorer's score (0-10,
+    higher better, None = not yet scored), and optionally a third leg named by
+    extra_rank_field. Returns jobs sorted by combined RRF score, descending —
+    stable relative to input order for exact ties.
 
-    RRF_score(job) = 1/(k + rank_embedding) + 1/(k + rank_llm_score)
+    RRF_score(job) = 1/(k + rank_embedding) + 1/(k + rank_llm_score) [+ 1/(k + rank_extra)]
 
     Before this, scripts/rank_jobs.py chose the pool feeding rerank/listwise/
     debate purely by embedding rank — the scorer's LLM score was only ever used
@@ -24,11 +25,24 @@ def fuse_by_rrf(jobs: list[dict], k: int = _RRF_K) -> list[dict]:
     9/10 by the LLM but with only average cosine similarity could sit outside
     the top-N and never reach the paid rerank/listwise stages at all.
 
-    A job the LLM scorer hasn't reached yet (score=None) gets no LLM-rank
-    contribution rather than a fabricated rank — it's still eligible purely on
-    embedding rank, exactly as before this fusion existed."""
+    A job missing score (or extra_rank_field, when given) gets no contribution
+    from that leg rather than a fabricated rank — it's still eligible purely on
+    the remaining leg(s), exactly as before this fusion existed. This is also
+    how scripts/rank_jobs.py re-fuses the Voyage cross-encoder back in as a
+    third leg (extra_rank_field='rerank_score') after reranking the top-N pool,
+    instead of letting the cross-encoder's own order unilaterally decide who
+    reaches listwise ranking. This function itself doesn't know whether a
+    rerank_score is trustworthy — ranker.reranker.rerank_jobs sets
+    _rerank_unreliable on every job when the Voyage call fell back (no query,
+    or the API failed), and it's the caller's job to check that marker and skip
+    passing extra_rank_field entirely in that case, rather than re-fusing a
+    rerank_score that's actually just a copy of the embedding score."""
     if not jobs:
         return []
+
+    def _partial_rank(key: str) -> dict:
+        ranked = sorted((j for j in jobs if j.get(key) is not None), key=lambda j: j[key], reverse=True)
+        return {job["id"]: i for i, job in enumerate(ranked)}
 
     by_embedding = sorted(
         jobs,
@@ -36,15 +50,15 @@ def fuse_by_rrf(jobs: list[dict], k: int = _RRF_K) -> list[dict]:
         reverse=True,
     )
     embedding_rank = {job["id"]: i for i, job in enumerate(by_embedding)}
-
-    scored = [j for j in jobs if j.get("score") is not None]
-    by_llm_score = sorted(scored, key=lambda j: j["score"], reverse=True)
-    llm_rank = {job["id"]: i for i, job in enumerate(by_llm_score)}
+    llm_rank = _partial_rank("score")
+    extra_rank = _partial_rank(extra_rank_field) if extra_rank_field else {}
 
     def rrf_score(job: dict) -> float:
         total = 1.0 / (k + embedding_rank[job["id"]])
         if job["id"] in llm_rank:
             total += 1.0 / (k + llm_rank[job["id"]])
+        if job["id"] in extra_rank:
+            total += 1.0 / (k + extra_rank[job["id"]])
         return total
 
     return sorted(jobs, key=rrf_score, reverse=True)

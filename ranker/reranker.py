@@ -25,7 +25,9 @@ def rerank_jobs(jobs: list[dict], query: str, top_k: int = 20) -> list[dict]:
     """
     Cross-encoder rerank using Voyage Rerank API.
     Returns up to top_k jobs sorted by rerank score (best first).
-    Falls back to original order on failure.
+    Falls back to original order on failure — those jobs are marked
+    _rerank_unreliable so callers re-fusing rerank_score as an RRF leg (see
+    scripts/rank_jobs.py) know not to treat it as a real signal.
     """
     if not jobs:
         return []
@@ -40,6 +42,7 @@ def rerank_jobs(jobs: list[dict], query: str, top_k: int = 20) -> list[dict]:
         logger.warning("rerank_jobs called with no candidate query (e.g. no CV uploaded yet) — skipping cross-encoder rerank")
         for job in jobs:
             job.setdefault("rerank_score", job.get("_embedding_score") or 0.0)
+            job["_rerank_unreliable"] = True
         return jobs[:top_k]
 
     client = _get_client()
@@ -56,6 +59,7 @@ def rerank_jobs(jobs: list[dict], query: str, top_k: int = 20) -> list[dict]:
         logger.error(f"Voyage rerank failed: {e} — falling back to embedding order")
         for job in jobs:
             job.setdefault("rerank_score", job.get("_embedding_score", 0.0))
+            job["_rerank_unreliable"] = True
         return jobs[:top_k]
 
     reranked = []

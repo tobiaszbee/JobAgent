@@ -94,8 +94,14 @@ fused = fuse_by_rrf(ranking_eligible)
 rerank_pool = fused[:RANKING["top_n_rerank"]]
 if len(rerank_pool) > 1:
     print(f"\nReranking top-{len(rerank_pool)} with Voyage cross-encoder...")
-    rerank_pool = rerank_jobs(rerank_pool, retrieval_query, top_k=RANKING["top_n_listwise"])
+    # top_k=len(rerank_pool), not top_n_listwise — Voyage scores every pair
+    # regardless of top_k (this doesn't cost more), and the fuse below needs a
+    # rerank_score on the whole pool to pick the top-N itself, rather than
+    # trusting Voyage's own cut as the final word on who reaches listwise ranking.
+    rerank_pool = rerank_jobs(rerank_pool, retrieval_query, top_k=len(rerank_pool))
     print(f"  Got {len(rerank_pool)} after reranking")
+    if not any(j.get("_rerank_unreliable") for j in rerank_pool):
+        rerank_pool = fuse_by_rrf(rerank_pool, extra_rank_field="rerank_score")
 else:
     for j in rerank_pool:
         j["rerank_score"] = j.get("_embedding_score")

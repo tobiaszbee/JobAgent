@@ -147,6 +147,42 @@ class TestRerankJobs:
 
         assert len(result) == 2
 
+    def test_no_query_fallback_marks_jobs_rerank_unreliable(self):
+        # scripts/rank_jobs.py re-fuses rerank_score as an RRF leg after this
+        # call — it must be able to tell "no real cross-encoder signal" apart
+        # from a genuine low score, or a fallback value (== embedding score)
+        # would double-count the embedding leg in that fusion.
+        jobs = [_job("j1")]
+        jobs[0]["_embedding_score"] = 0.5
+
+        result = rerank_jobs(jobs, query=None)
+
+        assert result[0]["_rerank_unreliable"] is True
+
+    def test_api_error_fallback_marks_jobs_rerank_unreliable(self):
+        jobs = [_job("j1")]
+        jobs[0]["_embedding_score"] = 0.5
+
+        with patch("ranker.reranker._get_client") as mock_get:
+            mock_client = MagicMock()
+            mock_client.rerank.side_effect = Exception("Voyage down")
+            mock_get.return_value = mock_client
+
+            result = rerank_jobs(jobs, "query")
+
+        assert result[0]["_rerank_unreliable"] is True
+
+    def test_successful_rerank_does_not_mark_jobs_unreliable(self):
+        jobs = [_job("j1")]
+        with patch("ranker.reranker._get_client") as mock_get:
+            mock_client = MagicMock()
+            mock_client.rerank.return_value = [{"index": 0, "score": 0.77}]
+            mock_get.return_value = mock_client
+
+            result = rerank_jobs(jobs, "query")
+
+        assert "_rerank_unreliable" not in result[0]
+
     def test_fallback_on_api_error_preserves_original_order(self):
         jobs = [_job("j1"), _job("j2"), _job("j3")]
         for j in jobs:
