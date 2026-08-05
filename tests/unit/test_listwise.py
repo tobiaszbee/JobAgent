@@ -1,7 +1,15 @@
 import json
 from unittest.mock import MagicMock, patch
 
+import anthropic
+import httpx
+
 from ranker.listwise import FALLBACK_RANK_REASON, OMITTED_RANK_REASON, _format_job, listwise_rank
+
+
+def _rate_limit_error():
+    req = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    return anthropic.RateLimitError("rate limited", response=httpx.Response(429, request=req), body=None)
 
 
 def _job(id="j1", title="Senior Dev", company="Acme", location="Remote", description="Good job",
@@ -222,6 +230,27 @@ def test_listwise_rank_fallback_on_api_error(mock_anthropic):
     # anywhere in the data from a genuine (if terse) Opus ranking.
     assert result[0]["rank_reason"] == FALLBACK_RANK_REASON
     assert result[1]["rank_reason"] == FALLBACK_RANK_REASON
+
+
+@patch("ranker.retry.time.sleep")
+@patch("ranker.listwise.anthropic.Anthropic")
+def test_listwise_rank_retries_a_transient_error_instead_of_falling_back(mock_anthropic, mock_sleep):
+    # Regression: listwise_rank used to have no retry at all — a single
+    # transient hiccup (rate limit, a 5xx, a network blip) fell straight
+    # through to _fallback_ranking, discarding the whole batch's Opus judgment
+    # for that run even though a second attempt would likely have succeeded.
+    jobs = [_job("j1"), _job("j2")]
+    ranking = [{"job_id": j["id"], "reason": "x"} for j in jobs]
+    mock_anthropic.return_value.messages.create.side_effect = [
+        _rate_limit_error(),
+        _make_ranking_response(ranking),
+    ]
+
+    result = listwise_rank(jobs, "", [])
+
+    assert mock_anthropic.return_value.messages.create.call_count == 2
+    assert result[0]["rank_reason"] != FALLBACK_RANK_REASON
+    assert {r["id"] for r in result} == {"j1", "j2"}
 
 
 @patch("ranker.listwise.anthropic.Anthropic")

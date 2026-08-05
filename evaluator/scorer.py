@@ -48,18 +48,48 @@ def _build_examples_section(positive: list[dict], negative: list[dict]) -> str:
     return "\n".join(lines) + "\n" if lines else ""
 
 
-_LEGEND = (
+# Just the REJECT/ACCEPT/INFER annotation syntax — only meaningful alongside an
+# actual LEARNED PREFERENCE PROFILE block, since that's the only place those
+# annotations appear. The precedence rule that used to live in here too
+# (_build_precedence_note below) does NOT belong here: MUST HAVE, the candidate
+# questionnaire, and PREFERRED are present in every prompt regardless of
+# whether a learned profile exists, so the model needs that precedence
+# guidance every time — this glossary alone used to gate it behind having a
+# learned profile, silently omitting it for exactly the new-user case where
+# the questionnaire is the only real signal and getting the precedence right
+# matters most.
+_ANNOTATION_LEGEND = (
     "Interpretation:\n"
     "- REJECT[conf=ABSOLUTE/HIGH]: near-dealbreaker — score ≤2 if job matches this pattern\n"
     "- REJECT[conf=MEDIUM]: strong penalty; REJECT[conf=LOW]: minor penalty\n"
     "- ACCEPT[...]: positive signal — weight by conf the same way\n"
     "- INFER[...]: soft signal — if the offer lacks the data (e.g. no salary shown), do NOT penalize\n"
-    "- n=X/Y = evidence count; higher Y = more reliable signal\n"
-    "- Precedence when sources conflict: MUST HAVE always wins; then the CANDIDATE QUESTIONNAIRE "
-    "(their own direct, current answers) outranks this LEARNED PREFERENCE PROFILE (inferred from past "
-    "applied/rejected jobs — useful nuance, but a proxy for what they told you directly, not a "
-    "replacement); this profile in turn overrides PREFERRED criteria\n\n"
+    "- n=X/Y = evidence count; higher Y = more reliable signal\n\n"
 )
+
+
+def _build_precedence_note(has_questionnaire: bool, has_learned_profile: bool) -> str:
+    """Only chains in the tiers actually present in this prompt — mentioning a
+    tier that isn't there (e.g. "the questionnaire outranks X" when the
+    candidate never filled one in, so there's no CANDIDATE QUESTIONNAIRE
+    section at all) would be a dangling reference the model can't act on."""
+    if has_questionnaire and has_learned_profile:
+        middle = (
+            "then the CANDIDATE QUESTIONNAIRE (their own direct, current answers) outranks the "
+            "LEARNED PREFERENCE PROFILE (inferred from past applied/rejected jobs — useful nuance, "
+            "but a proxy for what they told you directly, not a replacement); that profile in turn "
+            "overrides PREFERRED criteria"
+        )
+    elif has_questionnaire:
+        middle = "then the CANDIDATE QUESTIONNAIRE (their own direct, current answers) outranks PREFERRED criteria"
+    elif has_learned_profile:
+        middle = (
+            "then the LEARNED PREFERENCE PROFILE (inferred from past applied/rejected jobs) "
+            "outranks PREFERRED criteria"
+        )
+    else:
+        middle = "PREFERRED criteria are the lowest priority"
+    return f"Precedence when sources conflict: MUST HAVE always wins; {middle}.\n\n"
 
 
 def _build_preferences_section(learned_preferences: list[dict] | str) -> str:
@@ -77,7 +107,7 @@ def _build_preferences_section(learned_preferences: list[dict] | str) -> str:
         )
         if not scored_text.strip():
             return ""
-    return f"LEARNED PREFERENCE PROFILE:\n{scored_text}\n\n{_LEGEND}"
+    return f"LEARNED PREFERENCE PROFILE:\n{scored_text}\n\n{_ANNOTATION_LEGEND}"
 
 
 def _build_calibration_section(divergence_cases: list[dict]) -> str:
@@ -112,6 +142,7 @@ def build_system_prompt(
     """Call once per batch and reuse across jobs."""
     questionnaire_section = f"{questionnaire}\n\n" if questionnaire else ""
     prefs_section = _build_preferences_section(learned_preferences)
+    precedence_note = _build_precedence_note(has_questionnaire=bool(questionnaire), has_learned_profile=bool(prefs_section))
     examples_section = _build_examples_section(positive_examples, negative_examples)
     calibration_section = _build_calibration_section(divergence_cases or [])
 
@@ -132,7 +163,7 @@ def build_system_prompt(
 
 {candidate_profile}
 
-{questionnaire_section}{prefs_section}{examples_section}{calibration_section}{required_header}
+{questionnaire_section}{prefs_section}{examples_section}{calibration_section}{precedence_note}{required_header}
 {required_lines}
 
 PREFERRED (increases score):

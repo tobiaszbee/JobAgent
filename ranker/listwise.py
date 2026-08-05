@@ -8,6 +8,7 @@ import anthropic
 from config import ANTHROPIC_API_KEY, CLAUDE_RANK_MODEL
 from collector.utils import build_excerpt, excerpt_looks_incomplete, INCOMPLETE_DESCRIPTION_NOTE
 from db.repositories.usage_repository import log_anthropic
+from ranker.retry import call_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -193,13 +194,16 @@ Include ALL {len(jobs)} jobs. No text after the closing </ranking> tag."""
 
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
     try:
-        response = client.messages.create(
-            model=CLAUDE_RANK_MODEL,
-            max_tokens=16000,
-            thinking={"type": "adaptive"},
-            output_config={"effort": "high"},
-            system=system,
-            messages=[{"role": "user", "content": f"Rank these {len(jobs)} jobs from best to worst:\n\n{jobs_text}"}],
+        response = call_with_retry(
+            lambda: client.messages.create(
+                model=CLAUDE_RANK_MODEL,
+                max_tokens=16000,
+                thinking={"type": "adaptive"},
+                output_config={"effort": "high"},
+                system=system,
+                messages=[{"role": "user", "content": f"Rank these {len(jobs)} jobs from best to worst:\n\n{jobs_text}"}],
+            ),
+            label="Listwise ranking",
         )
     except Exception as e:
         logger.error(f"Listwise ranking failed: {e}")

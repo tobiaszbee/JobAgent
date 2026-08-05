@@ -5,6 +5,7 @@ import anthropic
 from config import ANTHROPIC_API_KEY, CLAUDE_MODEL
 from collector.utils import build_excerpt
 from db.repositories.usage_repository import log_anthropic
+from ranker.retry import call_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -127,13 +128,16 @@ Use the submit_debate_review tool to report your findings."""
 
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
     try:
-        response = client.messages.create(
-            model=CLAUDE_MODEL,
-            max_tokens=2000,
-            system=system,
-            messages=[{"role": "user", "content": f"Review this ranking of {len(ranked_jobs)} jobs:\n\n{jobs_text}"}],
-            tools=[_DEBATE_TOOL],
-            tool_choice={"type": "tool", "name": "submit_debate_review"},
+        response = call_with_retry(
+            lambda: client.messages.create(
+                model=CLAUDE_MODEL,
+                max_tokens=2000,
+                system=system,
+                messages=[{"role": "user", "content": f"Review this ranking of {len(ranked_jobs)} jobs:\n\n{jobs_text}"}],
+                tools=[_DEBATE_TOOL],
+                tool_choice={"type": "tool", "name": "submit_debate_review"},
+            ),
+            label="Debate review",
         )
     except Exception as e:
         logger.error(f"Debate review failed: {e}")

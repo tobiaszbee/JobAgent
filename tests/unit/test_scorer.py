@@ -168,6 +168,37 @@ class TestBuildSystemPrompt:
         assert "0-2" in prompt
         assert "clustering" in prompt.lower()
 
+    def test_precedence_note_present_with_no_learned_preferences(self):
+        # Regression: the precedence rule (MUST HAVE > questionnaire > PREFERRED)
+        # used to live only inside the LEARNED PREFERENCE PROFILE section's own
+        # legend, so it silently disappeared for exactly the new-user case where
+        # there's no learned profile yet and the questionnaire is the only real
+        # signal — precisely when getting the precedence right matters most.
+        prompt = build_system_prompt({}, [], [], learned_preferences="")
+        assert "Precedence when sources conflict" in prompt
+        assert "MUST HAVE always wins" in prompt
+
+    def test_precedence_note_omits_learned_profile_tier_when_none_exists(self):
+        prompt = build_system_prompt({}, [], [], learned_preferences="")
+        precedence_line = next(line for line in prompt.splitlines() if "Precedence when sources conflict" in line)
+        assert "LEARNED PREFERENCE PROFILE" not in precedence_line
+
+    def test_precedence_note_present_with_learned_preferences_too(self):
+        # Not just a new-user fix — still there (and still correctly worded)
+        # once a learned profile exists, same as before this change.
+        prompt = build_system_prompt({}, [], [], learned_preferences="ACCEPT[conf=HIGH][n=3/3] Remote roles")
+        assert "Precedence when sources conflict" in prompt
+        assert "LEARNED PREFERENCE PROFILE" in prompt
+
+    def test_annotation_legend_only_appears_alongside_a_learned_profile(self):
+        # The REJECT/ACCEPT/INFER glossary only makes sense next to actual
+        # annotated preference lines — unlike the precedence note, it should
+        # stay gated on having a learned profile.
+        without = build_system_prompt({}, [], [], learned_preferences="")
+        with_profile = build_system_prompt({}, [], [], learned_preferences="ACCEPT[conf=HIGH][n=3/3] Remote roles")
+        assert "REJECT[conf=" not in without
+        assert "REJECT[conf=" in with_profile
+
 
 class TestBuildUserMessage:
     def test_contains_all_job_fields(self):

@@ -1,6 +1,14 @@
 from unittest.mock import MagicMock, patch
 
+import anthropic
+import httpx
+
 from ranker.debate import debate_rank, _format_job_for_review, _parse_reviews
+
+
+def _rate_limit_error():
+    req = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    return anthropic.RateLimitError("rate limited", response=httpx.Response(429, request=req), body=None)
 
 
 def _job(job_id="j1", title="Dev", rank=1, rank_reason="Good fit", breakdown=None, **overrides):
@@ -157,6 +165,24 @@ class TestDebateRank:
         mock_anthropic.return_value.messages.create.side_effect = Exception("boom")
         result = debate_rank(jobs, "profile")
         assert result == jobs
+
+    @patch("ranker.retry.time.sleep")
+    @patch("ranker.debate.anthropic.Anthropic")
+    def test_retries_a_transient_error_instead_of_returning_original_ranking(self, mock_anthropic, mock_sleep):
+        # Regression: debate_rank used to have no retry at all — a single
+        # transient hiccup fell straight through to "return ranked_jobs
+        # unchanged", silently skipping the whole debate review for that run.
+        jobs = [_job("j1", rank=1), _job("j2", rank=2)]
+        mock_anthropic.return_value.messages.create.side_effect = [
+            _rate_limit_error(),
+            _debate_response([{"job_id": "j1", "flag": "dealbreaker_risk", "note": "risk"}]),
+        ]
+
+        result = debate_rank(jobs, "profile")
+
+        assert mock_anthropic.return_value.messages.create.call_count == 2
+        assert result[-1]["id"] == "j1"  # the flag from the *retried* response was actually applied
+        assert result[-1]["debate_flag"] == "dealbreaker_risk"
 
     @patch("ranker.debate.anthropic.Anthropic")
     def test_no_tool_use_block_returns_original_ranking(self, mock_anthropic):

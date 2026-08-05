@@ -41,7 +41,6 @@ def test_preferences_section_includes_legend():
     signals = [{"type": "ACCEPT", "dim": "x", "value": "y", "conf": "HIGH"}]
     section = _build_preferences_section(signals)
     assert "Interpretation" in section
-    assert "MUST HAVE always wins" in section
 
 
 def test_preferences_section_infer_soft_signal_in_legend():
@@ -133,6 +132,20 @@ def test_build_system_prompt_questionnaire_before_learned_profile():
 
 def test_legend_states_questionnaire_precedence_over_learned_profile():
     signals = [{"type": "ACCEPT", "dim": "x", "value": "y"}]
-    prompt = build_system_prompt(_criteria(), [], [], learned_preferences=signals)
+    prompt = build_system_prompt(
+        _criteria(), [], [], learned_preferences=signals, questionnaire="CANDIDATE QUESTIONNAIRE:\n- Work mode: remote"
+    )
     assert "QUESTIONNAIRE" in prompt
-    assert "outranks this LEARNED PREFERENCE PROFILE" in prompt
+    assert "outranks the LEARNED PREFERENCE PROFILE" in prompt
+
+
+def test_precedence_note_omits_questionnaire_tier_when_none_given():
+    # Regression: the precedence note used to unconditionally name "the
+    # CANDIDATE QUESTIONNAIRE" even when questionnaire="" — a dangling
+    # reference to a section that doesn't actually exist in the prompt for a
+    # candidate who never filled one in.
+    signals = [{"type": "ACCEPT", "dim": "x", "value": "y"}]
+    prompt = build_system_prompt(_criteria(), [], [], learned_preferences=signals)
+    assert "CANDIDATE QUESTIONNAIRE" not in prompt
+    assert "LEARNED PREFERENCE PROFILE" in prompt
+    assert "Precedence when sources conflict" in prompt
