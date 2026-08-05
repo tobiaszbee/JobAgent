@@ -37,11 +37,15 @@ function formatDate(d) {
   return new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
 }
 
-function showToast(msg) {
+function showToast(msg, kind) {
   const t = document.getElementById('toast');
   t.textContent = msg;
+  t.classList.toggle('error', kind === 'error');
   t.classList.add('show');
-  setTimeout(() => t.classList.remove('show'), 2500);
+  // Errors get more time on screen than a routine confirmation — this is the
+  // one place a failed pipeline run (silent otherwise, see _updateAgentIndicator)
+  // actually surfaces to someone who isn't staring at the Run Agent modal.
+  setTimeout(() => t.classList.remove('show'), kind === 'error' ? 6000 : 2500);
 }
 
 // ── Theme ──────────────────────────────────────────────────────────────────────
@@ -1471,6 +1475,21 @@ function _updateElapsedLabel() {
   if (el) el.textContent = _runStartedAtMs ? 'Elapsed: ' + _formatElapsed(Date.now() - _runStartedAtMs) : '';
 }
 
+// Shared by startAgent()'s live __DONE__ handler and _attachToActiveRun()'s
+// poll-detected completion — a failed run (lastStatus 'error' or
+// 'done_with_errors') used to render identically to a clean one: full bar,
+// "Stage 6/6", no visual difference at all.
+function _applyFinalStageVisual(lastStatus) {
+  const bar = document.getElementById('run-progress-bar');
+  const lbl = document.getElementById('run-progress-label');
+  const failed = lastStatus && lastStatus !== 'done';
+  bar.style.width = '100%';
+  bar.classList.toggle('error', failed);
+  lbl.textContent = failed
+    ? `Stage ${_AGENT_STAGE_COUNT} / ${_AGENT_STAGE_COUNT} — finished with errors, see log above`
+    : `Stage ${_AGENT_STAGE_COUNT} / ${_AGENT_STAGE_COUNT}`;
+}
+
 // Polls the log file directly (written continuously server-side regardless of
 // any websocket's state) instead of a live push — the one live /ws/agent
 // stream belongs to whichever tab called startAgent(); a tab that reopens
@@ -1481,11 +1500,11 @@ async function _pollActiveRunOnce() {
   try {
     const [logsResp, statusResp] = await Promise.all([fetch('/api/agent/logs'), fetch('/api/agent/status')]);
     const { lines } = await logsResp.json();
-    const { running, stage } = await statusResp.json();
+    const { running, stage, last_status } = await statusResp.json();
     _renderLogAndProgress(lines, stage);
-    return running;
+    return { running, lastStatus: last_status };
   } catch (e) {
-    return true; // a transient fetch blip shouldn't tear down the view
+    return { running: true, lastStatus: null }; // a transient fetch blip shouldn't tear down the view
   }
 }
 
@@ -1496,27 +1515,34 @@ async function _attachToActiveRun(startedAt) {
   document.getElementById('btn-generic-stop').style.display = '';
   document.getElementById('run-progress').style.display = '';
   document.getElementById('run-progress-bar').style.width = '0%';
+  document.getElementById('run-progress-bar').classList.remove('error'); // clear a red bar left over from a previous failed run
   document.getElementById('run-progress-label').textContent = `Stage 0 / ${_AGENT_STAGE_COUNT}`;
 
   _runStartedAtMs = startedAt ? new Date(startedAt).getTime() : null;
   _clearLogPollTimer();
+  // Guarantees _updateAgentIndicator sees a real running->not-running transition
+  // below (and so actually toasts on failure) even if the background 5s poller
+  // (pollAgentStatus) hasn't independently observed this run as active yet.
+  _agentRunning = true;
 
-  const stillRunning = await _pollActiveRunOnce();
-  if (!stillRunning) {
+  const first = await _pollActiveRunOnce();
+  if (!first.running) {
     _runStartedAtMs = null;
     document.getElementById('btn-generic-stop').style.display = 'none';
-    _updateAgentIndicator(false);
+    _applyFinalStageVisual(first.lastStatus);
+    _updateAgentIndicator(false, first.lastStatus);
     loadStats();
     loadJobs();
     return;
   }
   _logPollTimer = setInterval(async () => {
-    const running = await _pollActiveRunOnce();
+    const { running, lastStatus } = await _pollActiveRunOnce();
     if (!running) {
       _clearLogPollTimer();
       _runStartedAtMs = null;
       document.getElementById('btn-generic-stop').style.display = 'none';
-      _updateAgentIndicator(false);
+      _applyFinalStageVisual(lastStatus);
+      _updateAgentIndicator(false, lastStatus);
       loadStats();
       loadJobs();
     }
@@ -1608,10 +1634,17 @@ let _agentRunning = false;
 async function checkAgentStatus() {
   const r = await fetch('/api/agent/status');
   const s = await r.json();
-  _updateAgentIndicator(s.running);
+  _updateAgentIndicator(s.running, s.last_status);
 }
 
-function _updateAgentIndicator(running) {
+// The one place that reacts to a run actually finishing, regardless of *how*
+// that was detected — the live websocket's __DONE__ (startAgent), the 4s
+// reattach poll (_pollActiveRunOnce), or this function's own background 5s
+// poll running with no modal open at all. A run that failed used to render
+// identically to a clean one everywhere; lastStatus (runner.py's
+// done/done_with_errors/error) is what makes that visible even to someone who
+// wasn't watching when it happened.
+function _updateAgentIndicator(running, lastStatus) {
   const pill = document.getElementById('running-pill');
   const runBtn = document.getElementById('run-btn');
   const wasRunning = _agentRunning;
@@ -1627,13 +1660,19 @@ function _updateAgentIndicator(running) {
   if (wasRunning && !running) {
     loadStats();
     loadJobs();
+    if (lastStatus && lastStatus !== 'done') {
+      const msg = lastStatus === 'error'
+        ? 'Run failed — see the log for details.'
+        : 'Run finished, but one or more stages failed — see the log for details.';
+      showToast(msg, 'error');
+    }
   }
 }
 
 function pollAgentStatus() {
   fetch('/api/agent/status')
     .then(r => r.json())
-    .then(s => _updateAgentIndicator(s.running))
+    .then(s => _updateAgentIndicator(s.running, s.last_status))
     .catch(() => {})
     .finally(() => setTimeout(pollAgentStatus, 5000));
 }
@@ -1668,6 +1707,7 @@ async function startAgent() {
   btn.onclick = stopAgent;
   prog.style.display = '';
   bar.style.width = '0%';
+  bar.classList.remove('error'); // clear a red bar left over from a previous failed run
   lbl.textContent = `Stage 0 / ${_AGENT_STAGE_COUNT}`;
 
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -1688,11 +1728,12 @@ async function startAgent() {
   }
 
   agentSocket.onmessage = e => {
-    if (e.data.includes('__DONE__')) {
-      bar.style.width = '100%';
-      lbl.textContent = `Stage ${_AGENT_STAGE_COUNT} / ${_AGENT_STAGE_COUNT}`;
+    const doneMatch = e.data.match(/__DONE__:(\w+)/);
+    if (doneMatch) {
+      const finalStatus = doneMatch[1]; // 'done' | 'done_with_errors' | 'error'
+      _applyFinalStageVisual(finalStatus);
       _resetStartBtn();
-      _updateAgentIndicator(false);
+      _updateAgentIndicator(false, finalStatus);
       loadStats();
       loadJobs();
       return;

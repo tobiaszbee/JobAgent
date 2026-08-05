@@ -119,14 +119,18 @@ def agent_status():
     """started_at lets the frontend show an elapsed-time counter after
     reopening the run modal mid-run (see openRunModal in dashboard.js) — the
     browser has no other way to know when an already-in-progress run began,
-    since a page reload or modal close/reopen loses any client-side timer."""
+    since a page reload or modal close/reopen loses any client-side timer.
+
+    last_status is read unconditionally (not just while running) so a client
+    that missed the live __DONE__ message — a poller that reattached mid-run
+    (see _attachToActiveRun in dashboard.js), or a fresh page load right after
+    a run finished — can still learn whether the last run actually succeeded,
+    instead of only ever seeing a bare 'running: false' with no outcome."""
     running = _is_run_active()
-    started_at = None
-    if running:
-        latest = session_repository.get_latest()
-        if latest:
-            started_at = latest.get("started_at")
-    return {"running": running, "started_at": started_at, "stage": _stage_progress}
+    latest = session_repository.get_latest()
+    started_at = latest.get("started_at") if (running and latest) else None
+    last_status = latest.get("status") if latest else None
+    return {"running": running, "started_at": started_at, "stage": _stage_progress, "last_status": last_status}
 
 
 @bp.get("/api/agent/query-suggestions")
@@ -278,7 +282,16 @@ def _run_pipeline_ws(ws, run_label: str, build_stages) -> None:
     inside the guard, exactly where the original per-handler code did — not
     before it, which would let that read happen even when a run is already
     active. Return None from build_stages to abort after already sending your
-    own error message (e.g. invalid params)."""
+    own error message (e.g. invalid params).
+
+    A stage with stop_if_fails=False that exits non-zero used to be silently
+    swallowed — the loop just moved on, and a failed EXTRACTOR/EVALUATOR/AI
+    RANKING rendered in the UI identically to a clean run (progress bar at
+    100%, "Stage 6/6", no error anywhere). Every non-zero exit is now logged
+    inline regardless of stop_if_fails, and the run's final status reflects it
+    (done / done_with_errors / error) via both the session record (so
+    /api/agent/status's last_status survives past this websocket) and a
+    __DONE__:<status> suffix (so a live listener doesn't need a second call)."""
     global _agent_process, _stage_progress
 
     with _RunGuard() as acquired:
@@ -295,6 +308,7 @@ def _run_pipeline_ws(ws, run_label: str, build_stages) -> None:
         if session_id is None:
             return
         status = "done"
+        failed_stages: list[str] = []
 
         stages = [
             (label, path, [str(session_id) if a == _SESSION_ID_PLACEHOLDER else a for a in args], stop_if_fails)
@@ -312,11 +326,27 @@ def _run_pipeline_ws(ws, run_label: str, build_stages) -> None:
                     exit_code = _run_script(ws, script_path, args, log_file=log_file)
                     if exit_code == 0 and label.startswith("COLLECTOR"):
                         session_repository.mark_collected(session_id)
-                    if stop_if_fails and exit_code != 0:
-                        msg = f"\n{label} failed (exit code {exit_code}). Skipping remaining stages.\n"
+                    if exit_code != 0:
+                        failed_stages.append(label)
+                        continuation = "Skipping remaining stages." if stop_if_fails else "Continuing with remaining stages."
+                        msg = f"\n{label} failed (exit code {exit_code}). {continuation}\n"
                         log_file.write(msg)
                         _safe_send(ws, msg)
-                        break
+                        if stop_if_fails:
+                            break
+
+                if failed_stages:
+                    status = "done_with_errors"
+                # Deliberately NOT "=== ... ===" — that's the exact pattern
+                # dashboard.js's stageMatch regex uses to detect a new stage
+                # header, so this line would otherwise get miscounted as a 7th
+                # stage and push the progress bar/label past 100%.
+                summary = f"\nRESULT: {status.upper()}"
+                if failed_stages:
+                    summary += f" (failed: {', '.join(failed_stages)})"
+                summary += "\n"
+                log_file.write(summary)
+                _safe_send(ws, summary)
         except Exception:
             status = "error"
             raise
@@ -325,7 +355,7 @@ def _run_pipeline_ws(ws, run_label: str, build_stages) -> None:
             usage_repository.record_run_summary(run_label, started_at)
             _agent_process = None
             _stage_progress = None
-            _safe_send(ws, "\n__DONE__\n")
+            _safe_send(ws, f"\n__DONE__:{status}\n")
 
 
 @sock.route("/ws/agent")
