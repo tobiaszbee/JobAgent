@@ -94,6 +94,17 @@ def jobagentweb_server():
 
 
 @pytest.fixture(autouse=True)
+def _no_static_api_key(monkeypatch):
+    """Neutralizes config.JOBAGENT_API_KEY for every test, regardless of what's set
+    in this machine's real .env. Without this, api_client.request() unconditionally
+    takes the static-key branch (see api_client.py) and every test hits the
+    ephemeral jobagentweb_server with a key that's meaningless there (it's scoped to
+    a real user_id on the real production DB) — 401 on every request, isolated user
+    registration or not."""
+    monkeypatch.setattr(api_client, "JOBAGENT_API_KEY", None)
+
+
+@pytest.fixture(autouse=True)
 def _isolated_user(jobagentweb_server, tmp_path, monkeypatch):
     """Every test gets its own freshly-registered JobAgentWeb user — perfect
     isolation with no truncation step needed, since every table is scoped by
