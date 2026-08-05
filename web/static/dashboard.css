@@ -413,6 +413,7 @@ h1,h2,h3 { text-wrap: balance; }
 .run-params input[type=number] { font-family: var(--font-mono); font-size: 0.9rem; background: var(--paper); border: 1px solid var(--line); border-radius: 9px; padding: 9px 12px; color: var(--ink); }
 .run-params input[type=number]:focus { border-color: var(--signal); outline: none; }
 .run-params label.f.disabled { opacity: .4; }
+.st-tx { display: flex; flex-direction: column; }
 .since-toggle { display: flex; align-items: flex-start; gap: 10px; background: var(--paper-sunk); border: 1px solid var(--line-soft); border-radius: 10px; padding: 11px 13px; margin-bottom: 14px; cursor: pointer; }
 .since-toggle input { width: 17px; height: 17px; accent-color: var(--signal); margin-top: 1px; flex: none; }
 .since-toggle .st-tx .t { font-size: 0.84rem; font-weight: 600; }
