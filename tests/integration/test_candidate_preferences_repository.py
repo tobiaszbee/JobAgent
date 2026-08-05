@@ -48,9 +48,9 @@ class TestInsert:
         assert active["languages"] == langs
 
     def test_explicit_empty_list_distinct_from_unset(self):
-        repo.insert(_cv_id(), {"excluded_company_types": []})
+        repo.insert(_cv_id(), {"extra_tech": []})
         active = repo.get_active()
-        assert active["excluded_company_types"] == []
+        assert active["extra_tech"] == []
 
     def test_show_jobs_without_salary_defaults_to_one(self):
         repo.insert(_cv_id())

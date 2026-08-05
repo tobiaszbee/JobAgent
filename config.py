@@ -34,7 +34,6 @@ QUERY_PRUNING = {
 RANKING = {
     "top_n_rerank":        50,
     "top_n_listwise":      20,
-    "auto_distill_after":  25,
     "min_score_for_ranking": 2.0,  # below scorer's own near-dealbreaker cutoff — skip paid ranking
 }
 

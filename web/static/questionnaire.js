@@ -238,14 +238,12 @@ async function savePreferences() {
   status.textContent = 'Saving…';
 
   const salaryMin = document.getElementById('salary-min').value;
-  const salaryMax = document.getElementById('salary-max').value;
 
   const fields = {
     work_mode: getToggledValues('workmode-group'),
     remote_countries: getChipValues('country-chips'),
     hybrid_cities: getChipValues('city-chips'),
     salary_min: salaryMin ? parseInt(salaryMin, 10) : null,
-    salary_max: salaryMax ? parseInt(salaryMax, 10) : null,
     salary_currency: document.getElementById('salary-currency').value,
     show_jobs_without_salary: document.getElementById('show-no-salary').checked ? 1 : 0,
     seniority_levels: getToggledValues('seniority-group'),
@@ -316,7 +314,6 @@ async function init() {
 
   if (hasPrefs) {
     if (prefs.salary_min != null) document.getElementById('salary-min').value = prefs.salary_min;
-    if (prefs.salary_max != null) document.getElementById('salary-max').value = prefs.salary_max;
     if (prefs.salary_currency) document.getElementById('salary-currency').value = prefs.salary_currency;
     document.getElementById('show-no-salary').checked = !!prefs.show_jobs_without_salary;
   }

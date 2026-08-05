@@ -50,20 +50,35 @@ def test_all_list_fields_rendered_with_labels(mock_prefs):
     mock_prefs.return_value = {
         "role_types": ["backend"],
         "preferred_company_types": ["product"],
-        "excluded_company_types": ["agency"],
-        "preferred_industries": ["fintech"],
-        "excluded_industries": ["gambling"],
         "extra_tech": ["Rust"],
         "avoided_tech": ["PHP"],
     }
     section = load_questionnaire_preferences()
     assert "Desired role type(s): backend" in section
     assert "Prefers company type(s): product" in section
-    assert "Wants to avoid company type(s): agency" in section
-    assert "Prefers industry/industries: fintech" in section
-    assert "Wants to avoid industry/industries: gambling" in section
     assert "Also interested in: Rust" in section
     assert "Wants to avoid working with: PHP" in section
+
+
+@patch("evaluator.profile.candidate_preferences_repository.get_active")
+def test_removed_dead_fields_are_ignored_even_if_present(mock_prefs):
+    # Regression: excluded_company_types/preferred_industries/excluded_industries
+    # were removed from _LIST_FIELD_LABELS (dead — no UI ever wrote them, nothing
+    # downstream ever read them). Even if a row somehow still carries a value for
+    # one (e.g. a pre-existing DB row from before the field was retired), it must
+    # not render — unlike the fields above, which fail this same test if their
+    # rendering ever regresses.
+    mock_prefs.return_value = {
+        "role_types": ["backend"],
+        "excluded_company_types": ["agency"],
+        "preferred_industries": ["fintech"],
+        "excluded_industries": ["gambling"],
+    }
+    section = load_questionnaire_preferences()
+    assert "Desired role type(s): backend" in section
+    assert "agency" not in section
+    assert "fintech" not in section
+    assert "gambling" not in section
 
 
 @patch("evaluator.profile.candidate_preferences_repository.get_active")
@@ -129,15 +144,22 @@ def test_retrieval_query_appends_positive_terms(mock_prefs):
 
 
 @patch("evaluator.profile.candidate_preferences_repository.get_active")
+def test_removed_preferred_industries_does_not_reach_the_retrieval_query(mock_prefs):
+    # Regression: preferred_industries was removed from _RETRIEVAL_LIST_FIELDS
+    # (dead field, never had a UI writer). Even if a row somehow still carries a
+    # value, it must not leak into the retrieval query.
+    mock_prefs.return_value = {"preferred_company_types": ["product"], "preferred_industries": ["fintech"]}
+    query = build_retrieval_query("CANDIDATE: Senior Python dev")
+    assert "product" in query
+    assert "fintech" not in query
+
+
+@patch("evaluator.profile.candidate_preferences_repository.get_active")
 def test_retrieval_query_excludes_negative_fields(mock_prefs):
     # Regression: embeddings/cross-encoder rerank have no way to represent
-    # negation from a bare word — including e.g. "agency" from
-    # excluded_company_types would pull MORE agency jobs toward the top.
-    mock_prefs.return_value = {
-        "excluded_company_types": ["agency"],
-        "excluded_industries": ["gambling"],
-        "avoided_tech": ["PHP"],
-    }
+    # negation from a bare word — including e.g. "PHP" from avoided_tech
+    # would pull MORE PHP jobs toward the top.
+    mock_prefs.return_value = {"avoided_tech": ["PHP"]}
     query = build_retrieval_query("CANDIDATE: Senior Python dev")
     assert query == "CANDIDATE: Senior Python dev"
 

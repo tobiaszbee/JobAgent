@@ -10,23 +10,19 @@ logger = logging.getLogger(__name__)
 
 # Fields worth folding into a semantic retrieval query — the ones with real
 # positive lexical/semantic overlap against job description text. Deliberately
-# excludes excluded_company_types/excluded_industries/avoided_tech: embeddings
-# and cross-encoder rerank have no way to represent negation from a bare word
-# in a query — including e.g. "agency" from an excluded_company_types entry
-# would just pull MORE agency jobs toward the top, the opposite of intent.
+# excludes avoided_tech: embeddings and cross-encoder rerank have no way to
+# represent negation from a bare word in a query — including it would just
+# pull MORE of what it's meant to avoid toward the top, the opposite of intent.
 # open_notes is included as full free text (not list terms) since a real
 # sentence like "not interested in gambling companies" gives the embedding
 # model actual negation context that a bare listed word can't.
-_RETRIEVAL_LIST_FIELDS = ["role_types", "preferred_company_types", "preferred_industries", "extra_tech"]
+_RETRIEVAL_LIST_FIELDS = ["role_types", "preferred_company_types", "extra_tech"]
 
 # Maps a candidate_preferences list field to its rendered label — order here is
 # the order they appear in the prompt.
 _LIST_FIELD_LABELS = [
     ("role_types", "Desired role type(s)"),
     ("preferred_company_types", "Prefers company type(s)"),
-    ("excluded_company_types", "Wants to avoid company type(s)"),
-    ("preferred_industries", "Prefers industry/industries"),
-    ("excluded_industries", "Wants to avoid industry/industries"),
     ("extra_tech", "Also interested in"),
     ("avoided_tech", "Wants to avoid working with"),
 ]
