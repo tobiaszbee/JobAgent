@@ -1,4 +1,4 @@
-"""Unit tests for the justjoin.it scraper — no real HTTP/browser calls made."""
+"""Unit tests for the justjoin.it scraper, no real HTTP/browser calls made."""
 import json
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
@@ -199,7 +199,7 @@ class TestJustJoinSourceSearch:
 
     def test_source_structured_data_captures_salary_and_skills(self):
         # Regression: justjoin.it discloses salary/skills as structured API
-        # fields (verified live against the real site) — Haiku shouldn't have
+        # fields (verified live against the real site), Haiku shouldn't have
         # to re-guess them from the description text later.
         offer = _offer()
         offer["experienceLevel"] = "senior"
@@ -223,7 +223,7 @@ class TestJustJoinSourceSearch:
 
     def test_posted_at_captures_the_publication_date(self):
         # publishedAt was already parsed for the days_back cutoff, then
-        # discarded — RawJob.posted_at carries it through instead.
+        # discarded, RawJob.posted_at carries it through instead.
         src = _make_source()
         src._client.get.return_value = MagicMock(status_code=200, text=_offers_html([_offer(days_ago=3)]))
         results = src.search("PHP Developer", "Poland")
@@ -247,7 +247,7 @@ class TestExtractSourceStructuredData:
 
     def test_unknown_seniority_value_skipped(self):
         # justjoin.it's experienceLevel vocabulary doesn't necessarily line up
-        # 1:1 with extractor/runner.py's enum — never write a value outside it.
+        # 1:1 with extractor/runner.py's enum, never write a value outside it.
         data = _extract_source_structured_data({"experienceLevel": "c-level"})
         assert "seniority" not in data
 
@@ -282,7 +282,7 @@ class TestFetchDescription:
         assert desc == "Para one\nPara two"
 
     def test_falls_back_to_job_description_heading_when_editor_paragraph_empty(self):
-        # A real posting was found live with no .editor-paragraph markup at all —
+        # A real posting was found live with no .editor-paragraph markup at all,
         # description rendered as plain text under a "Job description" heading instead.
         from playwright.sync_api import TimeoutError as PlaywrightTimeout
         src = JustJoinSource()

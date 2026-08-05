@@ -8,17 +8,17 @@ from db.repositories.usage_repository import log_anthropic
 
 logger = logging.getLogger(__name__)
 
-# Fields worth folding into a semantic retrieval query — the ones with real
+# Fields worth folding into a semantic retrieval query, the ones with real
 # positive lexical/semantic overlap against job description text. Deliberately
 # excludes avoided_tech: embeddings and cross-encoder rerank have no way to
-# represent negation from a bare word in a query — including it would just
+# represent negation from a bare word in a query, including it would just
 # pull MORE of what it's meant to avoid toward the top, the opposite of intent.
 # open_notes is included as full free text (not list terms) since a real
 # sentence like "not interested in gambling companies" gives the embedding
 # model actual negation context that a bare listed word can't.
 _RETRIEVAL_LIST_FIELDS = ["role_types", "preferred_company_types", "extra_tech"]
 
-# Maps a candidate_preferences list field to its rendered label — order here is
+# Maps a candidate_preferences list field to its rendered label, order here is
 # the order they appear in the prompt.
 _LIST_FIELD_LABELS = [
     ("role_types", "Desired role type(s)"),
@@ -52,15 +52,12 @@ def load_active_profile() -> str:
 
 
 def load_questionnaire_preferences() -> str:
-    """Return the candidate's raw questionnaire answers (candidate_preferences_repository)
-    as a formatted prompt block, or "" if none saved yet. Distinct from both
-    load_active_profile() (parsed CV facts) and the learned preference profile
-    (preference_agent — signals inferred from applied/rejected history): this is
-    the candidate's own direct, current, stated answers, collected but previously
-    never reaching any LLM prompt. Deliberately restates fields already enforced
-    as hard dealbreakers (evaluator/dealbreakers.py) too — that filter skips on
-    missing/unclear structured data by design, so a job it let through can still
-    carry the relevant info in free-text description that only the LLM will catch."""
+    # Distinct from load_active_profile() (parsed CV facts) and the learned
+    # preference profile (inferred from applied/rejected history): the
+    # candidate's own direct, current answers. Restates fields already
+    # enforced as hard dealbreakers too, since that filter skips on
+    # missing/unclear structured data and a job it let through can still
+    # carry the relevant info in free text only the LLM will catch.
     prefs = candidate_preferences_repository.get_active()
     if not prefs:
         return ""
@@ -103,14 +100,10 @@ def load_questionnaire_preferences() -> str:
 
 
 def build_retrieval_query(candidate_profile: str) -> str:
-    """Combine the CV profile with a compact questionnaire summary for use as the
-    query text for both semantic retrieval (embeddings/indexer.py::build_ideal_vector's
-    cold-start fallback) and cross-encoder reranking (ranker/reranker.py::rerank_jobs)
-    — both previously only ever saw the CV, missing everything the candidate told the
-    questionnaire directly (extra tech interests, preferred industries, etc.). Kept
-    dense and unlabeled, unlike load_questionnaire_preferences() above (meant for an
-    LLM prompt): rerank_jobs truncates its query to _MAX_QUERY_CHARS, so every
-    character here should be a real retrieval term, not prose structure."""
+    # Combines the CV profile with a compact questionnaire summary, dense and
+    # unlabeled unlike load_questionnaire_preferences() above: rerank_jobs
+    # truncates its query to _MAX_QUERY_CHARS, so every character here should
+    # be a real retrieval term, not prose structure.
     prefs = candidate_preferences_repository.get_active()
     if not prefs:
         return candidate_profile
@@ -130,7 +123,7 @@ def build_retrieval_query(candidate_profile: str) -> str:
 
 
 _HYDE_PROMPT = """Based on this candidate's profile and stated preferences, write a single
-realistic job posting describing their IDEAL job — as if it were a real ad on a job board,
+realistic job posting describing their IDEAL job, as if it were a real ad on a job board,
 not a description of the candidate. Write it in job-posting genre and voice: a job title,
 a short company blurb, a few bullet points of responsibilities, a few bullet points of
 requirements (matching their actual stack/seniority), and any preferences they stated
@@ -144,23 +137,13 @@ no markdown headers.
 
 
 def build_hyde_query(candidate_profile: str, questionnaire: str = "") -> str:
-    """Generate a synthetic "ideal job posting" via a cheap LLM call and return it as
-    the retrieval query, in place of raw CV/preference text — used both for the
-    cold-start embedding query (embeddings/indexer.py::build_ideal_vector's fallback)
-    and the Voyage cross-encoder rerank query (ranker/reranker.py::rerank_jobs), which
-    both previously embedded the CV/questionnaire text directly.
-
-    That was a structural query/document genre mismatch: a CV describes what the
-    candidate has DONE, in resume voice; a job posting describes a role being
-    OFFERED, in ad voice. Embedding one genre to retrieve documents in the other
-    systematically under-weights postings that are excellent fits but phrased
-    nothing like a CV (classic HyDE — Hypothetical Document Embeddings, Gao et al.
-    2022 — generate a hypothetical answer/document in the target genre, embed
-    that instead of the raw query).
-
-    Falls back to build_retrieval_query()'s plain concatenation on any API failure
-    or empty response, so retrieval never goes fully blind over a transient error —
-    same fallback text used before this function existed."""
+    # Generates a synthetic "ideal job posting" via a cheap LLM call and uses
+    # it as the retrieval query instead of raw CV text: a CV is written in
+    # resume voice (what the candidate has done), while postings are written
+    # in ad voice (what's being offered), so embedding a CV to retrieve
+    # postings systematically under-weights good-fit postings phrased nothing
+    # like a CV (HyDE, Gao et al. 2022). Falls back to build_retrieval_query()
+    # on any API failure or empty response.
     if not candidate_profile and not questionnaire:
         return ""
 
@@ -178,5 +161,5 @@ def build_hyde_query(candidate_profile: str, questionnaire: str = "") -> str:
             raise ValueError("empty HyDE response")
         return text
     except Exception as e:
-        logger.warning(f"HyDE query generation failed: {e} — falling back to CV/preferences text")
+        logger.warning(f"HyDE query generation failed: {e}, falling back to CV/preferences text")
         return build_retrieval_query(candidate_profile)

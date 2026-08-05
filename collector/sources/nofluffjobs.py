@@ -1,6 +1,6 @@
-"""NoFluffJobs source — Poland/CEE tech job board, public and unauthenticated.
+"""NoFluffJobs source, Poland/CEE tech job board, public and unauthenticated.
 
-No Cloudflare wall here (unlike theprotocol.it/it.pracuj.pl) — a plain `httpx` GET with
+No Cloudflare wall here (unlike theprotocol.it/it.pracuj.pl), a plain `httpx` GET with
 a realistic User-Agent works directly, verified live, so no Playwright is needed for
 either search() or fetch_description().
 
@@ -8,7 +8,7 @@ This is an Angular Universal (SSR) app: listing and detail data are both embedde
 JSON in a `<script id="serverApp-state">` tag, Angular's TransferState mechanism. The
 JSON text has a handful of HTML entities escaped (`&q;`, `&a;`, `&l;`, `&g;`) that must
 be un-escaped before parsing. Keys are hashed or literal-request-path strings (Angular's
-HTTP TransferState cache is keyed by request identity, not a fixed name) — rather than
+HTTP TransferState cache is keyed by request identity, not a fixed name), rather than
 guess the exact key, we scan all top-level values for the shape we need.
 
 Search results don't include the full description (only tags/salary/seniority), so a
@@ -72,9 +72,9 @@ _KNOWN_SALARY_CURRENCIES = {"PLN", "EUR", "USD", "GBP"}
 
 def _extract_source_structured_data(posting: dict) -> dict:
     """NoFluffJobs' own search-result payload already discloses salary as a
-    structured field (verified live against the real site), not prose — no
+    structured field (verified live against the real site), not prose, no
     reason to make Haiku re-guess it from the description later. NoFluffJobs
-    quotes are always monthly regardless of contract type (b2b/permanent) —
+    quotes are always monthly regardless of contract type (b2b/permanent),
     a site-wide convention, not a per-posting field, unlike justjoin.it which
     states its own unit explicitly."""
     data: dict = {}
@@ -153,7 +153,7 @@ class NoFluffJobsSource(JobSource):
             return []
 
         postings = _find_postings(state)
-        # Only the first page of results is fetched — plenty for a daily incremental
+        # Only the first page of results is fetched, plenty for a daily incremental
         # run; deeper pagination isn't implemented yet.
 
         results: list[RawJob] = []
@@ -179,7 +179,7 @@ class NoFluffJobsSource(JobSource):
 
             # "places" mixes a "Remote" pseudo-city with real cities and, for a
             # nationwide remote posting, every Polish province as separate
-            # entries — take the real city (if any) for the label and treat
+            # entries, take the real city (if any) for the label and treat
             # a "Remote" entry as the remote-mode signal. NoFluffJobs' listing
             # payload doesn't distinguish hybrid from onsite, so a posting with
             # a real city and no "Remote" entry is labeled with no suffix

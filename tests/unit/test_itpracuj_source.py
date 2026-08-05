@@ -1,4 +1,4 @@
-"""Unit tests for the it.pracuj.pl scraper — no real browser calls made."""
+"""Unit tests for the it.pracuj.pl scraper, no real browser calls made."""
 import json
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
@@ -133,7 +133,7 @@ class TestItPracujSourceSearch:
         assert results[0].location == "Gdansk, Poland"
 
     def test_description_taken_from_search_payload(self):
-        # No second (detail-page) fetch is made — a cross-subdomain navigation in the
+        # No second (detail-page) fetch is made, a cross-subdomain navigation in the
         # same session triggered a live Cloudflare CAPTCHA once, so this uses the
         # truncated preview already present in the search results instead.
         src = _make_source()
@@ -195,7 +195,7 @@ class TestItPracujSourceSearch:
 
     def test_posted_at_captures_last_publicated(self):
         # lastPublicated was already parsed for the days_back cutoff, then
-        # discarded — RawJob.posted_at carries it through instead.
+        # discarded, RawJob.posted_at carries it through instead.
         src = _make_source()
         src._page.eval_on_selector.return_value = json.dumps(_search_payload([_group(days_ago=1)]))
         results = src.search("PHP Developer", "Poland")

@@ -141,7 +141,7 @@ def test_legend_states_questionnaire_precedence_over_learned_profile():
 
 def test_precedence_note_omits_questionnaire_tier_when_none_given():
     # Regression: the precedence note used to unconditionally name "the
-    # CANDIDATE QUESTIONNAIRE" even when questionnaire="" — a dangling
+    # CANDIDATE QUESTIONNAIRE" even when questionnaire="", a dangling
     # reference to a section that doesn't actually exist in the prompt for a
     # candidate who never filled one in.
     signals = [{"type": "ACCEPT", "dim": "x", "value": "y"}]

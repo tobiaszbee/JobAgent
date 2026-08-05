@@ -11,7 +11,7 @@ from db.repositories import candidate_preferences_repository, cv_repository, job
 
 def _add_job(**kwargs):
     """Insert a job directly via the repository (bypasses HTTP). job_postings is
-    shared/global and never truncated between tests — every call gets its own
+    shared/global and never truncated between tests, every call gets its own
     unique url so this test's job never collides with another test's."""
     defaults = dict(title="PHP Developer", company="Acme Corp",
                     location="Poland", url=f"https://example.com/job/{uuid.uuid4().hex}",
@@ -81,7 +81,7 @@ class TestJobsEndpoints:
         assert resp.headers["X-Jobs-Truncated"] == "false"
 
     def test_list_jobs_truncated_header_when_result_hits_the_cap(self, flask_client):
-        # A real 2000-row insert would make this test glacially slow — mock the
+        # A real 2000-row insert would make this test glacially slow, mock the
         # repository call instead to exercise just the truncation-detection logic.
         fake_results = [{"id": str(i)} for i in range(2000)]
         with patch("web.routes.jobs.job_repository.search", return_value=fake_results):
@@ -378,11 +378,11 @@ class TestLoginRouting:
         assert api_client.logged_in()
 
     def test_session_file_is_owner_only_on_posix(self, flask_client, _isolated_user):
-        # session.json is a live, unattended login for this JobAgentWeb account —
+        # session.json is a live, unattended login for this JobAgentWeb account,
         # on a shared machine, default permissions would hand it to anyone else
         # on the box. No-op on Windows (POSIX mode bits don't map to NTFS ACLs).
         if sys.platform == "win32":
-            pytest.skip("chmod is a no-op on Windows — nothing to assert here")
+            pytest.skip("chmod is a no-op on Windows, nothing to assert here")
         mode = stat.S_IMODE(api_client._SESSION_FILE.stat().st_mode)
         assert mode == 0o600
 
@@ -393,7 +393,7 @@ class TestApiClientReusedConnection:
         # of opening a fresh connection per request. httpx auto-captures Set-Cookie
         # from every response into that client's own persistent jar by default, and
         # JobAgentWeb's SessionMiddleware re-signs the session cookie on every
-        # response — so the auto-captured cookie and api_client's own explicit
+        # response, so the auto-captured cookie and api_client's own explicit
         # cookie-set could coexist as two separate entries in the jar instead of
         # one replacing the other, and a later request could end up sending the
         # stale one. Reproduced directly: registering a second user in the same

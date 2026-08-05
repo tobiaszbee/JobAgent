@@ -125,7 +125,7 @@ def test_suggest_queries_includes_existing_queries_in_prompt(mock_get_client, mo
 
 class TestApplyRoute:
     def test_failed_insert_is_logged_and_excluded_from_added_count(self, flask_client, caplog):
-        # Regression guard: this used to be a bare `except Exception: pass` — a
+        # Regression guard: this used to be a bare `except Exception: pass`, a
         # real failure (JobAgentWeb down, session expired) looked identical to
         # a silently-skipped duplicate, with zero signal anywhere it happened.
         def fake_insert(type_, value):

@@ -43,8 +43,8 @@ def test_job_line_falls_back_to_score_reason():
 
 
 def test_job_line_reason_not_truncated_below_400_chars():
-    # Regression: the rejection reason — the candidate's own direct, human-written
-    # explanation, the richest signal in the whole corpus — used to be cut to 120
+    # Regression: the rejection reason, the candidate's own direct, human-written
+    # explanation, the richest signal in the whole corpus, used to be cut to 120
     # chars, more aggressively than the job description it explains (1500 chars).
     long_reason = "x" * 300
     j = _job(rejection_reason=long_reason)
@@ -62,7 +62,7 @@ def test_job_line_reason_still_truncated_at_reason_limit():
 
 def test_job_line_includes_decided_at_date():
     # Regression: examples had no date at all, so a 6-month-old decision counted
-    # identically to yesterday's — no way to express "this pattern reversed".
+    # identically to yesterday's, no way to express "this pattern reversed".
     j = _job(decided_at="2026-07-15T10:23:45.123456")
     line = _job_line(j)
     assert "decided 2026-07-15" in line
@@ -92,7 +92,7 @@ def test_previous_profile_section_empty_when_empty_list():
 
 def test_previous_profile_section_includes_neutral_signals():
     # Unlike evaluator/scorer.py's LEARNED PREFERENCE PROFILE section (which drops
-    # NEUTRAL — irrelevant to scoring), the distiller needs its own prior NEUTRAL
+    # NEUTRAL, irrelevant to scoring), the distiller needs its own prior NEUTRAL
     # conclusions too: "I already checked this dimension, found no pattern" is
     # exactly the kind of prior state reconciliation is meant to preserve or revise.
     signals = [{"type": "NEUTRAL", "dim": "contract_form"}, {"type": "NEUTRAL", "dim": "domain"}]
@@ -157,7 +157,7 @@ def test_build_prompt_description_not_truncated():
 
 def test_build_prompt_shows_older_omitted_count_when_total_exceeds_sample():
     # Capping now happens upstream (job_repository.get_all_feedback's limit_*
-    # params, enforced server-side) — _build_prompt just renders whatever sample
+    # params, enforced server-side), _build_prompt just renders whatever sample
     # it's given plus the true total, so the "N older omitted" messaging is a
     # function of (total - len(sample)), not of any cap _build_prompt applies itself.
     rejected = [_job(title=f"Job {i}") for i in range(50)]
@@ -175,7 +175,7 @@ def test_build_prompt_no_omitted_message_when_sample_covers_everything():
 
 def test_build_prompt_applied_also_shows_older_omitted():
     # Regression: only REJECTED used to get the "showing N most recent, M older
-    # omitted" treatment — APPLIED had no cap at all before this fix.
+    # omitted" treatment, APPLIED had no cap at all before this fix.
     applied = [_job(title=f"Job {i}") for i in range(50)]
     prompt = _build_prompt(applied, [], applied_total=53, rejected_total=0)
     assert "APPLIED (53 jobs, showing 50 most recent, 3 older omitted)" in prompt
@@ -233,7 +233,7 @@ def test_build_prompt_questionnaire_appears_before_applied_section():
 def test_system_prompt_no_longer_bans_all_geo_signal():
     # Regression: the distiller used to unconditionally forbid learning any
     # location/remote/geography/visa signal, claiming it was "filtered
-    # upstream" — that wasn't true until the P3 geo dealbreaker, and even now
+    # upstream", that wasn't true until the P3 geo dealbreaker, and even now
     # only covers the narrow remote+country case, not timezone/visa/hybrid-city
     # nuance.
     from preference_agent.runner import _SYSTEM

@@ -31,7 +31,7 @@ def test_count_clamped_to_pool_size():
 
 def test_same_day_seed_picks_the_same_jobs():
     # The whole point: rank_cache.reuse_if_unchanged compares the exact
-    # listwise-pool job-id set between runs — a different sample every run
+    # listwise-pool job-id set between runs, a different sample every run
     # would defeat that cache permanently.
     candidates = [_job(str(i)) for i in range(20)]
     day = date(2026, 8, 1)
@@ -48,8 +48,8 @@ def test_different_day_seed_can_pick_different_jobs():
 
 
 def test_selection_independent_of_input_order():
-    # Per-job keying means a re-ordered (but same-membership) input list — e.g.
-    # from run-to-run score jitter re-sorting `fused` — still yields the same
+    # Per-job keying means a re-ordered (but same-membership) input list, e.g.
+    # from run-to-run score jitter re-sorting `fused`, still yields the same
     # day's pick.
     candidates = [_job(str(i)) for i in range(20)]
     reversed_candidates = list(reversed(candidates))
@@ -61,7 +61,7 @@ def test_selection_independent_of_input_order():
 
 def test_selection_stable_when_unpicked_candidates_leave_the_pool():
     # Regression: an earlier implementation sampled by INDEX
-    # (random.Random(seed).sample(sorted_pool, k)) — removing any candidate,
+    # (random.Random(seed).sample(sorted_pool, k)), removing any candidate,
     # even one that was never picked, shifts every later index and can change
     # the whole result. The real pool changes every run (jobs get decided, new
     # ones arrive), so that instability would defeat rank_cache's
@@ -126,7 +126,7 @@ def test_non_exploration_ranks_excludes_exploration_jobs_entirely():
 def test_non_exploration_ranks_closes_the_gap_left_by_exploration_jobs():
     # Regression: an exploration pick landing ahead of a real candidate (e.g.
     # Opus genuinely liked it) must not push that candidate past
-    # rank_ceiling — the pick extends the pool, it isn't supposed to cost a
+    # rank_ceiling, the pick extends the pool, it isn't supposed to cost a
     # real candidate its would-apply slot.
     ranked = [_ranked_job("explore", 1), _ranked_job("real1", 2), _ranked_job("real2", 3)]
     ranks = compute_non_exploration_ranks(ranked, {"explore"})

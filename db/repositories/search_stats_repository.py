@@ -9,7 +9,7 @@ def record(session_id: int, source: str, search_query: str, location: str, cards
 
 
 def get_query_summary(source: str) -> list[dict]:
-    """Per search_query totals across all recorded runs — zero_result_searches counts
+    """Per search_query totals across all recorded runs, zero_result_searches counts
     individual (query, location) calls that found no cards at all, not full runs."""
     return api_client.get("/api/search-stats/summary", params={"source": source}).json()
 

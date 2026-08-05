@@ -1,4 +1,4 @@
-"""Unit tests for the Remotive.io scraper — no HTTP calls made."""
+"""Unit tests for the Remotive.io scraper, no HTTP calls made."""
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
@@ -195,7 +195,7 @@ class TestRemotiveSourceSearch:
 
     def test_posted_at_captures_the_publication_date(self):
         # publication_date was already parsed for the days_back cutoff, then
-        # discarded — RawJob.posted_at carries it through instead.
+        # discarded, RawJob.posted_at carries it through instead.
         src = _build_source([_make_job(job_id=1, days_ago=2)])
         results = src.search("PHP Developer", "Remote")
         assert results[0].posted_at is not None

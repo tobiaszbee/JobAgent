@@ -1,24 +1,24 @@
-"""it.pracuj.pl source — Poland's largest general job board, IT section.
+"""it.pracuj.pl source, Poland's largest general job board, IT section.
 
 Same corporate group (Grupa Pracuj) and Cloudflare setup as theprotocol.it: a plain
 `httpx` GET gets a "Just a moment..." challenge, and even headless Playwright
 (`channel="chrome"`) gets served the same challenge. Only a non-headless (visible)
-browser gets through — verified live. So, like theprotocol.it, this source uses
+browser gets through, verified live. So, like theprotocol.it, this source uses
 Playwright end to end, no login/stealth pacing (public site, no account).
 
 Unlike theprotocol.it, the `kw` search parameter here is a genuine substring/keyword
-filter, not a single-technology-tag autocomplete — "symfony developer" (4 results) is a
+filter, not a single-technology-tag autocomplete, "symfony developer" (4 results) is a
 proper subset of bare "symfony" (11 results), verified live. So the full multi-word
 `title` is passed through as-is, no first-word tag extraction needed.
 
 Search results embed a short, truncated description preview (`jobDescription`, ends in
 "..."). The full description lives on the job's detail page (`offerAbsoluteUri`), on a
-*different* subdomain (www.pracuj.pl vs. it.pracuj.pl for search) — and navigating there
+*different* subdomain (www.pracuj.pl vs. it.pracuj.pl for search), and navigating there
 in the same browser session, right after a search-page load, triggered a real Cloudflare
 CAPTCHA challenge live (not just the usual auto-clearing "Just a moment" screen). Since
 bypassing a CAPTCHA is off the table, this deliberately does NOT do a second fetch: the
 truncated `jobDescription` preview from search results is used as-is. It's shorter than
-ideal but real, substantive content — good enough for scoring, without the CAPTCHA risk.
+ideal but real, substantive content, good enough for scoring, without the CAPTCHA risk.
 """
 import json
 import logging
@@ -69,7 +69,7 @@ def _find_query(data: dict, query_name: str) -> dict | None:
 
 
 class ItPracujSource(JobSource):
-    # Same Grupa Pracuj / Cloudflare setup as theprotocol.it — multiple back-to-back
+    # Same Grupa Pracuj / Cloudflare setup as theprotocol.it, multiple back-to-back
     # searches with zero pause triggered a live Cloudflare challenge mid-run. Opting
     # into LinkedIn's adaptive pause between searches fixes it.
     requires_stealth_pauses = True
@@ -128,7 +128,7 @@ class ItPracujSource(JobSource):
 
         job_offers = _find_query(data, "jobOffers") or {}
         grouped = job_offers.get("groupedOffers", [])
-        # Only the first page (default 50 grouped results) is fetched — plenty for a
+        # Only the first page (default 50 grouped results) is fetched, plenty for a
         # daily incremental run; deeper pagination isn't implemented yet.
 
         results: list[RawJob] = []

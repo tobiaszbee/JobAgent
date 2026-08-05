@@ -1,4 +1,4 @@
-"""Unit tests for the We Work Remotely RSS source — no real HTTP calls made."""
+"""Unit tests for the We Work Remotely RSS source, no real HTTP calls made."""
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 from email.utils import format_datetime
@@ -133,7 +133,7 @@ class TestWWRSourceSearch:
         assert results == []
 
     def test_posted_at_captures_the_publication_date(self):
-        # pubDate was already parsed for the days_back cutoff, then discarded —
+        # pubDate was already parsed for the days_back cutoff, then discarded,
         # RawJob.posted_at carries it through instead.
         src = _build_source([_item_xml(days_ago=3)])
         results = src.search("PHP Developer", "Remote")

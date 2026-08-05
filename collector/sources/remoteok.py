@@ -1,4 +1,4 @@
-"""Remote OK source — public JSON API, no auth required."""
+"""Remote OK source, public JSON API, no auth required."""
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -56,7 +56,7 @@ class RemoteOKSource(JobSource):
             return []
         if not isinstance(data, list) or len(data) < 2:
             return []
-        # First element is API metadata, not a job — skip it
+        # First element is API metadata, not a job, skip it
         self._jobs_cache = [item for item in data[1:] if isinstance(item, dict)]
         return self._jobs_cache
 

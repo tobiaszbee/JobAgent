@@ -22,7 +22,7 @@ result = apply_keyword_filter()
 if result["checked"]:
     print(f"Checked {result['checked']} job(s), auto-rejected {result['auto_rejected']}")
 else:
-    print("No criteria configured — all jobs passed through")
+    print("No criteria configured, all jobs passed through")
 
 print("\n=== EVALUATOR ===")
 eval_result = evaluate()

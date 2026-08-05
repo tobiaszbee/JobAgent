@@ -63,10 +63,10 @@ def test_all_list_fields_rendered_with_labels(mock_prefs):
 @patch("evaluator.profile.candidate_preferences_repository.get_active")
 def test_removed_dead_fields_are_ignored_even_if_present(mock_prefs):
     # Regression: excluded_company_types/preferred_industries/excluded_industries
-    # were removed from _LIST_FIELD_LABELS (dead — no UI ever wrote them, nothing
+    # were removed from _LIST_FIELD_LABELS (dead, no UI ever wrote them, nothing
     # downstream ever read them). Even if a row somehow still carries a value for
     # one (e.g. a pre-existing DB row from before the field was retired), it must
-    # not render — unlike the fields above, which fail this same test if their
+    # not render, unlike the fields above, which fail this same test if their
     # rendering ever regresses.
     mock_prefs.return_value = {
         "role_types": ["backend"],
@@ -157,7 +157,7 @@ def test_removed_preferred_industries_does_not_reach_the_retrieval_query(mock_pr
 @patch("evaluator.profile.candidate_preferences_repository.get_active")
 def test_retrieval_query_excludes_negative_fields(mock_prefs):
     # Regression: embeddings/cross-encoder rerank have no way to represent
-    # negation from a bare word — including e.g. "PHP" from avoided_tech
+    # negation from a bare word, including e.g. "PHP" from avoided_tech
     # would pull MORE PHP jobs toward the top.
     mock_prefs.return_value = {"avoided_tech": ["PHP"]}
     query = build_retrieval_query("CANDIDATE: Senior Python dev")

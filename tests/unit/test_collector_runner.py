@@ -18,14 +18,14 @@ class TestLocationsForSource:
     def test_worldwide_remote_sources_search_once_per_candidate_location(self):
         # Regression: a single "Remote" search used to be an optimization, but
         # collector/location.py's matching treats "Remote" as matching
-        # everything unconditionally — that made country selection a no-op
-        # for these 4 sources, silently letting e.g. "Remote — US only"
+        # everything unconditionally, that made country selection a no-op
+        # for these 4 sources, silently letting e.g. "Remote, US only"
         # through for a candidate who only selected Poland.
         for source_id in ("remotive", "remoteok", "workingnomads", "weworkremotely"):
             assert _locations_for_source(source_id, ["Poland", "Germany", "Canada"]) == ["Poland", "Germany", "Canada"]
 
     def test_worldwide_remote_source_falls_back_to_remote_when_no_countries_selected(self):
-        # No candidate country to check a job's disclosed location against —
+        # No candidate country to check a job's disclosed location against,
         # fall back to the unrestricted single "Remote" search.
         assert _locations_for_source("remotive", []) == ["Remote"]
 
@@ -49,7 +49,7 @@ class TestLocationsForSource:
         assert _locations_for_source("some-future-source", countries) == countries
 
     def test_poland_only_source_triggers_on_polish_hybrid_city(self):
-        # A hybrid/onsite candidate never picks a country — only a city — so the
+        # A hybrid/onsite candidate never picks a country, only a city, so the
         # Polish boards must still activate for a known Polish city.
         assert _locations_for_source("justjoin", ["Warsaw"]) == ["Poland"]
 
@@ -204,7 +204,7 @@ class TestCollectJobCardsQueryExclusion:
     @patch("collector.runner.job_repository")
     @patch("collector.runner.make_source")
     def test_no_exclusions_recorded_runs_every_query(self, mock_make_source, mock_jobs, mock_stats):
-        # No patch on excluded_search_queries_repository — hits the real (empty,
+        # No patch on excluded_search_queries_repository, hits the real (empty,
         # per-test-isolated) DB, confirming an empty exclusion table filters nothing.
         source = _mock_source()
         mock_make_source.return_value = source
@@ -250,7 +250,7 @@ class TestCollectJobCardsBudgetAllocation:
         )
 
         # Each source's search() call should be capped to its fair share (2 of
-        # the total 4) — under the old shared-counter logic, the second
+        # the total 4), under the old shared-counter logic, the second
         # source would have seen 0 (or a near-zero) remaining budget instead.
         assert remotive_source.search.call_args.kwargs["max_results"] == 2
         assert remoteok_source.search.call_args.kwargs["max_results"] == 2
@@ -309,7 +309,7 @@ def _mock_run_deps(mock_criteria, mock_jobs, mock_collect, mock_lang, mock_kw):
 class TestRunSessionOwnership:
     """Regression coverage for the dashboard's 'Run Agent' pipeline: the outer
     websocket handler already has an active session spanning the whole run, so
-    the COLLECTOR stage must reuse it instead of starting its own — starting a
+    the COLLECTOR stage must reuse it instead of starting its own, starting a
     second one gets rejected by JobAgentWeb's concurrent-session guard."""
 
     @patch("collector.runner.apply_keyword_filter")
@@ -346,7 +346,7 @@ class TestRunSessionOwnership:
         mock_session.start.assert_not_called()
         mock_session.finish.assert_not_called()
         # Reusing a session means the caller owns its whole lifecycle, including
-        # marking it collected — that's _run_pipeline_ws's job in this case, not ours.
+        # marking it collected, that's _run_pipeline_ws's job in this case, not ours.
         mock_session.mark_collected.assert_not_called()
         assert mock_collect.call_args.args[-1] == 42
 
@@ -371,7 +371,7 @@ class TestRunSessionOwnership:
 
 class TestFilterFetchSharing:
     """Regression coverage: apply_language_filter() and apply_keyword_filter()
-    used to each independently call job_repository.get_new() — a full 'new'
+    used to each independently call job_repository.get_new(), a full 'new'
     pool fetch with descriptions, twice per collector run. run() now fetches
     once and shares the list."""
 

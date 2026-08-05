@@ -88,8 +88,8 @@ class LinkedInSource(JobSource):
                 self._wait()
                 return
             except PlaywrightTimeout:
-                # 2FA / checkpoint — fall through to manual wait
-                print("Verification required (2FA or CAPTCHA) — please complete in the browser window...")
+                # 2FA / checkpoint, fall through to manual wait
+                print("Verification required (2FA or CAPTCHA), please complete in the browser window...")
         else:
             print("Please log in to LinkedIn in the browser window (waiting up to 10 minutes)...")
 
@@ -100,7 +100,7 @@ class LinkedInSource(JobSource):
     def search(self, title: str, location: str, days_back: int | None = None, max_results: int | None = None, known_urls: set[str] | None = None) -> list[RawJob]:
         days = days_back if days_back is not None else self._days_back
         seconds = days * 24 * 3600
-        exact_phrase = f'"{title}"'  # quoted phrase — LinkedIn otherwise matches loosely on individual words
+        exact_phrase = f'"{title}"'  # quoted phrase, LinkedIn otherwise matches loosely on individual words
         url = (
             f"{_SEARCH_URL}"
             f"?keywords={quote(exact_phrase)}"
@@ -126,7 +126,7 @@ class LinkedInSource(JobSource):
 
         self._jitter_mouse()
         self._scroll_to_bottom()
-        # Occasionally scroll back up a bit — like re-reading something
+        # Occasionally scroll back up a bit, like re-reading something
         if random.random() < 0.3:
             up = random.randint(200, 600)
             self._page.evaluate(f"window.scrollBy(0, -{up})")
@@ -141,7 +141,7 @@ class LinkedInSource(JobSource):
                 if (descText.length > 100) {
                     return descText.slice(0, 8000);
                 }
-                // Fall back to section header — multilingual
+                // Fall back to section header, multilingual
                 const headers = [
                     'About the job', 'Über die Stelle', 'À propos du poste',
                     'Over de functie', 'Sobre el trabajo', 'O tej pracy',
@@ -161,7 +161,7 @@ class LinkedInSource(JobSource):
         if text:
             self._reading_delay(text)
         else:
-            # Nothing to read — still spend some time on the page before giving up.
+            # Nothing to read, still spend some time on the page before giving up.
             self._human_delay(STEALTH["desc_delay_min"], STEALTH["desc_delay_max"])
 
         return text
@@ -184,7 +184,7 @@ class LinkedInSource(JobSource):
         """Beta-distributed delay: mostly short, occasionally long. 5% chance of extra 1-5 min pause."""
         r = random.betavariate(2, 5)   # peaks near 0.25 of range
         wait = min_sec + r * (max_sec - min_sec)
-        if random.random() < 0.05:     # 5% — "went to make coffee"
+        if random.random() < 0.05:     # 5%, "went to make coffee"
             wait += random.uniform(60, 300)
         time.sleep(wait)
         return wait
@@ -245,11 +245,11 @@ class LinkedInSource(JobSource):
                 break
 
             # When a query genuinely matches nothing, LinkedIn shows a "no results" banner
-            # alongside an unrelated "Jobs you may be interested in" widget — which reuses
+            # alongside an unrelated "Jobs you may be interested in" widget, which reuses
             # the exact same .scaffold-layout__list-item markup as real results. Without
             # this check we'd silently scrape someone's personalized recommendations.
             if self._page.query_selector(".jobs-search-no-results-banner"):
-                print("  No matching jobs — LinkedIn showed unrelated recommendations instead. Skipping.")
+                print("  No matching jobs, LinkedIn showed unrelated recommendations instead. Skipping.")
                 break
 
             self._scroll_to_bottom()
@@ -293,7 +293,7 @@ class LinkedInSource(JobSource):
             print(f"  Page {page_num}: {len(cards)} cards ({new_on_page} new, total: {len(results)})")
 
             if known_urls is not None and new_on_page == 0 and len(cards) > 0:
-                print("  All cards on this page are known — stopping early.")
+                print("  All cards on this page are known, stopping early.")
                 break
 
             cap_count = new_total if known_urls is not None else len(results)

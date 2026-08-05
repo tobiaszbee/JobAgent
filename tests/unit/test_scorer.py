@@ -39,7 +39,7 @@ class TestBuildExamplesSection:
         assert "x" * (_EXAMPLE_DESC_LIMIT + 1) not in section
 
     def test_description_not_truncated_below_400_chars(self):
-        # Regression: descriptions used to be cut to 150-200 chars — too
+        # Regression: descriptions used to be cut to 150-200 chars, too
         # aggressive for the only concrete example the model has to learn from,
         # especially in cold start before a distilled preference profile exists.
         desc = "x" * 300
@@ -139,7 +139,7 @@ class TestBuildSystemPrompt:
     def test_missing_salary_disclosure_never_penalized(self):
         # Regression: the model was listing "no salary disclosed" as a con and
         # dragging the score down for it, even though most postings simply omit
-        # salary — absence of that data must stay neutral.
+        # salary, absence of that data must stay neutral.
         prompt = build_system_prompt({}, [], [])
         assert "neutral" in prompt.lower()
         assert "never" in prompt.lower()
@@ -173,7 +173,7 @@ class TestBuildSystemPrompt:
         # used to live only inside the LEARNED PREFERENCE PROFILE section's own
         # legend, so it silently disappeared for exactly the new-user case where
         # there's no learned profile yet and the questionnaire is the only real
-        # signal — precisely when getting the precedence right matters most.
+        # signal, precisely when getting the precedence right matters most.
         prompt = build_system_prompt({}, [], [], learned_preferences="")
         assert "Precedence when sources conflict" in prompt
         assert "MUST HAVE always wins" in prompt
@@ -184,7 +184,7 @@ class TestBuildSystemPrompt:
         assert "LEARNED PREFERENCE PROFILE" not in precedence_line
 
     def test_precedence_note_present_with_learned_preferences_too(self):
-        # Not just a new-user fix — still there (and still correctly worded)
+        # Not just a new-user fix, still there (and still correctly worded)
         # once a learned profile exists, same as before this change.
         prompt = build_system_prompt({}, [], [], learned_preferences="ACCEPT[conf=HIGH][n=3/3] Remote roles")
         assert "Precedence when sources conflict" in prompt
@@ -192,7 +192,7 @@ class TestBuildSystemPrompt:
 
     def test_annotation_legend_only_appears_alongside_a_learned_profile(self):
         # The REJECT/ACCEPT/INFER glossary only makes sense next to actual
-        # annotated preference lines — unlike the precedence note, it should
+        # annotated preference lines, unlike the precedence note, it should
         # stay gated on having a learned profile.
         without = build_system_prompt({}, [], [], learned_preferences="")
         with_profile = build_system_prompt({}, [], [], learned_preferences="ACCEPT[conf=HIGH][n=3/3] Remote roles")
@@ -225,7 +225,7 @@ class TestBuildUserMessage:
         assert "Company: Acme Corp" in msg
 
     def test_short_description_gets_incomplete_note(self):
-        # Regression: itpracuj's search-result preview (its only description source —
+        # Regression: itpracuj's search-result preview (its only description source,
         # see collector/sources/itpracuj.py) runs 113-250 chars in practice, and the
         # scorer used to have no way to tell that apart from a genuinely short but
         # complete posting, silently judging a stub as if it were the whole ad.
@@ -240,7 +240,7 @@ class TestBuildUserMessage:
         assert "short preview" not in msg
 
     def test_empty_description_does_not_get_incomplete_note(self):
-        # A missing description is a different, already-handled case — flagging it
+        # A missing description is a different, already-handled case, flagging it
         # as "incomplete" too would be redundant noise on top of just having nothing.
         job = _ex(description="")
         msg = _build_user_message(job)

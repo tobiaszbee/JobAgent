@@ -13,20 +13,16 @@ logger = logging.getLogger(__name__)
 _VALID_FLAGS = {"dealbreaker_risk", "overrated", "underrated"}
 
 # Written by this module itself on failure, never by the LLM (not in
-# _VALID_FLAGS/the tool schema) — so "debate ran and flagged nothing" and
-# "debate didn't run at all" are no longer stored identically. Before this,
-# every failure path here (API error even after retry, a truncated response,
-# a missing tool_use block) just returned ranked_jobs untouched — the exact
-# same shape as a genuine clean review, with nothing in the data to tell them
-# apart. Read by ranker/rank_cache.py so a run whose debate failed doesn't get
-# silently reused as "unchanged" on a future run with the same candidate pool.
+# _VALID_FLAGS/the tool schema), so "debate ran and flagged nothing" and
+# "debate didn't run at all" are distinguishable. Read by ranker/rank_cache.py
+# so a failed debate run doesn't get silently reused as "unchanged" later.
 DEBATE_UNAVAILABLE_FLAG = "review_unavailable"
 
 
 def _mark_unavailable(ranked_jobs: list[dict], reason: str) -> list[dict]:
     return [{**job, "debate_flag": DEBATE_UNAVAILABLE_FLAG, "debate_note": reason} for job in ranked_jobs]
 
-# How many positions an overrated/underrated flag shifts a job — modest by design:
+# How many positions an overrated/underrated flag shifts a job, modest by design:
 # debate is a secondary check, not a second full ranking pass, so it nudges the
 # primary listwise ranking rather than overriding its overall judgment. Naturally
 # clamped by list bounds (a job can't move further than the list allows) since the
@@ -41,7 +37,7 @@ _DEBATE_TOOL = {
         "properties": {
             "reviews": {
                 "type": "array",
-                "description": "One entry per job that you want to flag — omit jobs you have no concern about.",
+                "description": "One entry per job that you want to flag, omit jobs you have no concern about.",
                 "items": {
                     "type": "object",
                     "properties": {
@@ -54,7 +50,7 @@ _DEBATE_TOOL = {
                                 "(e.g. stack similarity masking a mismatch on seniority, company type, or "
                                 "an explicit requirement the candidate can't meet). "
                                 "overrated: ranked too high for a softer reason. "
-                                "underrated: ranked too low — this job deserves more credit."
+                                "underrated: ranked too low, this job deserves more credit."
                             ),
                         },
                         "note": {"type": "string", "description": "One sentence explaining the flag."},
@@ -69,7 +65,7 @@ _DEBATE_TOOL = {
 
 
 def _format_job_for_review(job: dict) -> str:
-    # Rank comes from the job's own listwise_rank, not presentation position —
+    # Rank comes from the job's own listwise_rank, not presentation position,
     # presentation is shuffled below (see debate_rank) so the rank number shown
     # here must stay tied to the real ranking, not to wherever this job landed
     # in the shuffled prompt order.
@@ -87,7 +83,7 @@ def _format_job_for_review(job: dict) -> str:
             b = None
         if b:
             # Exactly the per-dimension signal this reviewer's own brief (below)
-            # asks it to check for — seniority mismatch, wrong company type —
+            # asks it to check for, seniority mismatch, wrong company type,
             # computed by the scorer but never previously shown here at all.
             sub_scores = b.get("sub_scores")
             if sub_scores:
@@ -114,17 +110,11 @@ def _parse_reviews(tool_input: dict) -> dict[str, dict]:
 
 
 def debate_rank(ranked_jobs: list[dict], candidate_profile: str, preferences: list[dict] | None = None, questionnaire: str = "") -> list[dict]:
-    """Second-opinion critique of an already-ranked shortlist (the listwise top-N),
-    using a different model than the primary ranker. Does not re-derive the ranking
-    from scratch — only flags disagreements. Jobs flagged "dealbreaker_risk" are
-    demoted to the bottom of the list; "overrated"/"underrated" get a modest
-    _RANK_NUDGE-position shift down/up instead of a full re-rank.
-
-    preferences is the distilled learned-preference profile (same shape
-    listwise_rank already receives) — before this, the reviewer critiqued a
-    ranking that WAS built from learned preferences while having no visibility
-    into those preferences itself, auditing with less information than the
-    thing it was auditing had."""
+    # Second-opinion critique of an already-ranked shortlist, using a different
+    # model than the primary ranker. Doesn't re-derive the ranking, only flags
+    # disagreements: "dealbreaker_risk" demotes a job to the bottom;
+    # "overrated"/"underrated" get a modest _RANK_NUDGE shift instead of a
+    # full re-rank.
     if not ranked_jobs:
         return ranked_jobs
 
@@ -135,14 +125,10 @@ def debate_rank(ranked_jobs: list[dict], candidate_profile: str, preferences: li
         if scored:
             prefs_text = f"PREFERENCE PROFILE:\n{render_signals(scored)}\n\n"
 
-    # Shuffled presentation order, same reasoning as ranker/listwise.py's own
-    # shuffle: jobs shown in a fixed best-to-worst order (rank_reason already
-    # frames it that way) risk anchoring the reviewer toward confirming
-    # whatever's presented first — exactly the top-ranked jobs where a missed
-    # dealbreaker matters most (WOULD_APPLY["rank_ceiling"] gates on a job
-    # staying near the top of this exact list). Each job still carries its own
-    # [Rank #N] label (_format_job_for_review), so the reviewer always knows
-    # the real rank — only the order it's read in changes.
+    # Shuffled presentation order, same reasoning as ranker/listwise.py: a
+    # fixed best-to-worst order risks anchoring the reviewer toward confirming
+    # whatever's presented first. Each job still carries its own [Rank #N]
+    # label, so the reviewer always knows the real rank.
     presented = ranked_jobs[:]
     random.shuffle(presented)
     jobs_text = "\n\n---\n\n".join(_format_job_for_review(job) for job in presented)
@@ -153,12 +139,12 @@ def debate_rank(ranked_jobs: list[dict], candidate_profile: str, preferences: li
 {candidate_profile}
 
 {questionnaire_text}{prefs_text}Each job below is labeled with its rank from the primary ranking (rank #1 = best). Jobs are listed in a
-shuffled order, not by rank — go by the label, not position. Your job is NOT to re-rank — it's to catch
+shuffled order, not by rank, go by the label, not position. Your job is NOT to re-rank, it's to catch
 cases the primary ranking may have gotten wrong, especially where strong stack/keyword
 similarity could mask a real dealbreaker (seniority mismatch, wrong company type, an explicit
 requirement the candidate can't meet, etc.).
 
-Only flag jobs you genuinely disagree with. Most jobs need no flag at all — do not flag a job just
+Only flag jobs you genuinely disagree with. Most jobs need no flag at all, do not flag a job just
 to have something to say about it.
 
 Use the submit_debate_review tool to report your findings."""
@@ -184,10 +170,10 @@ Use the submit_debate_review tool to report your findings."""
 
     if response.stop_reason == "max_tokens":
         # A truncated review list could still parse as valid-but-partial JSON
-        # (missing the last few entries, or a malformed final one) — treat it
+        # (missing the last few entries, or a malformed final one), treat it
         # the same as "no tool_use block" below: apply no flags rather than
         # risk acting on a partial critique.
-        logger.error("Debate response truncated (max_tokens) — no flags applied.")
+        logger.error("Debate response truncated (max_tokens), no flags applied.")
         return _mark_unavailable(ranked_jobs, "Debate review unavailable this run: response truncated (max_tokens).")
 
     tool_block = next((b for b in response.content if b.type == "tool_use"), None)
@@ -197,37 +183,26 @@ Use the submit_debate_review tool to report your findings."""
 
     reviews = _parse_reviews(tool_block.input)
     if not reviews:
-        # A genuinely clean review (nothing to flag, for anyone in the pool) must
-        # still clear any stale flag left over from a previous run — same reasoning
-        # as the loop below. Without this, a fully clean debate result left every
-        # previously-flagged job flagged forever, since returning ranked_jobs
-        # untouched here skipped even them.
+        # A clean review must still clear any stale flag left over from a
+        # previous run, same as the loop below.
         return [{**job, "debate_flag": None, "debate_note": None} for job in ranked_jobs]
 
     demoted = []
     kept = []
     for job in ranked_jobs:
         review = reviews.get(job["id"])
-        # Always set debate_flag/debate_note explicitly this run, never leave them
-        # as whatever the job dict already carried (fetched from the DB) — a job
-        # not in `reviews` was reviewed and found clean, not skipped, so None is
-        # the correct, fresh result, not "no opinion". Before this, a job flagged
-        # dealbreaker_risk (or overrated/underrated) once kept that flag on every
-        # future run regardless of new evidence: would_apply.compute_would_apply
-        # stayed permanently blocked, and _nudge_key below kept re-applying the
-        # same rank nudge indefinitely.
+        # Always set debate_flag/debate_note explicitly this run rather than
+        # leaving a stale value from the DB: a job not in `reviews` was
+        # reviewed and found clean, so None is a fresh result, not "no opinion".
         job = {**job, "debate_flag": review["flag"] if review else None, "debate_note": review["note"] if review else None}
         if review and review["flag"] == "dealbreaker_risk":
             demoted.append(job)
         else:
             kept.append(job)
 
-    # overrated/underrated used to be attached to the job (debate_flag/debate_note,
-    # shown in the UI) but never changed its actual position — only dealbreaker_risk
-    # did anything. Nudge by _RANK_NUDGE positions instead: the +/-0.5 offset breaks
-    # ties strictly in the nudge's direction (without it, Python's stable sort would
-    # let an unflagged job at the landing index win the tie and blunt the shift by
-    # up to one position).
+    # The +/-0.5 offset breaks ties strictly in the nudge's direction, otherwise
+    # Python's stable sort would let an unflagged job at the landing index win
+    # the tie and blunt the shift by up to one position.
     def _nudge_key(indexed_job: tuple[int, dict]) -> float:
         index, job = indexed_job
         flag = job.get("debate_flag")

@@ -2,7 +2,7 @@ import api_client
 
 
 def exclude(source: str, search_query: str, reason: str) -> None:
-    """Idempotent — re-excluding an already-excluded query updates its reason
+    """Idempotent, re-excluding an already-excluded query updates its reason
     instead of erroring, so a re-run with fresher stats keeps the log current."""
     api_client.post("/api/excluded-search-queries", json={
         "source": source, "search_query": search_query, "reason": reason,

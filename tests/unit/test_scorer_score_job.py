@@ -79,7 +79,7 @@ class TestScoreJobStructuredResult:
     @patch("evaluator.scorer._get_client")
     def test_truncated_response_returns_error_result_not_zero_score(self, mock_get_client):
         # Regression: a truncated tool_use block can still parse as valid-but-
-        # incomplete JSON — missing "overall_score" would previously default
+        # incomplete JSON, missing "overall_score" would previously default
         # to 0.0 via .get("overall_score", 0), permanently auto-rejecting the
         # job instead of leaving it unscored (score=None) for retry.
         response = _tool_response(stop_reason="max_tokens")

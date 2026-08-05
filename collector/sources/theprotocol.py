@@ -1,19 +1,19 @@
-"""theprotocol.it source — Poland-focused IT job board, public and unauthenticated.
+"""theprotocol.it source, Poland-focused IT job board, public and unauthenticated.
 
 Unlike justjoin.it, this site sits behind Cloudflare and its headless-browser detection
 is aggressive: a plain `httpx` GET gets a 403 challenge page, and even Playwright's
 headless Chromium (with `channel="chrome"`) gets served the same "Just a moment..."
-challenge. Only a non-headless (visible) browser gets through — verified live. So this
+challenge. Only a non-headless (visible) browser gets through, verified live. So this
 source uses Playwright end to end, for both search() and fetch_description(), without
 any login or stealth pacing (public site, no account).
 
 Listing and detail data are both embedded as JSON in a `<script id="__NEXT_DATA__">` tag
-in the server-rendered page — no reverse-engineered wire format needed here, this is the
+in the server-rendered page, no reverse-engineered wire format needed here, this is the
 stable, documented Next.js pattern (unlike justjoin.it's newer RSC streaming).
 
 The site's own search box only recognizes single technology names as filter tags (typing
 a full phrase like "PHP Developer" auto-collapses to just the "PHP" tag in the UI, and a
-literal multi-word keyword in the URL returns zero results) — so search() uses the first
+literal multi-word keyword in the URL returns zero results), so search() uses the first
 word of `title` as the tag, matching how our multi-word title criteria are all phrased
 ("Symfony Developer" -> "symfony", "PHP" -> "php").
 """
@@ -63,10 +63,10 @@ def _section_text(offer: dict) -> str:
     return "\n\n".join(parts).strip()
 
 
-# theprotocol.it shows salary as a structured field on the page (per contract type —
+# theprotocol.it shows salary as a structured field on the page (per contract type,
 # a listing can offer both an employment contract and B2B, each with its own range),
 # but it lives under attributes.employment.typesOfContracts, entirely separate from
-# textSections — the free-text description body never mentions it. Missed here, it
+# textSections, the free-text description body never mentions it. Missed here, it
 # was silently invisible to extraction and the scorer treated real, disclosed pay as
 # "not shown" (verified live: a 23-32k PLN/month B2B rate was in the page's own JSON
 # the whole time). currencyCode comes through as the "zł" symbol, not the "PLN" code
@@ -93,7 +93,7 @@ class TheProtocolSource(JobSource):
     # Multiple back-to-back searches with zero pause between them (the default for
     # non-LinkedIn sources) triggered a real Cloudflare challenge live, even in a
     # non-headless browser. Opting into the same adaptive pause LinkedIn uses between
-    # searches fixes it — a few seconds of "look at the page" time between navigations.
+    # searches fixes it, a few seconds of "look at the page" time between navigations.
     requires_stealth_pauses = True
 
     def __init__(self, days_back: int = 7, **_):
@@ -166,7 +166,7 @@ class TheProtocolSource(JobSource):
 
         offers_response = data.get("props", {}).get("pageProps", {}).get("offersResponse") or {}
         offers = offers_response.get("offers", [])
-        # Only the first page (up to 50 results) is fetched — plenty for a daily
+        # Only the first page (up to 50 results) is fetched, plenty for a daily
         # incremental run; deeper pagination isn't implemented yet.
 
         results: list[RawJob] = []

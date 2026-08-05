@@ -1,5 +1,5 @@
 """Authenticate this JobAgent installation against JobAgentWeb, once. Every
-script and the local dashboard reuse the saved session afterward — see
+script and the local dashboard reuse the saved session afterward, see
 api_client.py.
 
 The dashboard's own /login page (web/app.py) covers this interactively now;
@@ -29,7 +29,7 @@ def main():
     except api_client.NotLoggedInError as e:
         raise SystemExit(f"Login failed: {e}")
 
-    print("Logged in — session saved. You won't need to do this again until it expires.")
+    print("Logged in, session saved. You won't need to do this again until it expires.")
 
 
 if __name__ == "__main__":

@@ -23,10 +23,10 @@ import httpx
 
 import api_client
 
-# JobAgent has no database of its own — every db/repositories/*.py call is a real
+# JobAgent has no database of its own, every db/repositories/*.py call is a real
 # HTTP call to JobAgentWeb (api_client.py). Rather than mock those calls, tests
 # run a real JobAgentWeb instance (its own repo/venv, sibling directory) against
-# the same isolated jobagentweb_test Postgres its own test suite uses — same
+# the same isolated jobagentweb_test Postgres its own test suite uses, same
 # "hit a real backend, not mocks" philosophy already established there.
 _JOBAGENTWEB_REPO = Path(os.environ.get("JOBAGENTWEB_REPO_PATH", Path(__file__).resolve().parent.parent.parent / "JobAgentWeb"))
 _JOBAGENTWEB_PYTHON = _JOBAGENTWEB_REPO / ".venv" / "Scripts" / "python.exe"
@@ -36,16 +36,16 @@ _JOBAGENTWEB_PYTHON = _JOBAGENTWEB_REPO / ".venv" / "Scripts" / "python.exe"
 def jobagentweb_server():
     if not _JOBAGENTWEB_PYTHON.exists():
         pytest.exit(
-            f"JobAgentWeb venv not found at {_JOBAGENTWEB_PYTHON} — set JOBAGENTWEB_REPO_PATH "
+            f"JobAgentWeb venv not found at {_JOBAGENTWEB_PYTHON}, set JOBAGENTWEB_REPO_PATH "
             "or check out JobAgentWeb as a sibling directory with its venv set up.",
             returncode=1,
         )
 
     env = os.environ.copy()
     env.update({
-        "INVITE_CODE": "test-invite-code",  # JobAgentWeb closes registration without one — matches its own conftest.py default
+        "INVITE_CODE": "test-invite-code",  # JobAgentWeb closes registration without one, matches its own conftest.py default
         "SECRET_KEY": "test-only-secret-key-not-real-923nf",  # JobAgentWeb now hard-fails at import without one
-        "DISABLE_RATE_LIMIT": "true",  # this suite registers a fresh user per test — far more than a real client
+        "DISABLE_RATE_LIMIT": "true",  # this suite registers a fresh user per test, far more than a real client
         "POSTGRES_HOST": "10.66.0.1",
         "POSTGRES_PORT": "5432",
         "POSTGRES_DB": "jobagentweb_test",
@@ -54,7 +54,7 @@ def jobagentweb_server():
         "SESSION_HTTPS_ONLY": "false",
     })
     # A pipe that nobody drains fills up (uvicorn logs a line per request) and the
-    # child then blocks on its own stdout write() forever — the whole test run
+    # child then blocks on its own stdout write() forever, the whole test run
     # freezes mid-suite with no error, just an unresponsive server. Redirect to a
     # real file instead; the OS handles that without the parent needing to read it.
     log_path = Path(os.environ.get("TMPDIR", os.environ.get("TEMP", "."))) / f"jobagentweb_test_server_{_TEST_PORT}.log"
@@ -99,14 +99,14 @@ def _no_static_api_key(monkeypatch):
     in this machine's real .env. Without this, api_client.request() unconditionally
     takes the static-key branch (see api_client.py) and every test hits the
     ephemeral jobagentweb_server with a key that's meaningless there (it's scoped to
-    a real user_id on the real production DB) — 401 on every request, isolated user
+    a real user_id on the real production DB), 401 on every request, isolated user
     registration or not."""
     monkeypatch.setattr(api_client, "JOBAGENT_API_KEY", None)
 
 
 @pytest.fixture(autouse=True)
 def _isolated_user(jobagentweb_server, tmp_path, monkeypatch):
-    """Every test gets its own freshly-registered JobAgentWeb user — perfect
+    """Every test gets its own freshly-registered JobAgentWeb user, perfect
     isolation with no truncation step needed, since every table is scoped by
     user_id (the shared job_postings/job_embeddings pool is the one exception,
     but tests that touch it use unique-per-test URLs anyway)."""

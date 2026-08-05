@@ -1,4 +1,4 @@
-"""Unit tests for the NoFluffJobs scraper — no real HTTP calls made."""
+"""Unit tests for the NoFluffJobs scraper, no real HTTP calls made."""
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
@@ -59,7 +59,7 @@ def _posting(slug="php-developer-remote", title="PHP Developer", company="Acme",
 def _search_html(postings: list[dict]) -> str:
     import json
     # Real state shape wraps searchResponse under a store-specific key (e.g. STORE_KEY
-    # or a hashed request identity) — _find_postings scans for it, so the wrapper key
+    # or a hashed request identity), _find_postings scans for it, so the wrapper key
     # name itself doesn't matter here, just that it's nested one level deep.
     payload = json.dumps({"STORE_KEY": {"searchResponse": {"postings": postings}}})
     return _state_html(payload.replace('"', "&q;"))
@@ -188,7 +188,7 @@ class TestNoFluffJobsSearch:
 
     def test_source_structured_data_captures_salary(self):
         # Regression: NoFluffJobs discloses salary as a structured search-result
-        # field (verified live against the real site) — Haiku shouldn't have to
+        # field (verified live against the real site), Haiku shouldn't have to
         # re-guess it from the description text later.
         posting = _posting()
         posting["salary"] = {"from": 13000, "to": 15000, "type": "b2b", "currency": "PLN"}
@@ -202,7 +202,7 @@ class TestNoFluffJobsSearch:
         assert ssd["salary_period"] == "monthly"
 
     def test_posted_at_captures_the_posted_timestamp(self):
-        # "posted" was already parsed for the days_back cutoff, then discarded —
+        # "posted" was already parsed for the days_back cutoff, then discarded,
         # RawJob.posted_at carries it through instead.
         src = _make_source()
         src._client.get.return_value = MagicMock(status_code=200, text=_search_html([_posting(days_ago=4)]))
@@ -219,7 +219,7 @@ class TestExtractSourceStructuredData:
 
     def test_undisclosed_salary_returns_empty(self):
         # NoFluffJobs omits from/to entirely when salary is only shown "at first
-        # interview" — never fabricate a range.
+        # interview", never fabricate a range.
         assert _extract_source_structured_data({"salary": {"type": "b2b", "currency": "PLN"}}) == {}
 
     def test_missing_salary_block_returns_empty(self):

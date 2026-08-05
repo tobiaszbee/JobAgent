@@ -33,7 +33,7 @@ pytestmark = [
     ),
 ]
 
-# job_postings is shared and never truncated — keeps urls from colliding across runs.
+# job_postings is shared and never truncated, keeps urls from colliding across runs.
 _RUN_ID = uuid.uuid4().hex
 
 
@@ -128,7 +128,7 @@ Requirements:
 We offer:
 - Fully remote position (European timezone)
 - 18,000–22,000 PLN net B2B
-- Truly async culture — no daily standups, no tracking
+- Truly async culture, no daily standups, no tracking
 - Startup environment, direct product ownership
 """,
 )
@@ -205,7 +205,7 @@ Current opening: PHP developer to be assigned to various client projects
 - Employment (UoP) or B2B available
 
 Salary: 7,000–9,000 PLN gross, depends on client and project.
-Outstaffing model — you will work for our clients, not for us directly.
+Outstaffing model, you will work for our clients, not for us directly.
 """,
 )
 
@@ -237,7 +237,7 @@ def _get_job_status(url: str) -> str:
 class TestE2Filter:
     def test_job_without_required_keywords_gets_auto_rejected(self):
         # Missing every 'required' keyword (php, remote) in both title and description
-        # is a hard rejection — see collector/filters.py::apply_keyword_filter.
+        # is a hard rejection, see collector/filters.py::apply_keyword_filter.
         job_repository.insert(**_JOB_E2_NO_REQUIRED_KEYWORDS)
         result = apply_keyword_filter()
         assert result["auto_rejected"] == 1

@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 def _require_voyage():
     if not VOYAGE_API_KEY:
-        raise RuntimeError("VOYAGE_API_KEY not set — add it to .env to use embedding/rerank features.")
+        raise RuntimeError("VOYAGE_API_KEY not set, add it to .env to use embedding/rerank features.")
     try:
         import voyageai  # noqa: F401
     except ImportError:
@@ -35,7 +35,7 @@ class VoyageClient:
         result = self._client.rerank(query, documents, model=VOYAGE_RERANK_MODEL, top_k=top_k)
         try:
             from db.repositories.usage_repository import log_voyage_rerank
-            # Voyage bills rerank per token processed (query + documents), not per query —
+            # Voyage bills rerank per token processed (query + documents), not per query,
             # log the real total_tokens the API reports rather than a document-count proxy.
             log_voyage_rerank(getattr(result, "total_tokens", len(documents) * 200))
         except Exception:

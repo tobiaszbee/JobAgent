@@ -1,8 +1,7 @@
-"""Thin HTTP client for JobAgentWeb — the sole data store now. Every db/repositories/*.py
-function goes through here instead of raw SQL. Auth is a single persisted session
-cookie (see login()), shared by every script and the local Flask dashboard alike:
-this JobAgent installation acts as one already-authenticated identity, not a
-per-caller login.
+"""Thin HTTP client for JobAgentWeb, the sole data store now. Every
+db/repositories/*.py function goes through here instead of raw SQL. Auth is a
+single persisted session cookie, shared by every script and the dashboard
+alike: this JobAgent installation acts as one already-authenticated identity.
 """
 import json
 import os
@@ -16,12 +15,8 @@ from config import JOBAGENTWEB_BASE_URL, JOBAGENT_API_KEY
 _SESSION_FILE = Path.home() / ".jobagent" / "session.json"
 
 # Reused across every call instead of opening a fresh TCP/TLS connection per
-# request — every db/repositories/*.py function goes through request() below,
-# so a full pipeline run used to pay a new handshake hundreds of times over,
-# on top of the WireGuard tunnel's own latency. Never explicitly closed: this
-# module is used both by short-lived scripts (the process exit cleans up the
-# socket) and the long-running dashboard (where staying open all run is the
-# point).
+# request. Never explicitly closed: used both by short-lived scripts (process
+# exit cleans up the socket) and the long-running dashboard.
 _client = httpx.Client(base_url=JOBAGENTWEB_BASE_URL, timeout=30.0)
 
 
@@ -59,16 +54,12 @@ def _load_cookie() -> str | None:
 def _save_cookie(cookie_value: str) -> None:
     _SESSION_FILE.parent.mkdir(parents=True, exist_ok=True)
     _SESSION_FILE.write_text(json.dumps({"session_cookie": cookie_value}))
-    # Owner-only — this file is a live, unattended login for this JobAgentWeb
-    # account; on a shared machine, default permissions would hand it to anyone
-    # else on the box. No-op on Windows (POSIX mode bits don't map to NTFS ACLs),
-    # but real protection on macOS/Linux, which this same code path also runs on.
+    # Owner-only, since this file is a live, unattended login. No-op on
+    # Windows, but real protection on macOS/Linux.
     os.chmod(_SESSION_FILE, 0o600)
 
 
 def login(username: str, password: str) -> None:
-    """Authenticates against JobAgentWeb and persists the session cookie to
-    ~/.jobagent/session.json for every future call from this machine."""
     resp = httpx.post(
         f"{JOBAGENTWEB_BASE_URL}/login",
         data={"username": username, "password": password},
@@ -76,14 +67,11 @@ def login(username: str, password: str) -> None:
     )
     cookie = resp.cookies.get("session")
     if resp.status_code != 303 or not cookie:
-        raise NotLoggedInError("Login failed — check your username and password.")
+        raise NotLoggedInError("Login failed, check your username and password.")
     _save_cookie(cookie)
 
 
 def register(username: str, password: str, invite_code: str = "") -> None:
-    """Registers a new account on JobAgentWeb and persists its session cookie,
-    same as login(). Mirrors JobAgentWeb's POST /register form contract, which
-    requires a valid invite_code whenever JobAgentWeb has one configured."""
     resp = httpx.post(
         f"{JOBAGENTWEB_BASE_URL}/register",
         data={"username": username, "password": password, "password_confirm": password, "invite_code": invite_code},
@@ -96,22 +84,18 @@ def register(username: str, password: str, invite_code: str = "") -> None:
 
 
 def logged_in() -> bool:
-    # A configured API key IS this installation's credential — there's no
-    # session file to check, and none is ever needed.
+    # A configured API key is this installation's credential directly, no
+    # session file needed.
     if JOBAGENT_API_KEY:
         return True
     return _load_cookie() is not None
 
 
 def request(method: str, path: str, **kwargs):
-    """Authenticated request against JobAgentWeb. Retries transient network/tunnel
-    blips with backoff (matching the old direct-Postgres adapter's behavior) —
-    never retries a 4xx, since that's a real error, not a connectivity hiccup.
-
-    Prefers the static API key (JOBAGENT_API_KEY) over the session-cookie flow
-    when both could apply — the key never expires and isn't affected by
-    JobAgentWeb's session_epoch logout mechanism, so once configured this
-    installation never needs `scripts/login.py` again."""
+    # Retries transient network/tunnel blips with backoff, never a 4xx (a real
+    # error, not a connectivity hiccup). Prefers the static API key over the
+    # session-cookie flow when both could apply: the key never expires and
+    # isn't affected by session_epoch logout.
     if JOBAGENT_API_KEY:
         headers = dict(kwargs.pop("headers", None) or {})
         headers["X-JobAgent-Api-Key"] = JOBAGENT_API_KEY
@@ -124,15 +108,10 @@ def request(method: str, path: str, **kwargs):
                 f"at {JOBAGENTWEB_BASE_URL}/register first."
             )
 
-        # Cleared and re-set on every call, not just set once: httpx.Client auto-
-        # captures Set-Cookie from every response into its own jar by default, and
-        # Starlette's SessionMiddleware re-signs and re-sends the session cookie on
-        # every response — the auto-captured entry and this explicit .set() can
-        # coexist as separate (domain, path) entries in the jar instead of one
-        # replacing the other, so a request can end up sending two "session"
-        # cookies at once, with the server's cookie parser picking whichever it
-        # sees first (observed in practice: a stale cookie from a previous login
-        # sharing this same process, e.g. two isolated test users in one session).
+        # Cleared and re-set on every call: httpx.Client auto-captures
+        # Set-Cookie into its own jar, and that entry can coexist alongside
+        # this explicit one instead of replacing it, sending two "session"
+        # cookies at once with the server picking whichever it sees first.
         _client.cookies.clear()
         _client.cookies.set("session", cookie)
 
@@ -149,12 +128,8 @@ def request(method: str, path: str, **kwargs):
 
     if resp.status_code == 401:
         if JOBAGENT_API_KEY:
-            # The key path failed — this is the one dead end fixed here: a
-            # freshly re-provisioned server whose .env is missing the key
-            # (bootstrap.sh's own env.example didn't even list it until this
-            # fix) used to mean every call 401s forever, with no way back to
-            # the session-cookie flow this installation might still have a
-            # valid, unexpired cookie for. Try it once before giving up.
+            # The key path failed. Fall back to a stored session cookie once
+            # before giving up, in case this installation still has a valid one.
             cookie = _load_cookie()
             if cookie:
                 fallback_headers = dict(kwargs.get("headers") or {})
@@ -166,11 +141,11 @@ def request(method: str, path: str, **kwargs):
                 if resp.status_code != 401:
                     return _raise_for_status(resp)
             raise NotLoggedInError(
-                "JobAgentWeb rejected JOBAGENT_API_KEY — check it matches JOBAGENT_API_KEY "
+                "JobAgentWeb rejected JOBAGENT_API_KEY, check it matches JOBAGENT_API_KEY "
                 "in JobAgentWeb's own .env on the server."
                 + (" (A stored session cookie was also tried as a fallback and rejected too.)" if cookie else "")
             )
-        raise NotLoggedInError("Session expired or invalid — run `python scripts/login.py` again.")
+        raise NotLoggedInError("Session expired or invalid, run `python scripts/login.py` again.")
     return _raise_for_status(resp)
 
 

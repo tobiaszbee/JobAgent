@@ -24,7 +24,7 @@ Guidelines learned from real testing on LinkedIn:
   "Developer" (e.g. "Symfony Developer", "Django Developer", "Laravel Developer",
   "FastAPI Developer", "Flask Developer", "React Developer").
 - Skip generic infrastructure/database/tooling names as standalone search terms
-  (e.g. Docker, PostgreSQL, Redis, Git, CI/CD) — they rarely appear as job titles.
+  (e.g. Docker, PostgreSQL, Redis, Git, CI/CD), they rarely appear as job titles.
 - Keep the final list short: 4-10 phrases total, no duplicates.
 
 Respond ONLY with a JSON array of strings, no other text.
@@ -54,17 +54,16 @@ def _derive_search_queries(tech: list[str], role_types: list[str], seniority_lev
 
 
 def _replace_criteria(type_: str, values: list[str]) -> None:
-    """Fully replace the active set of a given criteria type — these types are now
-    system-managed from the questionnaire, not hand-curated, so stale entries from a
-    previous save shouldn't linger."""
+    # These types are system-managed from the questionnaire now, not
+    # hand-curated, so stale entries from a previous save shouldn't linger.
     criteria_repository.delete_by_type(type_)
     for v in values:
         criteria_repository.insert(type_, v)
 
 
 def _sync_criteria_from_preferences(fields: dict) -> dict:
-    """Keep the collector's search inputs (title/location criteria) in sync with the
-    questionnaire — the user no longer edits these directly (see Run Agent)."""
+    # Keeps the collector's search inputs (title/location criteria) in sync
+    # with the questionnaire, since the user no longer edits these directly.
     warnings = []
 
     tech = fields.get("extra_tech") or []
@@ -75,16 +74,16 @@ def _sync_criteria_from_preferences(fields: dict) -> dict:
     except Exception as e:
         logger.warning(f"Search-query derivation failed: {e}")
         queries = []
-        warnings.append("Could not auto-generate search queries — try saving again.")
+        warnings.append("Could not auto-generate search queries, try saving again.")
     if queries:
         _replace_criteria("title", queries)
         _replace_criteria("search_query", [])  # titles must win over any stale search_query rows
 
-    # Locations are literal user-typed values, not an LLM derivation — replace
+    # Locations are literal user-typed values, not an LLM derivation, replace
     # unconditionally (including clearing to empty) so switching work modes doesn't
     # leave stale entries from a previous save driving the search.
     # Remote postings are matched by country; hybrid/onsite postings are matched by
-    # city only — both feed the same "location" criteria used across every source.
+    # city only, both feed the same "location" criteria used across every source.
     work_mode = fields.get("work_mode") or []
     locations = []
     if "remote" in work_mode:
@@ -94,19 +93,15 @@ def _sync_criteria_from_preferences(fields: dict) -> dict:
     _replace_criteria("location", locations)
 
     # Unconditional (unlike titles above): these are literal user-typed values,
-    # not an LLM derivation that can silently fail — clearing all avoid-chips should clear
+    # not an LLM derivation that can silently fail, clearing all avoid-chips should clear
     # the rejected keywords too.
     _replace_criteria("rejected", fields.get("avoided_tech") or [])
 
-    # Mirrors avoided_tech -> rejected above: extra_tech was collected (05 · Technologies)
-    # but nothing ever populated the scorer prompt's PREFERRED section from it — that
-    # section was only ever filled by the separate CV-derived apply-criteria flow, which
-    # nothing in this UI calls, so it stayed empty for every questionnaire-onboarded
-    # candidate. Deliberately NOT touching "required" here: combined with the keyword
-    # pre-filter's now-functional \b-boundary regex, a populated required-tech list could
-    # reject the entire pool for a candidate whose stack includes something like C#/C++/
-    # .NET if extraction ever mismatches a single required entry — required stays
-    # CV-derived-only, left for the user to set explicitly if they want it.
+    # Deliberately not touching "required" here: a populated required-tech
+    # list could reject the entire pool for a candidate whose stack includes
+    # something like C#/C++/.NET if extraction ever mismatches a single
+    # entry, so required stays CV-derived-only, left for the user to set
+    # explicitly.
     _replace_criteria("preferred", fields.get("extra_tech") or [])
 
     return {"warnings": warnings}

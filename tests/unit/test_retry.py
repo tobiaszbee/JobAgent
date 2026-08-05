@@ -16,7 +16,7 @@ def _rate_limit_error():
 
 
 def _internal_server_error():
-    # This is also how Anthropic's 529 "overloaded_error" surfaces — any 5xx
+    # This is also how Anthropic's 529 "overloaded_error" surfaces, any 5xx
     # status maps to InternalServerError in the SDK.
     return anthropic.InternalServerError("overloaded_error", response=httpx.Response(529, request=_request()), body=None)
 
@@ -105,7 +105,7 @@ class TestCallWithRetry:
         assert sleep.call_count == 2  # waits between attempts, not after the last one
 
     def test_does_not_retry_a_non_transient_error(self):
-        # A bad request fails identically on every attempt — retrying it would
+        # A bad request fails identically on every attempt, retrying it would
         # just waste the wait for a guaranteed-same result.
         calls = []
 

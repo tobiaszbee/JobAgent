@@ -54,7 +54,7 @@ def _configure_logging(log_path: str | None) -> list[logging.Handler]:
 
 def _run_script(name: str) -> int:
     """Runs a scripts/*.py file with no importable entrypoint (no `if __name__`
-    guard — see scripts/distill_preferences.py, scripts/prune_search_queries.py,
+    guard, see scripts/distill_preferences.py, scripts/prune_search_queries.py,
     scripts/rank_jobs.py) as a subprocess, matching the actual dashboard
     pipeline's approach for these same stages (web/routes/runner.py)."""
     import subprocess
@@ -75,13 +75,13 @@ def main() -> int:
     handlers = _configure_logging(args.log_file)
     # This CLI entry point never went through web/routes/runner.py's
     # started_at -> record_run_summary envelope, so every run_all.py run's
-    # cost (collector, distill, extractor, evaluator, prune, ranking — all of
+    # cost (collector, distill, extractor, evaluator, prune, ranking, all of
     # it) was silently missing from cost_summaries entirely.
     started_at = usage_repository.now_iso()
 
     try:
         logger.info("=" * 60)
-        logger.info(f"JobAgent run started — {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+        logger.info(f"JobAgent run started, {datetime.now().strftime('%Y-%m-%d %H:%M')}")
         logger.info("=" * 60)
 
         logger.info("\n=== COLLECTOR ===")
@@ -106,7 +106,7 @@ def main() -> int:
         if _run_script("distill_preferences.py") != 0:
             logger.warning("Preference distillation failed (non-fatal)")
 
-        # Must precede EVALUATOR — dealbreakers.py reads structured_data, and a job
+        # Must precede EVALUATOR, dealbreakers.py reads structured_data, and a job
         # never re-enters the unscored pool once scored.
         logger.info("\n=== EXTRACTOR ===")
         try:

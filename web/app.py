@@ -37,7 +37,7 @@ def require_login():
 
 @app.errorhandler(api_client.NotLoggedInError)
 def handle_session_expired(e):
-    """Session existed but JobAgentWeb rejected it (expired/invalid) — send the
+    """Session existed but JobAgentWeb rejected it (expired/invalid), send the
     user back to /login instead of a raw 500, distinguishing JSON callers (the
     dashboard's own fetch()) from full-page navigations."""
     if request.path.startswith("/api/"):
@@ -80,7 +80,7 @@ def how_it_works():
 
 
 def _clear_stale_session_at_startup():
-    """Clear any stale 'running' session left over from a previous crash —
+    """Clear any stale 'running' session left over from a previous crash,
     best-effort, not fatal: logged_in() only checks that a session file
     exists, not that it's still valid, so a stale/expired cookie (401) or a
     momentary JobAgentWeb/tunnel hiccup here must not take down the whole app

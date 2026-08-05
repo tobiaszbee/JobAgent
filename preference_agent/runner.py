@@ -28,26 +28,26 @@ Analyze ALL dimensions relevant to job-candidate fit, including but not limited 
 
 Remote-country matching is now enforced deterministically upstream whenever the candidate
 has set remote_countries in their questionnaire (evaluator/dealbreakers.py's geo dealbreaker
-rejects a remote job restricted to the wrong countries before it ever reaches feedback) — do
+rejects a remote job restricted to the wrong countries before it ever reaches feedback), do
 NOT re-derive that narrow signal. Other location/geography nuance is NOT filtered upstream and
 remains fair game: timezone-overlap preferences, visa/relocation requirements, hybrid/onsite
 city fit, or any pattern in rejection reasons the deterministic filter can't see.
 
 If a CANDIDATE QUESTIONNAIRE section appears below, treat it as ground truth already known to
-the evaluator — do not spend a signal restating something the candidate stated there directly
+the evaluator, do not spend a signal restating something the candidate stated there directly
 (e.g. a company type or salary floor already given). Only emit a signal where behavior reveals
 something the questionnaire doesn't already say, or where it genuinely diverges from what was
-stated (e.g. they say they want product companies but keep applying to agencies) — that
+stated (e.g. they say they want product companies but keep applying to agencies), that
 divergence is itself a high-value signal, worth calling out explicitly.
 
-Each APPLIED/REJECTED example is dated ("decided YYYY-MM-DD") — weight recent decisions more
+Each APPLIED/REJECTED example is dated ("decided YYYY-MM-DD"), weight recent decisions more
 heavily than old ones, same evidence otherwise. If a dimension shows a clear split by time
 (e.g. rejected every agency 6 months ago, but applied to one last week), that's a genuine
-reversal, not conflicting evidence to average away — call it out and prefer the more recent
+reversal, not conflicting evidence to average away, call it out and prefer the more recent
 pattern in the signal you emit, at a lower conf than you'd otherwise use given the small
 recent sample.
 
-If a YOUR PREVIOUS PROFILE section appears below, reconcile with it — it's your own prior
+If a YOUR PREVIOUS PROFILE section appears below, reconcile with it, it's your own prior
 conclusion from the last distillation, not a new candidate to weigh against this one. Keep a
 previous signal (updated n_match/n_total to the current totals) if it's still supported by the
 evidence; only change or drop it when new evidence genuinely contradicts it, and prefer to state
@@ -57,7 +57,7 @@ confidence run-to-run on nothing but chance.
 
 You may also see a DISMISSED SCORE FACTORS section: cases where the candidate looked at a specific
 pro/con from a past AI evaluation and explicitly said it doesn't apply to them, with a reason. This is
-the strongest signal available — direct correction, not inference. Fold each into whichever dimension it
+the strongest signal available, direct correction, not inference. Fold each into whichever dimension it
 belongs to (e.g. dismissing a timezone/right-to-work con → work_culture; dismissing a company-size con →
 company_type) rather than repeating the dismissed text verbatim, and weight it at least conf=HIGH.
 
@@ -66,17 +66,17 @@ Use ONLY these dimension names (sub-values are free-form):
 
 Signal types and required fields:
 - ACCEPT/REJECT: type, dim, value, conf (ABSOLUTE/HIGH/MEDIUM/LOW), n_match/n_total (X matching / total in class)
-- INFER: type, dim, value (inferred value), n_total (evidence count) — for patterns not directly stated by user
-- NEUTRAL: type, dim — dimension with no clear preference pattern
+- INFER: type, dim, value (inferred value), n_total (evidence count), for patterns not directly stated by user
+- NEUTRAL: type, dim, dimension with no clear preference pattern
 
 Rules:
 - One signal per dimension (or per distinct value if same dim splits ACCEPT/REJECT)
 - Infer dealbreakers from consistent rejections + repeated user reasons
 - Emit INFER with numeric values ONLY when the number appears explicitly in the evidence
-- Emit NEUTRAL for every dimension with no clear pattern — do not omit any
+- Emit NEUTRAL for every dimension with no clear pattern, do not omit any
 - LEVEL values: ABSOLUTE(100% consistent), HIGH(>80%), MEDIUM(60-80%), LOW(<60%)
 
-Calibration example (fictional data — do not copy these values):
+Calibration example (fictional data, do not copy these values):
 Input:
   APPLIED (3): all product SaaS companies, B2B contracts
   REJECTED (5): 4 outsourcing agencies ("body shop, bad rates"), 1 large enterprise ("too bureaucratic")
@@ -97,10 +97,9 @@ Submit your analysis using the submit_profile tool.\
 
 
 _DESC_LIMIT = 1500
-# The rejection reason is the candidate's own direct, human-written explanation for
-# a decision — the richest, most unambiguous signal in the whole corpus, yet it was
-# truncated more aggressively than the job description it explains (1500 chars) or
-# any other text fed to the distiller. Raised well past a single sentence's worth.
+# The rejection reason is the candidate's own direct explanation, the richest
+# signal in the whole corpus, so it gets the same generous limit as the
+# description it explains.
 _REASON_LIMIT = 400
 _MAX_APPLIED = 50
 _MAX_REJECTED = 50
@@ -114,7 +113,7 @@ def _job_line(job: dict, include_reason: bool = False) -> str:
     job_parts = [f'"{title}" @ {company}']
     if location:
         job_parts.append(f"[{location}]")
-    # JobAgentWeb's /api/jobs/feedback now includes decided_at (ujs.updated_at) —
+    # JobAgentWeb's /api/jobs/feedback now includes decided_at (ujs.updated_at),
     # date-only slice is plenty of recency signal without a full datetime parse.
     decided_at = (job.get("decided_at") or "")[:10]
     if decided_at:
@@ -137,34 +136,28 @@ def _build_dismissed_section(items: list[dict]) -> str:
         title = it.get("title", "?")
         company = it.get("company", "?")
         lines.append(
-            f'  - {kind} on "{title}" @ {company}: "{it["item_text"]}" '
-            f'— dismissed because: "{it["reason"]}"'
+            f'  - {kind} on "{title}" @ {company}: "{it["item_text"]}", '
+            f'dismissed because: "{it["reason"]}"'
         )
     return "\n\n" + "\n".join(lines)
 
 
 def _build_previous_profile_section(previous_signals: list[dict] | None) -> str:
-    """The distiller re-derived the whole profile from scratch every run, with no
-    view of its own prior conclusions — nothing anchored a dimension's signal
-    run-to-run, so the same underlying evidence could flip a signal's value or conf
-    on pure model variance rather than because anything actually changed. Feeding
-    the previous profile back in gives the model something concrete to reconcile
-    against instead of re-deriving blind."""
+    # Feeds the previous profile back in so the model reconciles against its
+    # own prior conclusions instead of re-deriving blind and drifting on
+    # pure variance run-to-run.
     if not previous_signals:
         return ""
     rendered = render_signals(previous_signals)
     if not rendered.strip():
         return ""
     return (
-        "\n\nYOUR PREVIOUS PROFILE (from the last distillation — reconcile with it, "
+        "\n\nYOUR PREVIOUS PROFILE (from the last distillation, reconcile with it, "
         "don't re-derive from scratch):\n" + rendered
     )
 
 
 def _divergence_line(case: dict) -> str:
-    """JobAgentWeb's /api/eval/report divergence cases carry divergence_type +
-    listwise_rank, not a pre-formatted label — same presentation the calibration
-    section in evaluator/scorer.py builds independently from the same raw fields."""
     if case["divergence_type"] == "false_positive":
         label = f"Ranked #{case['listwise_rank']} but rejected"
     else:
@@ -175,10 +168,9 @@ def _divergence_line(case: dict) -> str:
 def _build_prompt(
     applied: list[dict], rejected: list[dict], applied_total: int, rejected_total: int, questionnaire: str = ""
 ) -> str:
-    """`applied`/`rejected` arrive already capped to at most _MAX_APPLIED/_MAX_REJECTED
-    (most-recent-first) and description-truncated server-side — see
-    job_repository.get_all_feedback(). `applied_total`/`rejected_total` are the true,
-    uncapped counts, only for the "N older omitted" messaging below."""
+    # applied/rejected arrive already capped and truncated server-side, see
+    # job_repository.get_all_feedback(); the _total counts are the true,
+    # uncapped counts, only for the "N older omitted" messaging below.
     sections = []
     if questionnaire:
         sections.append(questionnaire)
@@ -206,18 +198,16 @@ def _build_prompt(
 
 
 def run() -> dict:
-    # applied/rejected are capped samples (most-recent-first, description-truncated
-    # server-side); applied_total/rejected_total are the true counts, needed for
-    # detecting "did anything change since last distillation" — the capped sample's
-    # own length stays pinned at the cap forever once a candidate has more than
-    # _MAX_APPLIED/_MAX_REJECTED decisions, which would silently break that check.
+    # applied_total/rejected_total (not the capped sample's length) drive the
+    # "did anything change since last distillation" check below, since the
+    # sample stays pinned at the cap forever past _MAX_APPLIED/_MAX_REJECTED.
     applied, rejected = job_repository.get_all_feedback(limit_applied=_MAX_APPLIED, limit_rejected=_MAX_REJECTED)
     stats = job_repository.get_stats()
     applied_total = stats["applied"]
     rejected_total = stats["rejected"]
     dismissed_total = dismissed_item_repository.count_all()
     if not applied_total and not rejected_total and not dismissed_total:
-        logger.info("No feedback data yet — apply, reject, or dismiss a score factor first.")
+        logger.info("No feedback data yet, apply, reject, or dismiss a score factor first.")
         return {"ok": False, "reason": "no_data"}
 
     previous_profile = preference_repository.get_latest()
@@ -225,7 +215,7 @@ def run() -> dict:
         if (applied_total == previous_profile["applied_count"] and
                 rejected_total == previous_profile["rejected_count"] and
                 dismissed_total == (previous_profile.get("dismissed_count") or 0)):
-            logger.info("No new feedback since last distillation — profile is up to date.")
+            logger.info("No new feedback since last distillation, profile is up to date.")
             signals = previous_profile.get("signals", [])
             return {
                 "ok": True,
@@ -247,7 +237,7 @@ def run() -> dict:
     divergences = divergence_cases()
     if divergences:
         div_lines = [_divergence_line(d) for d in divergences[:10]]
-        prompt += f"\n\nRANKING DIVERGENCE (high-value signals — model ranking vs user decision):\n" + "\n".join(div_lines)
+        prompt += f"\n\nRANKING DIVERGENCE (high-value signals, model ranking vs user decision):\n" + "\n".join(div_lines)
 
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
     try:
@@ -266,7 +256,7 @@ def run() -> dict:
     log_anthropic(response, "distiller", CLAUDE_DISTILL_MODEL)
 
     if response.stop_reason == "max_tokens":
-        logger.error("Profile output was truncated — not saved.")
+        logger.error("Profile output was truncated, not saved.")
         return {"ok": False, "reason": "truncated"}
 
     tool_block = next((b for b in response.content if b.type == "tool_use"), None)

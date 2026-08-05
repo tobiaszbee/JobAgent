@@ -50,14 +50,14 @@ class TestFormatJobForReview:
 
     def test_includes_rank_from_job_not_position(self):
         # Rank shown must come from the job's own listwise_rank, not wherever it
-        # lands in a (now shuffled) presentation order — see debate_rank.
+        # lands in a (now shuffled) presentation order, see debate_rank.
         text = _format_job_for_review(_job(rank=7))
         assert "Rank #7" in text
 
     def test_includes_sub_scores_from_breakdown(self):
         # Regression: sub_scores (stack_fit/seniority_fit/company_fit/
         # compensation_fit) were computed by the scorer and stored, but never
-        # shown to this reviewer — despite its own brief explicitly asking it to
+        # shown to this reviewer, despite its own brief explicitly asking it to
         # check for exactly a seniority or company-type mismatch.
         import json
         breakdown = json.dumps({"sub_scores": {"seniority_fit": 3, "company_fit": 8}, "pros": [], "cons": []})
@@ -94,7 +94,7 @@ class TestDebateRank:
     @patch("ranker.debate.anthropic.Anthropic")
     def test_presentation_order_is_shuffled(self, mock_anthropic, mock_shuffle):
         # Regression: jobs used to be sent to the reviewer in a fixed best-to-
-        # worst order (matching listwise_rank) — exactly the anchoring risk
+        # worst order (matching listwise_rank), exactly the anchoring risk
         # ranker/listwise.py already shuffles against for the primary ranking.
         jobs = [_job("j1", rank=1), _job("j2", rank=2), _job("j3", rank=3)]
         mock_anthropic.return_value.messages.create.return_value = _debate_response([])
@@ -120,7 +120,7 @@ class TestDebateRank:
     @patch("ranker.debate.anthropic.Anthropic")
     def test_no_flags_does_not_get_the_unavailable_sentinel(self, mock_anthropic):
         # A genuine review that found nothing to flag must stay indistinguishable
-        # from "no opinion" — only an actual failure should ever set
+        # from "no opinion", only an actual failure should ever set
         # DEBATE_UNAVAILABLE_FLAG.
         jobs = [_job("j1", rank=1)]
         mock_anthropic.return_value.messages.create.return_value = _debate_response([])
@@ -131,7 +131,7 @@ class TestDebateRank:
     def test_stale_flag_cleared_when_this_job_is_not_reflagged(self, mock_anthropic):
         # Regression: a job carrying a stale debate_flag/debate_note from a
         # previous run (fetched straight from the DB row) used to keep it forever
-        # once no fresh review mentioned that specific job again — permanently
+        # once no fresh review mentioned that specific job again, permanently
         # blocking would_apply (dealbreaker_risk) or re-applying the same rank
         # nudge (overrated/underrated) with no new evidence.
         jobs = [
@@ -171,7 +171,7 @@ class TestDebateRank:
     def test_overrated_flag_moves_job_down(self, mock_anthropic):
         # Regression: overrated/underrated used to be attached to the job
         # (debate_flag/debate_note, shown in the UI) but never changed its
-        # actual position — only dealbreaker_risk did anything.
+        # actual position, only dealbreaker_risk did anything.
         jobs = [_job("j1", rank=1), _job("j2", rank=2)]
         mock_anthropic.return_value.messages.create.return_value = _debate_response([
             {"job_id": "j1", "flag": "overrated", "note": "Slightly overrated"},
@@ -242,7 +242,7 @@ class TestDebateRank:
 
     @patch("ranker.debate.anthropic.Anthropic")
     def test_api_error_marks_jobs_unavailable_instead_of_looking_like_a_clean_review(self, mock_anthropic):
-        # Regression: this used to return ranked_jobs completely untouched —
+        # Regression: this used to return ranked_jobs completely untouched,
         # identical in the stored data to "the reviewer checked everything and
         # flagged nothing", with no way to tell the two apart later.
         jobs = [_job("j1", rank=1), _job("j2", rank=2)]
@@ -255,7 +255,7 @@ class TestDebateRank:
     @patch("ranker.retry.time.sleep")
     @patch("ranker.debate.anthropic.Anthropic")
     def test_retries_a_transient_error_instead_of_returning_original_ranking(self, mock_anthropic, mock_sleep):
-        # Regression: debate_rank used to have no retry at all — a single
+        # Regression: debate_rank used to have no retry at all, a single
         # transient hiccup fell straight through to "return ranked_jobs
         # unchanged", silently skipping the whole debate review for that run.
         jobs = [_job("j1", rank=1), _job("j2", rank=2)]
@@ -286,7 +286,7 @@ class TestDebateRank:
     @patch("ranker.debate.anthropic.Anthropic")
     def test_truncated_response_marks_jobs_unavailable_not_a_clean_review(self, mock_anthropic):
         # Regression: a truncated reviews array can still parse as valid-but-
-        # partial JSON — without an explicit stop_reason check, a partial
+        # partial JSON, without an explicit stop_reason check, a partial
         # critique could apply flags based on an incomplete review. Separately,
         # this used to return ranked_jobs untouched (no debate_flag at all),
         # indistinguishable from a genuine "nothing to flag" review.
@@ -296,7 +296,7 @@ class TestDebateRank:
         )
         result = debate_rank(jobs, "profile")
         assert [j["id"] for j in result] == ["j1", "j2"]
-        assert result[0]["debate_flag"] == DEBATE_UNAVAILABLE_FLAG  # not "dealbreaker_risk" — that flag must be ignored
+        assert result[0]["debate_flag"] == DEBATE_UNAVAILABLE_FLAG  # not "dealbreaker_risk", that flag must be ignored
 
     @patch("ranker.debate.anthropic.Anthropic")
     def test_questionnaire_included_in_system_prompt_when_given(self, mock_anthropic):
@@ -319,7 +319,7 @@ class TestDebateRank:
     def test_preference_profile_included_in_system_prompt_when_given(self, mock_anthropic):
         # Regression: the reviewer used to critique a ranking that WAS built
         # from the learned preference profile while having no visibility into
-        # that profile itself — auditing with less information than the thing
+        # that profile itself, auditing with less information than the thing
         # it was auditing had.
         jobs = [_job("j1", rank=1)]
         preferences = [{"type": "ACCEPT", "dim": "company_type", "value": "product", "conf": "HIGH", "n_match": 3, "n_total": 3}]

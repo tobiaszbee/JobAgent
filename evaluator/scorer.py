@@ -20,11 +20,9 @@ def _get_client() -> anthropic.Anthropic:
     return _client
 
 
-# Mirrors preference_agent/runner.py's _REASON_LIMIT (raised from a bare 120 to
-# 400 for the same reason): a rejection reason is the candidate's own direct
-# explanation — the richest signal available — and this system prompt is built
-# once per scoring batch and cached, not rebuilt per job, so the extra length
-# is paid once per run, not once per job scored.
+# Mirrors preference_agent/runner.py's _REASON_LIMIT. The system prompt is
+# built once per batch and cached, not rebuilt per job, so the extra length
+# is paid once per run.
 _EXAMPLE_DESC_LIMIT = 400
 _EXAMPLE_REASON_LIMIT = 400
 
@@ -32,7 +30,7 @@ _EXAMPLE_REASON_LIMIT = 400
 def _build_examples_section(positive: list[dict], negative: list[dict]) -> str:
     lines = []
     if positive:
-        lines.append("EXAMPLES OF JOBS I APPLIED TO (high quality — learn what I like):")
+        lines.append("EXAMPLES OF JOBS I APPLIED TO (high quality, learn what I like):")
         for ex in positive:
             desc = build_excerpt(ex.get("description"), ex.get("source"))[:_EXAMPLE_DESC_LIMIT].replace("\n", " ")
             lines.append(f'- "{ex["title"]}" @ {ex["company"]}: {desc}...')
@@ -48,35 +46,27 @@ def _build_examples_section(positive: list[dict], negative: list[dict]) -> str:
     return "\n".join(lines) + "\n" if lines else ""
 
 
-# Just the REJECT/ACCEPT/INFER annotation syntax — only meaningful alongside an
-# actual LEARNED PREFERENCE PROFILE block, since that's the only place those
-# annotations appear. The precedence rule that used to live in here too
-# (_build_precedence_note below) does NOT belong here: MUST HAVE, the candidate
-# questionnaire, and PREFERRED are present in every prompt regardless of
-# whether a learned profile exists, so the model needs that precedence
-# guidance every time — this glossary alone used to gate it behind having a
-# learned profile, silently omitting it for exactly the new-user case where
-# the questionnaire is the only real signal and getting the precedence right
-# matters most.
+# Just the REJECT/ACCEPT/INFER syntax, only meaningful alongside a LEARNED
+# PREFERENCE PROFILE block. The precedence rule lives in _build_precedence_note
+# instead, since MUST HAVE/questionnaire/PREFERRED need it in every prompt,
+# not only when a learned profile exists.
 _ANNOTATION_LEGEND = (
     "Interpretation:\n"
-    "- REJECT[conf=ABSOLUTE/HIGH]: near-dealbreaker — score ≤2 if job matches this pattern\n"
+    "- REJECT[conf=ABSOLUTE/HIGH]: near-dealbreaker, score ≤2 if job matches this pattern\n"
     "- REJECT[conf=MEDIUM]: strong penalty; REJECT[conf=LOW]: minor penalty\n"
-    "- ACCEPT[...]: positive signal — weight by conf the same way\n"
-    "- INFER[...]: soft signal — if the offer lacks the data (e.g. no salary shown), do NOT penalize\n"
+    "- ACCEPT[...]: positive signal, weight by conf the same way\n"
+    "- INFER[...]: soft signal, if the offer lacks the data (e.g. no salary shown), do NOT penalize\n"
     "- n=X/Y = evidence count; higher Y = more reliable signal\n\n"
 )
 
 
 def _build_precedence_note(has_questionnaire: bool, has_learned_profile: bool) -> str:
-    """Only chains in the tiers actually present in this prompt — mentioning a
-    tier that isn't there (e.g. "the questionnaire outranks X" when the
-    candidate never filled one in, so there's no CANDIDATE QUESTIONNAIRE
-    section at all) would be a dangling reference the model can't act on."""
+    # Only chains in the tiers actually present in this prompt, so it never
+    # references a section that was never included.
     if has_questionnaire and has_learned_profile:
         middle = (
             "then the CANDIDATE QUESTIONNAIRE (their own direct, current answers) outranks the "
-            "LEARNED PREFERENCE PROFILE (inferred from past applied/rejected jobs — useful nuance, "
+            "LEARNED PREFERENCE PROFILE (inferred from past applied/rejected jobs, useful nuance, "
             "but a proxy for what they told you directly, not a replacement); that profile in turn "
             "overrides PREFERRED criteria"
         )
@@ -111,23 +101,23 @@ def _build_preferences_section(learned_preferences: list[dict] | str) -> str:
 
 
 def _build_calibration_section(divergence_cases: list[dict]) -> str:
-    """Cases where a past ranking diverged from the candidate's actual decision
-    (evaluation/harness.py::divergence_cases()) — the model's own past mistakes,
-    kept separate from the generic applied/rejected examples above since these are
-    specifically patterns to stop repeating, not just preference signal."""
+    # Cases where a past ranking diverged from the candidate's actual decision
+    # (evaluation/harness.py::divergence_cases()): the model's own past
+    # mistakes, kept separate from the generic examples above since these are
+    # specifically patterns to stop repeating.
     if not divergence_cases:
         return ""
     lines = []
     for case in divergence_cases:
         if case.get("divergence_type") == "false_positive":
             reason = (case.get("rejection_reason") or case.get("score_reason") or "").strip()
-            reason_str = f" — reason: \"{reason}\"" if reason else ""
+            reason_str = f", reason: \"{reason}\"" if reason else ""
             lines.append(f'- Ranked #{case["listwise_rank"]} but candidate rejected: "{case["title"]}"{reason_str}')
         elif case.get("divergence_type") == "false_negative":
-            lines.append(f'- Candidate applied despite rank #{case["listwise_rank"]}: "{case["title"]}" — this fit better than the ranking showed')
+            lines.append(f'- Candidate applied despite rank #{case["listwise_rank"]}: "{case["title"]}", this fit better than the ranking showed')
     if not lines:
         return ""
-    return "CALIBRATION — you got these wrong before, don't repeat the pattern:\n" + "\n".join(lines) + "\n\n"
+    return "CALIBRATION, you got these wrong before, don't repeat the pattern:\n" + "\n".join(lines) + "\n\n"
 
 
 def build_system_prompt(
@@ -151,12 +141,12 @@ def build_system_prompt(
     required_lines = "\n".join(f"- {r}" for r in required) if required else "- (none configured)"
     preferred_lines = "\n".join(f"- {p}" for p in preferred) if preferred else "- (none configured)"
     # Multiple entries are alternatives (candidate needs at least one), matching the
-    # keyword pre-filter's OR semantics (collector/filters.py) — not "needs every one".
+    # keyword pre-filter's OR semantics (collector/filters.py), not "needs every one".
     required_header = (
-        "MUST HAVE — candidate needs AT LEAST ONE of these "
-        "(heavy penalty ONLY if the job matches none — score ≤2):"
+        "MUST HAVE, candidate needs AT LEAST ONE of these "
+        "(heavy penalty ONLY if the job matches none, score ≤2):"
         if len(required) > 1
-        else "MUST HAVE (heavy penalty if absent — score ≤2):"
+        else "MUST HAVE (heavy penalty if absent, score ≤2):"
     )
 
     return f"""You are evaluating job listings for a candidate.
@@ -170,14 +160,14 @@ PREFERRED (increases score):
 {preferred_lines}
 
 Score the job 0-10 based on overall fit with the candidate profile, must-have criteria, and preferences.
-Use the full range — don't default to clustering scores in 6-8:
-- 9-10: Exceptional — matches nearly everything the candidate wants, no real cons.
-- 7-8: Strong — clearly worth applying to; only minor gaps or open questions.
-- 5-6: Mixed — meets the must-haves, but several stated preferences go unmet; a genuine toss-up.
-- 3-4: Weak — barely clears the must-haves, multiple real concerns.
-- 0-2: Poor / near-dealbreaker — fails or barely meets what matters most.
+Use the full range, don't default to clustering scores in 6-8:
+- 9-10: Exceptional, matches nearly everything the candidate wants, no real cons.
+- 7-8: Strong, clearly worth applying to; only minor gaps or open questions.
+- 5-6: Mixed, meets the must-haves, but several stated preferences go unmet; a genuine toss-up.
+- 3-4: Weak, barely clears the must-haves, multiple real concerns.
+- 0-2: Poor / near-dealbreaker, fails or barely meets what matters most.
 
-Missing salary/compensation info is neutral, not a red flag — most postings simply don't disclose it. Never
+Missing salary/compensation info is neutral, not a red flag, most postings simply don't disclose it. Never
 list "no salary shown" or similar as a con, and never let it lower the score. Only treat compensation as a
 signal when a number IS disclosed: a rate/range that meets or exceeds the candidate's expectations is a
 genuine pro; one that falls short is a genuine con.
@@ -205,12 +195,12 @@ _SCORE_TOOL = {
         "properties": {
             "sub_scores": {
                 "type": "object",
-                "description": "Independent 0-10 ratings per dimension — for transparency, not averaged into the overall score.",
+                "description": "Independent 0-10 ratings per dimension, for transparency, not averaged into the overall score.",
                 "properties": {
                     "stack_fit":         {"type": "number", "description": "How well the tech stack matches, 0-10."},
                     "seniority_fit":     {"type": "number", "description": "How well the seniority level matches, 0-10."},
                     "company_fit":       {"type": "number", "description": "Fit with preferred company type/industry, 0-10."},
-                    "compensation_fit":  {"type": "number", "description": "Fit with salary expectations, 0-10. Use 5 (neutral) when no salary is disclosed — absence of data is never a penalty."},
+                    "compensation_fit":  {"type": "number", "description": "Fit with salary expectations, 0-10. Use 5 (neutral) when no salary is disclosed, absence of data is never a penalty."},
                 },
                 "required": ["stack_fit", "seniority_fit", "company_fit", "compensation_fit"],
             },
@@ -223,7 +213,7 @@ _SCORE_TOOL = {
                 "description": "Short phrases: concrete reasons this job doesn't fit, or open concerns. "
                                "Never include missing salary/compensation disclosure as a con.",
             },
-            "overall_score": {"type": "number", "description": "Holistic score from 0 to 10 — your own judgment, not a formula over sub_scores."},
+            "overall_score": {"type": "number", "description": "Holistic score from 0 to 10, your own judgment, not a formula over sub_scores."},
             "score_reason": {"type": "string", "description": "One sentence summarizing the overall_score."},
         },
         "required": ["sub_scores", "pros", "cons", "overall_score", "score_reason"],
@@ -247,12 +237,6 @@ def score_job(job: dict, system_prompt: str) -> ScoreResult:
         try:
             response = client.messages.create(
                 model=CLAUDE_MODEL,
-                # 500 was tight even before the questionnaire section was added to the
-                # system prompt; richer context tends to produce richer (longer)
-                # pros/cons, and a truncated response now silently returns score=None
-                # (evaluator/runner.py retries it forever) instead of the old, worse
-                # behavior of guessing a fake score — so the cost of running a little
-                # short is higher than the cost of a few extra output tokens.
                 max_tokens=700,
                 system=[{
                     "type": "text",
@@ -279,10 +263,9 @@ def score_job(job: dict, system_prompt: str) -> ScoreResult:
 
     if response.stop_reason == "max_tokens":
         # A truncated tool_use block can still parse as valid-but-incomplete
-        # JSON (missing a trailing field like overall_score) — without this
-        # check, result.get("overall_score", 0) below would silently default
-        # to a real-looking 0.0, permanently auto-rejecting the job instead of
-        # leaving it unscored for evaluator/runner.py to retry next run.
+        # JSON, so without this check a missing overall_score would default to
+        # 0.0 and permanently auto-reject the job instead of leaving it
+        # unscored for evaluator/runner.py to retry.
         return {**_ERROR_RESULT, "score_reason": "Response truncated (max_tokens)"}
 
     tool_block = next((b for b in response.content if b.type == "tool_use"), None)

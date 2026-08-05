@@ -137,7 +137,7 @@ class TestScorePoolBySimilarity:
         # (e.g. backend Python roles vs data-engineering roles) used to be averaged
         # into a single centroid sitting in semantic no-man's-land, close to
         # neither. A candidate job identical to ONE of the two applied jobs should
-        # score a perfect 1.0 under max-sim — strictly higher than the ~0.707
+        # score a perfect 1.0 under max-sim, strictly higher than the ~0.707
         # cosine similarity it would have gotten against the old centroid.
         ja1 = _insert_job(status="applied")
         _insert_embedding(ja1, [1.0, 0.0])
@@ -265,7 +265,7 @@ class TestScoreBySimilarity:
 
     def test_computes_cosine_similarity(self):
         # Computed server-side now (JobAgentWeb's /api/embeddings/similarity) rather
-        # than fetched-then-scored locally — no VoyageClient involved at all here.
+        # than fetched-then-scored locally, no VoyageClient involved at all here.
         j1 = _insert_job()
         _insert_embedding(j1, [1.0, 0.0])
 

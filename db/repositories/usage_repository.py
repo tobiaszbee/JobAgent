@@ -29,7 +29,7 @@ def log_usage(
     try:
         api_client.post("/api/usage", json={
             "model": model, "module": module,
-            # Cache tokens folded into input_tokens here — JobAgentWeb's usage_log has
+            # Cache tokens folded into input_tokens here, JobAgentWeb's usage_log has
             # no separate column for them, and this keeps the reported token totals
             # matching real API throughput instead of undercounting cached requests.
             "input_tokens": input_tokens + cache_creation_tokens + cache_read_tokens,
@@ -41,7 +41,7 @@ def log_usage(
 
 def log_anthropic(response, module: str, model: str) -> None:
     """Log usage from an Anthropic messages.create() response, including prompt-cache
-    read/write tokens — response.usage.input_tokens alone excludes those, which used
+    read/write tokens, response.usage.input_tokens alone excludes those, which used
     to silently undercount every cached (evaluator/scorer.py) call."""
     try:
         log_usage(
@@ -72,7 +72,7 @@ def get_summary() -> dict:
 
 def record_run_summary(run_label: str, started_at: str) -> None:
     """Snapshot everything logged to usage_log since `started_at` (a pipeline run's
-    start time) into a durable, per-run record — token/cost breakdown per model, how
+    start time) into a durable, per-run record, token/cost breakdown per model, how
     many jobs got scored, and this run's own cost-per-100. Called once at the end of
     each pipeline run. The aggregation itself now happens server-side (usage_log
     already lives there); this just tells JobAgentWeb which run and window to snapshot."""
@@ -80,7 +80,7 @@ def record_run_summary(run_label: str, started_at: str) -> None:
 
 
 def get_cost_per_100() -> float | None:
-    """Rolling average cost-per-100-jobs-scored across every recorded run — never a
+    """Rolling average cost-per-100-jobs-scored across every recorded run, never a
     function of how many jobs currently exist."""
     return get_summary().get("cost_per_100_usd")
 
@@ -91,5 +91,5 @@ def get_history() -> list[dict]:
 
 
 def now_iso() -> str:
-    """UTC start-time marker for record_run_summary() — compared server-side against usage_log.created_at."""
+    """UTC start-time marker for record_run_summary(), compared server-side against usage_log.created_at."""
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")

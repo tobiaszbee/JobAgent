@@ -16,7 +16,7 @@ def _insert_ranked(title, status, rank, url=None):
 
 class TestEvalReport:
     # precision@K and divergence-case CALCULATION are tested against JobAgentWeb's
-    # own TestPrecisionAtK/TestDivergenceCases (tests/test_evaluation.py) — the
+    # own TestPrecisionAtK/TestDivergenceCases (tests/test_evaluation.py), the
     # canonical implementation now lives there, this just proxies it. These tests
     # only cover that the proxy round-trip and shape are correct.
 
@@ -62,7 +62,7 @@ class TestEvalReport:
 
     def test_score_floor_reflects_local_config_not_jobagentweb_mirror(self, monkeypatch):
         # JobAgentWeb keeps its own copy of this value for its own display
-        # convenience — JobAgent must never trust it over its own config, since
+        # convenience, JobAgent must never trust it over its own config, since
         # JobAgent is the one that actually enforces the floor.
         import evaluation.harness as harness
         monkeypatch.setitem(harness.WOULD_APPLY, "score_floor", 9.5)

@@ -38,7 +38,7 @@ _RANKING_TOOL = {
 
 
 def _posting_age_days(posted_at: str | None) -> int | None:
-    """None (not "unknown"/0) when posted_at is absent — LinkedIn and pre-migration
+    """None (not "unknown"/0) when posted_at is absent, LinkedIn and pre-migration
     postings have no reliable per-posting date, and treating that as "just posted"
     would be worse than not mentioning age at all."""
     if not posted_at:
@@ -67,23 +67,23 @@ def _format_job(job: dict) -> str:
         parts.append(f"Location: {job['location']}")
 
     # Posting age was parsed by every collector source (to apply --days), then
-    # discarded — nothing downstream could tell a 5-week-old posting from one
+    # discarded, nothing downstream could tell a 5-week-old posting from one
     # collected this morning. None (not "unknown") for sources with no reliable
-    # per-posting date (LinkedIn) — never state an age we don't actually have.
+    # per-posting date (LinkedIn), never state an age we don't actually have.
     age_days = _posting_age_days(job.get("posted_at"))
     if age_days is not None:
         parts.append(f"Posted: {age_days} day{'s' if age_days != 1 else ''} ago")
 
-    # The scorer's rating never reached this prompt before — RRF (ranker/fusion.py)
+    # The scorer's rating never reached this prompt before, RRF (ranker/fusion.py)
     # uses it to decide which jobs make the listwise pool at all, but Opus itself had
     # no visibility into the most expensive signal in the pipeline once a job got here.
     if job.get("score") is not None:
-        reason = f" — {job['score_reason']}" if job.get("score_reason") else ""
+        reason = f", {job['score_reason']}" if job.get("score_reason") else ""
         parts.append(f"Scorer's rating: {job['score']}/10{reason}")
 
     # sub_scores (stack_fit/seniority_fit/company_fit/compensation_fit) are
     # computed by evaluator/scorer.py and stored on every scored job, but were
-    # never surfaced to any downstream prompt — the per-dimension breakdown
+    # never surfaced to any downstream prompt, the per-dimension breakdown
     # behind the single overall_score above, silently discarded.
     score_breakdown = job.get("score_breakdown")
     if score_breakdown:
@@ -123,21 +123,15 @@ def _format_job(job: dict) -> str:
     return "\n".join(parts)
 
 
-# Sentinel rank_reason for the 3 fallback paths below (API error, no text
-# block, unparseable JSON) — without this, a fallback batch that just echoes
-# rerank order back with rank_reason="" was indistinguishable anywhere in the
-# stored data from a genuine (if terse) Opus ranking, which corrupts anything
-# that later reads listwise_rank as a real signal (calibration/precision
-# metrics, dashboard display).
-FALLBACK_RANK_REASON = "[unranked — Opus ranking unavailable this run, showing rerank order]"
+# Sentinel rank_reason for the fallback paths below, so a batch that just
+# echoes rerank order back stays distinguishable from a genuine Opus ranking
+# wherever listwise_rank later gets read as a real signal.
+FALLBACK_RANK_REASON = "[unranked, Opus ranking unavailable this run, showing rerank order]"
 
-# Distinct from FALLBACK_RANK_REASON above: this is a partial-response case, not a
-# total failure — Opus responded and ranked most jobs for real, but silently left
-# some out of its <ranking> array. Those get appended at the end by the safety net
-# below; without a distinct marker, rank_reason="" was indistinguishable anywhere
-# in the stored data (calibration/precision metrics, dashboard display) from a
-# real (if unusually terse) Opus ranking.
-OMITTED_RANK_REASON = "[omitted by Opus — not in its ranking response, appended at the end]"
+# Distinct from FALLBACK_RANK_REASON: Opus responded and ranked most jobs for
+# real, but silently left some out of its <ranking> array. Those get appended
+# at the end by the safety net below.
+OMITTED_RANK_REASON = "[omitted by Opus, not in its ranking response, appended at the end]"
 
 
 def _fallback_ranking(jobs: list[dict]) -> list[dict]:
@@ -170,7 +164,7 @@ def listwise_rank(jobs: list[dict], candidate_profile: str, preferences: list[di
 
     # Shuffled presentation order: a listwise ranker shown jobs best-first (the
     # reranker's own order) with sequential "[Job #N]" labels tends to mostly
-    # echo that input order back — position becomes a stronger signal than the
+    # echo that input order back, position becomes a stronger signal than the
     # actual content, paying full Opus cost for little new information. Only
     # the prompt's presentation order changes here; job_by_id/seen-based
     # result assembly below is keyed by job_id, not position, so this has no
@@ -186,16 +180,16 @@ def listwise_rank(jobs: list[dict], candidate_profile: str, preferences: list[di
 
 {questionnaire_text}{prefs_text}Your task: rank ALL {len(jobs)} jobs from best (rank 1) to worst fit. Consider:
 - Overall match with candidate profile and experience
-- Each job's "Scorer's rating" (if shown) is a per-job first pass made WITHOUT seeing the other jobs in this batch — treat it as one data point to weigh against everything else below, not a target ordering to reproduce. Your job is the comparative judgment the scorer couldn't make.
-- The candidate's own stated questionnaire preferences (if given above) — direct and current, outranks the inferred preference profile when they conflict
+- Each job's "Scorer's rating" (if shown) is a per-job first pass made WITHOUT seeing the other jobs in this batch, treat it as one data point to weigh against everything else below, not a target ordering to reproduce. Your job is the comparative judgment the scorer couldn't make.
+- The candidate's own stated questionnaire preferences (if given above), direct and current, outranks the inferred preference profile when they conflict
 - Preference signals (strong signals = heavy weight)
 - Role quality, growth potential, company type
 - Dealbreakers (REJECT[conf=ABSOLUTE/HIGH] signals)
-- Posting age ("Posted: N days ago", if shown) — an older posting is more likely to already be filled or to have gone quiet; let it count moderately against an otherwise-similar fresher posting, not as a hard cutoff
+- Posting age ("Posted: N days ago", if shown), an older posting is more likely to already be filled or to have gone quiet; let it count moderately against an otherwise-similar fresher posting, not as a hard cutoff
 
 Every job must appear exactly once in the ranking.
 
-Do all your reordering and self-correction before you start writing the JSON — once you begin the <ranking> block, each "reason" must already be your settled, final answer for that job. Never write deliberation, corrections, or meta-commentary about the ranking process itself (e.g. "wait, correcting...", "actually X is better", "placing here by ID") into a "reason" value — it is shown directly to the candidate and must read as a clean, final one-sentence explanation of that job's fit.
+Do all your reordering and self-correction before you start writing the JSON, once you begin the <ranking> block, each "reason" must already be your settled, final answer for that job. Never write deliberation, corrections, or meta-commentary about the ranking process itself (e.g. "wait, correcting...", "actually X is better", "placing here by ID") into a "reason" value, it is shown directly to the candidate and must read as a clean, final one-sentence explanation of that job's fit.
 
 After your analysis, output ONLY the final ranking as a JSON array inside <ranking> tags, like this:
 <ranking>
@@ -241,7 +235,7 @@ Include ALL {len(jobs)} jobs. No text after the closing </ranking> tag."""
     result = []
     seen = set()
 
-    # listwise_rank is always len(result) + 1 at append time — a compacted,
+    # listwise_rank is always len(result) + 1 at append time, a compacted,
     # gap-free sequence. Using enumerate(ranking)'s raw index instead used to
     # leave a gap whenever a hallucinated/invalid job_id was skipped, which
     # the safety-net loop below (also numbering from len(result) + 1) could

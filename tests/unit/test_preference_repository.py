@@ -28,4 +28,4 @@ def test_get_latest_returns_most_recent():
 
 
 # Legacy content_format='text' handling in get_latest() is covered in
-# JobAgentWeb's test_preference_profiles.py — unreachable from this client.
+# JobAgentWeb's test_preference_profiles.py, unreachable from this client.

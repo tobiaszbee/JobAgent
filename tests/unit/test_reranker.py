@@ -82,7 +82,7 @@ class TestRerankJobs:
 
     def test_does_not_truncate_a_realistic_hyde_length_query(self):
         # Regression test: evaluator.profile.build_hyde_query's synthetic job posting
-        # (max_tokens=400, "under 200 words") runs up to ~1600 chars worst case — the
+        # (max_tokens=400, "under 200 words") runs up to ~1600 chars worst case, the
         # cap used to be 500, silently cutting HyDE's output right around the company
         # blurb and losing the stack/seniority/preferences that follow.
         hyde_length_query = "x" * 1600
@@ -104,7 +104,7 @@ class TestRerankJobs:
 
     def test_skips_cross_encoder_when_no_query_given(self):
         # A generic placeholder query would produce a rerank_score that looks
-        # considered but isn't — the cross-encoder must not be called at all.
+        # considered but isn't, the cross-encoder must not be called at all.
         jobs = [_job("j1"), _job("j2")]
         with patch("ranker.reranker._get_client") as mock_get:
             mock_client = MagicMock()
@@ -149,7 +149,7 @@ class TestRerankJobs:
 
     def test_no_query_fallback_marks_jobs_rerank_unreliable(self):
         # scripts/rank_jobs.py re-fuses rerank_score as an RRF leg after this
-        # call — it must be able to tell "no real cross-encoder signal" apart
+        # call, it must be able to tell "no real cross-encoder signal" apart
         # from a genuine low score, or a fallback value (== embedding score)
         # would double-count the embedding leg in that fusion.
         jobs = [_job("j1")]

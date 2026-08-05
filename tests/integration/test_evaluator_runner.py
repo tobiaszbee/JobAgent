@@ -6,7 +6,7 @@ from evaluator.runner import run
 
 
 def _unique_url(url: str) -> str:
-    """job_postings is shared/global and never truncated between tests — reusing
+    """job_postings is shared/global and never truncated between tests, reusing
     a literal url across tests would silently reuse another test's stale posting
     fields (title/company) instead of creating a fresh one."""
     return f"{url}?t={uuid.uuid4().hex}"
@@ -67,7 +67,7 @@ class TestEvaluatorRunner:
     def test_explicit_jobs_list_skips_the_fetch_and_is_used_directly(self):
         # Regression: scripts/rescore_new.py already fetches this same list to
         # check emptiness and print a count before calling run(force_rescore=True)
-        # — run() used to redundantly re-fetch the identical (potentially large,
+        #, run() used to redundantly re-fetch the identical (potentially large,
         # full-description) list itself.
         job_id = _insert_scoreable()
         job = next(j for j in job_repository.search(status="all") if j["id"] == job_id)
@@ -155,7 +155,7 @@ class TestEvaluatorRunner:
     def test_previously_scored_job_rejected_when_it_now_violates_a_dealbreaker(self):
         # Regression: the dealbreaker filter used to run only once, at first
         # scoring (get_unscored()'s score IS NULL filter excluded it from ever
-        # being checked again) — a job that was fine when first scored but now
+        # being checked again), a job that was fine when first scored but now
         # violates a tightened/newly-added criterion (or was scored
         # dealbreaker-blind because extraction hadn't succeeded yet) used to sit
         # in the pool forever.

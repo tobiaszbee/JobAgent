@@ -7,7 +7,7 @@ def workplace_suffix(modes: set[str]) -> str:
     Polish job board. Callers translate their own site-specific vocabulary
     (Polish or English, single value or list) into this common set before
     calling. An offer can legitimately advertise more than one mode (e.g.
-    "hybrid or fully remote") — remote wins the label since it's the strictest
+    "hybrid or fully remote"), remote wins the label since it's the strictest
     claim a downstream geo check needs to be able to trust."""
     if "remote" in modes:
         return " (Remote)"

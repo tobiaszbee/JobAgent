@@ -33,7 +33,7 @@ _run_active = False
 # its finally. Lets /api/agent/status report exact progress for a tab that
 # reattaches mid-run (see openRunModal/_attachToActiveRun in dashboard.js)
 # without re-deriving it by scanning the log tail, which /api/agent/logs
-# truncates to the last 200 lines — too short to still contain early stage
+# truncates to the last 200 lines, too short to still contain early stage
 # headers on a run whose current stage has printed thousands of lines since.
 _stage_progress: dict | None = None
 
@@ -44,7 +44,7 @@ def init_sock(app):
 
 _DEFAULT_DAYS_NO_PRIOR_RUN = 7
 
-# Sentinel substituted with the real session id once _run_pipeline_ws has one —
+# Sentinel substituted with the real session id once _run_pipeline_ws has one,
 # build_stages() runs before the session exists (see its call site below), but
 # the COLLECTOR stage needs to reuse the same session id rather than starting
 # its own, or JobAgentWeb's concurrent-session guard rejects the second start().
@@ -52,14 +52,10 @@ _SESSION_ID_PLACEHOLDER = "__SESSION_ID__"
 
 
 def _days_since_last_run() -> int:
-    """Collector sources filter by whole days, not exact timestamps — so "since last
-    run" is approximated as the number of days back that comfortably covers the time
-    since the last successful *collection*, rounded up. Slight overlap is harmless
-    (the collector already dedupes by URL); under-covering would silently miss
-    postings. Deliberately reads last-collected, not last-finished — every pipeline
-    session finishes 'done' regardless of run type (ranking, rescoring, etc never
-    collect), so last-finished would silently narrow this window on any day where
-    something other than an actual collection ran first."""
+    # Rounded up since collector sources filter by whole days; slight overlap
+    # is harmless (the collector dedupes by URL), under-covering would miss
+    # postings. Reads last-collected, not last-finished, since a non-collector
+    # run (ranking, rescoring) would otherwise narrow this window.
     last_collected = session_repository.get_last_collected_at()
     if not last_collected:
         return _DEFAULT_DAYS_NO_PRIOR_RUN
@@ -81,10 +77,10 @@ def _is_run_active() -> bool:
 
 
 class _RunGuard:
-    """Holds _run_active for the guard's entire lifetime (not just until the first
-    subprocess spawns), closing the race where two near-simultaneous websocket
-    connections could both pass the active-run check. Usage: `with _RunGuard() as
-    acquired: if not acquired: ...bail out...`."""
+    """Holds _run_active for the guard's entire lifetime, closing the race
+    where two near-simultaneous websocket connections could both pass the
+    active-run check. Usage: `with _RunGuard() as acquired: if not acquired:
+    ...bail out...`."""
 
     def __enter__(self) -> bool:
         global _run_active
@@ -100,13 +96,10 @@ class _RunGuard:
 
 
 def _start_session_or_none(ws) -> int | None:
-    """session_repository.start() now fails server-side (409) if this account
-    already has a running session — the real guard against two concurrent runs,
-    since _RunGuard is only an in-process flag and does nothing for a run
-    launched directly from a terminal (e.g. `python collector/runner.py`)
-    racing a dashboard-started one, which is exactly what happened in
-    production. Sends a friendly message and returns None instead of letting
-    the ApiError propagate uncaught out of the websocket handler."""
+    # session_repository.start() fails server-side (409) if this account
+    # already has a running session, the real guard against two concurrent
+    # runs, since _RunGuard is only an in-process flag. Sends a friendly
+    # message instead of letting the ApiError propagate uncaught.
     try:
         return session_repository.start()
     except api_client.ApiError as e:
@@ -116,16 +109,10 @@ def _start_session_or_none(ws) -> int | None:
 
 @bp.get("/api/agent/status")
 def agent_status():
-    """started_at lets the frontend show an elapsed-time counter after
-    reopening the run modal mid-run (see openRunModal in dashboard.js) — the
-    browser has no other way to know when an already-in-progress run began,
-    since a page reload or modal close/reopen loses any client-side timer.
-
-    last_status is read unconditionally (not just while running) so a client
-    that missed the live __DONE__ message — a poller that reattached mid-run
-    (see _attachToActiveRun in dashboard.js), or a fresh page load right after
-    a run finished — can still learn whether the last run actually succeeded,
-    instead of only ever seeing a bare 'running: false' with no outcome."""
+    # started_at lets the frontend show an elapsed-time counter after
+    # reopening the run modal mid-run, since a page reload loses any
+    # client-side timer. last_status is read unconditionally so a client that
+    # missed the live __DONE__ message can still learn the last run's outcome.
     running = _is_run_active()
     latest = session_repository.get_latest()
     started_at = latest.get("started_at") if (running and latest) else None
@@ -135,15 +122,11 @@ def agent_status():
 
 @bp.get("/api/agent/query-suggestions")
 def agent_query_suggestions():
-    """Checked at the start of Run Agent, before the pipeline starts — see
-    collector.query_pruning.suggest_queries_for_review for what qualifies."""
     return {"suggestions": suggest_queries_for_review()}
 
 
 @bp.post("/api/agent/query-suggestions/apply")
 def agent_query_suggestions_apply():
-    """Excludes exactly the queries the user checked, no more — 'none' is a valid,
-    explicit choice, so this is never called implicitly on the pipeline's behalf."""
     queries = (request.get_json(force=True) or {}).get("queries", [])
     source = QUERY_PRUNING["source"]
     for query in queries:
@@ -257,7 +240,7 @@ def _latest_log() -> str | None:
     return files[-1] if files else None
 
 
-# Stages run after a successful collection. EXTRACTOR must precede EVALUATOR —
+# Stages run after a successful collection. EXTRACTOR must precede EVALUATOR,
 # dealbreakers.py reads structured_data, and a job never re-enters the unscored
 # pool once scored, so extracting later would miss it permanently.
 def _post_collect_stages() -> list[tuple[str, str, list[str], bool]]:
@@ -271,27 +254,18 @@ def _post_collect_stages() -> list[tuple[str, str, list[str], bool]]:
 
 
 def _run_pipeline_ws(ws, run_label: str, build_stages) -> None:
-    """Shared body for every pipeline websocket handler: acquire _RunGuard, start
-    a session spanning every stage (has_active_run() must stay true for the whole
-    run, not just its first stage — see _start_session_or_none), run each
-    (header, script_path, args, stop_if_fails) stage in order, and always finish
-    the session, record usage, and send __DONE__, even on error.
-
-    build_stages is a callable (not a plain list) so a handler needing to read
-    ws.receive() first (only _agent_run does, for its "days" param) does so
-    inside the guard, exactly where the original per-handler code did — not
-    before it, which would let that read happen even when a run is already
-    active. Return None from build_stages to abort after already sending your
-    own error message (e.g. invalid params).
-
-    A stage with stop_if_fails=False that exits non-zero used to be silently
-    swallowed — the loop just moved on, and a failed EXTRACTOR/EVALUATOR/AI
-    RANKING rendered in the UI identically to a clean run (progress bar at
-    100%, "Stage 6/6", no error anywhere). Every non-zero exit is now logged
-    inline regardless of stop_if_fails, and the run's final status reflects it
-    (done / done_with_errors / error) via both the session record (so
-    /api/agent/status's last_status survives past this websocket) and a
-    __DONE__:<status> suffix (so a live listener doesn't need a second call)."""
+    # Shared body for every pipeline websocket handler: acquire _RunGuard,
+    # start a session spanning every stage, run each stage in order, and
+    # always finish the session, record usage, and send __DONE__, even on
+    # error. build_stages is a callable, not a plain list, so a handler
+    # needing ws.receive() first (only _agent_run does) reads it inside the
+    # guard; return None from it to abort after sending your own error.
+    #
+    # A stage with stop_if_fails=False that exits non-zero used to be silently
+    # swallowed, rendering identically to a clean run in the UI. Every
+    # non-zero exit is now logged inline, and the run's final status
+    # (done / done_with_errors / error) reaches both the session record and
+    # the __DONE__:<status> suffix.
     global _agent_process, _stage_progress
 
     with _RunGuard() as acquired:
@@ -337,7 +311,7 @@ def _run_pipeline_ws(ws, run_label: str, build_stages) -> None:
 
                 if failed_stages:
                     status = "done_with_errors"
-                # Deliberately NOT "=== ... ===" — that's the exact pattern
+                # Deliberately NOT "=== ... ===", that's the exact pattern
                 # dashboard.js's stageMatch regex uses to detect a new stage
                 # header, so this line would otherwise get miscounted as a 7th
                 # stage and push the progress bar/label past 100%.
@@ -365,7 +339,7 @@ def agent_ws(ws):
 
 def _agent_run(ws):
     """The actual handler body, factored out of agent_ws so it's callable
-    directly in tests — flask_sock's @sock.route decorator discards the
+    directly in tests, flask_sock's @sock.route decorator discards the
     original function and replaces it with a wrapper that requires a real
     request context, so agent_ws itself can't be invoked outside a live
     WebSocket connection."""
@@ -382,7 +356,7 @@ def _agent_run(ws):
             try:
                 days = int(params.get("days", 1))
             except (ValueError, TypeError):
-                ws.send("ERROR: Invalid parameter 'days' — must be an integer.\n")
+                ws.send("ERROR: Invalid parameter 'days', must be an integer.\n")
                 return None
 
         collector_args = ["--days", str(days), "--session-id", _SESSION_ID_PLACEHOLDER]

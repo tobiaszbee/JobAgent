@@ -21,7 +21,7 @@ def _reset_run_active():
 class TestPostCollectStages:
     def test_extractor_runs_before_evaluator_and_ranking(self):
         # evaluator/dealbreakers.py's pre-LLM filter reads structured_data, and jobs
-        # never re-enter the "unscored" pool once evaluated — so extraction must
+        # never re-enter the "unscored" pool once evaluated, so extraction must
         # happen before evaluation, or the dealbreaker filter never has data to act on.
         labels = [label for label, _, _, _ in _post_collect_stages()]
         assert labels.index("EXTRACTOR") < labels.index("EVALUATOR") < labels.index("AI RANKING")
@@ -83,7 +83,7 @@ class TestRunGuard:
 
     def test_second_acquire_fails_while_first_is_held(self):
         # Regression guard: the old code only held the lock around the initial check,
-        # then released it before the slow parts (ws.receive(), subprocess spawn) —
+        # then released it before the slow parts (ws.receive(), subprocess spawn),
         # so a second near-simultaneous connection could pass the check too.
         with _RunGuard():
             with _RunGuard() as second:
@@ -109,7 +109,7 @@ class TestRunGuard:
 
 class TestSessionSpansWholeHandler:
     """Regression: session_repository.start()/finish() used to live only inside
-    collector/runner.py, scoped to collection alone — so has_active_run() went
+    collector/runner.py, scoped to collection alone, so has_active_run() went
     false the moment collection finished, even though distill/extract/evaluate/
     rank were still running, letting a separately launched process race with
     the dashboard's own run undetected (this happened in production once)."""
@@ -146,7 +146,7 @@ class TestSessionSpansWholeHandler:
         # Regression guard: the outer handler already holds an active session for
         # the whole run before the collector subprocess is spawned. If the
         # collector subprocess called session_repository.start() itself (as it
-        # used to), JobAgentWeb's concurrent-session guard rejects it — the
+        # used to), JobAgentWeb's concurrent-session guard rejects it, the
         # collector stage would fail every single "Run Agent" click. Confirms
         # the placeholder in the collector's args is replaced with the real id,
         # not left as the literal placeholder string.
@@ -169,7 +169,7 @@ class TestSessionSpansWholeHandler:
 
     def test_agent_ws_skips_post_collect_stages_when_collector_fails(self):
         # Regression guard for _run_pipeline_ws's stop_if_fails: nothing new was
-        # collected, so distill/extract/evaluate/prune/rank have nothing to do —
+        # collected, so distill/extract/evaluate/prune/rank have nothing to do,
         # running them anyway would just waste an API-cost cycle on stale data.
         mock_ws = MagicMock()
         mock_ws.receive.return_value = json.dumps({"days": 1})
@@ -183,7 +183,7 @@ class TestSessionSpansWholeHandler:
             runner_module._agent_run(mock_ws)
 
         assert len(calls) == 1  # only the collector ran, every post-collect stage skipped
-        # A handled failure, not an exception (session_repository.finish still runs) — but
+        # A handled failure, not an exception (session_repository.finish still runs), but
         # not a clean "done" either, unlike before this was tracked: a run that skipped
         # every post-collect stage used to report the same "done" as a fully clean run.
         assert session_repository.get_latest()["status"] == "done_with_errors"
@@ -223,7 +223,7 @@ def _sent_text(mock_ws) -> str:
 
 class TestFailureReporting:
     """Regression coverage for the silent-failure bug: a stage with
-    stop_if_fails=False that exited non-zero used to be completely swallowed —
+    stop_if_fails=False that exited non-zero used to be completely swallowed,
     the loop just moved on, session status stayed 'done', and __DONE__ carried
     no outcome at all. A failed EXTRACTOR/EVALUATOR/AI RANKING rendered in the
     UI identically to a fully clean run."""
@@ -236,7 +236,7 @@ class TestFailureReporting:
         def _fake_run_script(ws, script_path, args=None, log_file=None):
             calls.append(script_path)
             # Stage order is COLLECTOR, DISTILL PREFERENCES, EXTRACTOR, EVALUATOR,
-            # PRUNE QUERIES, AI RANKING (see _post_collect_stages) — 3rd call is EXTRACTOR.
+            # PRUNE QUERIES, AI RANKING (see _post_collect_stages), 3rd call is EXTRACTOR.
             return 1 if len(calls) == 3 else 0
 
         with patch("web.routes.runner._run_script", side_effect=_fake_run_script):
@@ -318,7 +318,7 @@ class TestFailureReporting:
 
     def test_fatal_stage_failure_also_reported_in_summary(self):
         # A stop_if_fails=True stage (COLLECTOR) failing used to just report
-        # status="done" once every downstream stage was skipped — the same as
+        # status="done" once every downstream stage was skipped, the same as
         # a fully clean run, with nothing distinguishing "collected 0 new jobs
         # on purpose" from "the collector crashed and nothing ran after it".
         mock_ws = MagicMock()
@@ -344,7 +344,7 @@ class TestAgentStatus:
         # whatever session the shared test DB's get_latest() happens to return
         # (job_postings/sessions are shared/global and never truncated between
         # tests, same as everywhere else in this suite), so its value here
-        # depends on test execution order — see TestLastStatus below for the
+        # depends on test execution order, see TestLastStatus below for the
         # behavior that actually matters.
         status = runner_module.agent_status()
         assert status["running"] is False
@@ -366,7 +366,7 @@ class TestAgentStatus:
         assert len(seen) == 6  # collector + 5 post-collect stages
         assert all(s["running"] is True for s in seen)
         assert all(s["started_at"] is not None for s in seen)
-        # Same started_at across every stage — the whole run is one session, not
+        # Same started_at across every stage, the whole run is one session, not
         # a fresh one restarting the clock per stage.
         assert len({s["started_at"] for s in seen}) == 1
 
@@ -400,8 +400,8 @@ class TestAgentStatus:
 
 class TestLastStatus:
     """last_status is read unconditionally (not just while running), so a client
-    that missed the live __DONE__ message — a poller that reattached mid-run, or a
-    fresh page load right after a run finished — can still learn the outcome of
+    that missed the live __DONE__ message, a poller that reattached mid-run, or a
+    fresh page load right after a run finished, can still learn the outcome of
     the last run instead of only ever seeing a bare 'running: false'."""
 
     def test_reflects_a_clean_run(self):

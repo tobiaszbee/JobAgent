@@ -174,7 +174,7 @@ class TestSavePreferences:
     def test_extra_tech_syncs_into_preferred_criteria(self, mock_anthropic, flask_client):
         # Regression: the scorer prompt's PREFERRED section was only ever populated
         # by the separate CV-derived apply-criteria flow, which nothing in this UI
-        # calls — extra_tech was collected (05 · Technologies) but never reached it.
+        # calls, extra_tech was collected (05 · Technologies) but never reached it.
         mock_anthropic.return_value.messages.create.return_value = _mock_claude_response("[]")
         flask_client.post("/api/candidate-preferences", json={"extra_tech": ["Rust", "Kubernetes"]})
         preferred = criteria_repository.get_active("preferred")

@@ -1,14 +1,14 @@
-"""justjoin.it source — Poland-focused IT job board, public and unauthenticated.
+"""justjoin.it source, Poland-focused IT job board, public and unauthenticated.
 
 Search results are fetched with a plain HTTP GET: the listing data (title, company,
 salary, skills, workplace type) is embedded as structured JSON inside the server-rendered
 page (verified live against the real site), so no browser is needed for search(). Full
 descriptions aren't in that listing payload, so each new job's detail page is rendered
-with Playwright to read the description text — the description is itself streamed inside
+with Playwright to read the description text, the description is itself streamed inside
 Next.js's internal RSC wire format, and reverse-engineering that byte-for-byte proved too
 fragile (unstable across page loads) to rely on for real content.
 
-This is a Poland-only board — search() only fires anything when `location` resolves to
+This is a Poland-only board, search() only fires anything when `location` resolves to
 Poland, to avoid firing the same query once per configured country for no reason.
 """
 import json
@@ -37,10 +37,10 @@ def _parse_rsc_offers(html: str) -> list[dict]:
     """Extract the job-listing array embedded in the page's Next.js RSC payload.
 
     Each `self.__next_f.push([<id>, "<json>"])` script tag is a self-contained JSON
-    array — the second element is itself a JSON-escaped string of the form
+    array, the second element is itself a JSON-escaped string of the form
     `<hex_id>:<json>` (a React Server Components "row"). We only need the one row that
     carries the dehydrated react-query state with the OFFERS listing, so we scan each
-    push call independently for that content and parse just that one — no need to
+    push call independently for that content and parse just that one, no need to
     reassemble a general cross-chunk stream (other row kinds, e.g. text/hint rows, use
     a different micro-syntax we don't need to understand for this).
     """
@@ -88,7 +88,7 @@ def _parse_rsc_offers(html: str) -> list[dict]:
     return []
 
 
-# extractor/runner.py's schema — same keys/enums, so this can be overlaid
+# extractor/runner.py's schema, same keys/enums, so this can be overlaid
 # directly onto Haiku's output with no translation step.
 _SALARY_UNIT_TO_PERIOD = {"month": "monthly", "hour": "hourly", "year": "yearly"}
 _KNOWN_SALARY_CURRENCIES = {"PLN", "EUR", "USD", "GBP"}
@@ -97,7 +97,7 @@ _KNOWN_SENIORITY_LEVELS = {"junior", "mid", "senior", "lead", "director"}
 
 def _extract_source_structured_data(offer: dict) -> dict:
     """Fields justjoin.it's own API already discloses structurally (verified
-    live against the real site) — salary and skills are collected here as
+    live against the real site), salary and skills are collected here as
     UI-driven fields, not prose, so there's no reason to make Haiku re-guess
     them from the description later. Conservative like every dealbreaker
     check: skip a field entirely rather than write a value outside the
@@ -111,7 +111,7 @@ def _extract_source_structured_data(offer: dict) -> dict:
 
     employment_types = offer.get("employmentTypes") or []
     # Multiple entries exist per posting: one "original" (what the company
-    # actually typed in) plus several currency-converted duplicates — only the
+    # actually typed in) plus several currency-converted duplicates, only the
     # original is a real disclosed figure, not justjoin's own FX estimate.
     contract = next((e for e in employment_types if e.get("currencySource") == "original"), None)
     if contract is None and employment_types:
@@ -187,7 +187,7 @@ class JustJoinSource(JobSource):
         except Exception:
             pass
 
-        # Some postings don't use the rich-text-editor markup above (verified live —
+        # Some postings don't use the rich-text-editor markup above (verified live,
         # a real posting rendered its description as plain text under a "Job description"
         # heading instead). The sibling element's CSS class is MUI's auto-generated
         # hash (not stable across deploys), but the heading-text + next-sibling

@@ -1,7 +1,7 @@
 from flask import Blueprint, jsonify, request
 from db.repositories import job_repository, dismissed_item_repository
 
-# Bulk delete, score-item dismissal, and internal counts — split from jobs.bp for organization.
+# Bulk delete, score-item dismissal, and internal counts, split from jobs.bp for organization.
 bp = Blueprint("jobs_admin", __name__)
 
 

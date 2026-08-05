@@ -2,10 +2,10 @@ from flask import Blueprint, jsonify, request
 from db.repositories import job_repository, cv_repository, dismissed_item_repository
 
 # Browsing + status changes only. Bulk delete, score-item dismissal, and internal
-# counts live in jobs_admin.bp instead — see that module.
+# counts live in jobs_admin.bp instead, see that module.
 bp = Blueprint("jobs", __name__)
 
-# Safety net, not a normal-use limit — a status/search/source-filtered view under
+# Safety net, not a normal-use limit, a status/search/source-filtered view under
 # regular triage is dozens to a few hundred jobs. This only engages during a real
 # pileup (e.g. the pool grows unattended for months), and the dashboard shows a
 # visible banner rather than silently dropping jobs off the end.

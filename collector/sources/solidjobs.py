@@ -1,8 +1,8 @@
-"""solid.jobs source — Poland-focused IT job board built around transparent salary
+"""solid.jobs source, Poland-focused IT job board built around transparent salary
 ranges, public and unauthenticated.
 
 The site is an Angular SPA and calls a clean REST API for both listing and detail data,
-but a bare request to either endpoint 404s ("API endpoint nie istnieje") — the API
+but a bare request to either endpoint 404s ("API endpoint nie istnieje"), the API
 content-negotiates on a vendor-specific `Accept` header that a plain browser UA alone
 doesn't imply. Adding the right `Accept` value (found by inspecting the real request the
 SPA makes) is enough; no Playwright is needed for either search() or fetch_description(),
@@ -13,10 +13,10 @@ verified live:
 - detail:   GET /api/offers/{id}/{jobOfferUrl}
             Accept: application/vnd.solidjobs.jobofferdetails+json, application/json, text/plain, */*
 
-The listing endpoint doesn't support server-side keyword search (confirmed — no query
+The listing endpoint doesn't support server-side keyword search (confirmed, no query
 param changes the result set) or a `division=it` recency filter, so the *entire* IT
 division (1500+ offers) is fetched once per collection run and cached, then filtered
-client-side per title/remote-mode/date — same shape as remotive.py's per-source cache,
+client-side per title/remote-mode/date, same shape as remotive.py's per-source cache,
 just keyed by nothing (there's only one list to fetch) rather than by search term.
 """
 import logging
@@ -41,7 +41,7 @@ _HEADERS = {
 }
 _POLAND_ALIASES = {"poland", "polska", "pl"}
 # solid.jobs is routed for hybrid/onsite Polish-city candidates too (see
-# collector/runner.py's _POLAND_ONLY_SOURCES routing) — a remote-only filter
+# collector/runner.py's _POLAND_ONLY_SOURCES routing), a remote-only filter
 # here silently returned nothing relevant for them (verified live: "Hybrydowo"
 # and "Możliwa częściowo" alone account for more offers than the old
 # remote-only allowlist). Every remotePossible value observed live is mapped

@@ -1,4 +1,4 @@
-"""Unit tests for the solid.jobs scraper — no real HTTP calls made."""
+"""Unit tests for the solid.jobs scraper, no real HTTP calls made."""
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
@@ -68,7 +68,7 @@ class TestSolidJobsSearch:
 
     def test_hybrid_included_and_labeled_hybrid(self):
         # Regression: solid.jobs is routed for hybrid/onsite Polish-city
-        # candidates too (collector/runner.py's _POLAND_ONLY_SOURCES) — these
+        # candidates too (collector/runner.py's _POLAND_ONLY_SOURCES), these
         # used to be silently dropped entirely by a remote-only allowlist.
         src = _make_source()
         src._client.get.return_value = MagicMock(status_code=200, json=lambda: [_offer(city="Krakow", remote="Hybrydowo")])
@@ -170,7 +170,7 @@ class TestSolidJobsSearch:
         assert results == []
 
     def test_posted_at_captures_valid_from(self):
-        # validFrom was already parsed for the days_back cutoff, then discarded —
+        # validFrom was already parsed for the days_back cutoff, then discarded,
         # RawJob.posted_at carries it through instead.
         src = _make_source()
         src._client.get.return_value = MagicMock(status_code=200, json=lambda: [_offer(days_ago=3)])

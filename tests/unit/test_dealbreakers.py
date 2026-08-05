@@ -82,7 +82,7 @@ class TestSalaryFloor:
     def test_hourly_b2b_rate_not_mistaken_for_a_starvation_salary(self, mock_prefs, mock_update):
         # Regression test for the real bug: "100-145 PLN/h" B2B rate must never be
         # compared directly against an annual floor as if it were annual pay.
-        # 145 PLN/h * 168h/month * 12 = 292,320 PLN/year — well above 150000/year.
+        # 145 PLN/h * 168h/month * 12 = 292,320 PLN/year, well above 150000/year.
         mock_prefs.return_value = _prefs(salary_min=150000, salary_currency="PLN")
         job = _job(structured={"salary_max": 145, "salary_currency": "PLN", "salary_period": "hourly"})
         surviving, stats = apply_dealbreaker_filter([job])
@@ -92,7 +92,7 @@ class TestSalaryFloor:
     @patch("evaluator.dealbreakers.job_repository.update_score_and_status")
     @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
     def test_low_hourly_rate_still_rejected_after_normalization(self, mock_prefs, mock_update):
-        # 20 PLN/h * 2016h/year = 40,320 PLN/year — below a 150000/year floor.
+        # 20 PLN/h * 2016h/year = 40,320 PLN/year, below a 150000/year floor.
         mock_prefs.return_value = _prefs(salary_min=150000, salary_currency="PLN")
         job = _job(structured={"salary_max": 20, "salary_currency": "PLN", "salary_period": "hourly"})
         surviving, stats = apply_dealbreaker_filter([job])
@@ -102,7 +102,7 @@ class TestSalaryFloor:
     @patch("evaluator.dealbreakers.job_repository.update_score_and_status")
     @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
     def test_skips_when_pay_period_unknown(self, mock_prefs, mock_update):
-        # Old/un-migrated structured_data without salary_period — never guess a
+        # Old/un-migrated structured_data without salary_period, never guess a
         # basis, skip rather than risk a false rejection.
         mock_prefs.return_value = _prefs(salary_min=150000, salary_currency="PLN")
         job = _job(structured={"salary_max": 100, "salary_currency": "PLN"})
@@ -133,7 +133,7 @@ class TestSalaryFloor:
     def test_currency_mismatch_now_converted_and_compared(self, mock_prefs, mock_update):
         # Regression: a currency mismatch used to skip the check entirely
         # rather than convert. 3000 EUR/month * 12 * 4.3 ~= 154,800 PLN/year,
-        # comfortably above a 15,000 PLN/year floor — passes, but now because
+        # comfortably above a 15,000 PLN/year floor, passes, but now because
         # it was genuinely compared, not because the check was bypassed.
         mock_prefs.return_value = _prefs(salary_min=15000, salary_currency="PLN")
         job = _job(structured={"salary_max": 3000, "salary_currency": "EUR", "salary_period": "monthly"})
@@ -147,7 +147,7 @@ class TestSalaryFloor:
         # Regression for the audit's exact finding: before this fix, this job
         # would have silently skipped the floor check entirely (currency
         # mismatch) instead of being conservatively converted and compared.
-        # 500 EUR/month * 12 * 4.3 ~= 25,800 PLN/year — below a 150,000 floor.
+        # 500 EUR/month * 12 * 4.3 ~= 25,800 PLN/year, below a 150,000 floor.
         mock_prefs.return_value = _prefs(salary_min=150000, salary_currency="PLN")
         job = _job(structured={"salary_max": 500, "salary_currency": "EUR", "salary_period": "monthly"})
         surviving, stats = apply_dealbreaker_filter([job])
@@ -158,7 +158,7 @@ class TestSalaryFloor:
     @patch("evaluator.dealbreakers.job_repository.update_score_and_status")
     @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
     def test_candidate_salary_in_foreign_currency_also_converted(self, mock_prefs, mock_update):
-        # Candidate's own floor is in EUR, job pay is in PLN — both sides must
+        # Candidate's own floor is in EUR, job pay is in PLN, both sides must
         # convert, not just the job side.
         mock_prefs.return_value = _prefs(salary_min=30000, salary_currency="EUR")  # ~129,000 PLN/year
         job = _job(structured={"salary_max": 100000, "salary_currency": "PLN", "salary_period": "yearly"})
@@ -218,7 +218,7 @@ class TestRemoteOnlyMismatch:
     @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
     def test_rejects_job_offering_both_remote_and_hybrid(self, mock_prefs, mock_update):
         # hybrid=True disqualifies a remote-only candidate even when remote=True is
-        # also set — confirmed with the candidate: hybrid means occasional required
+        # also set, confirmed with the candidate: hybrid means occasional required
         # office days regardless of what else the posting advertises.
         mock_prefs.return_value = _prefs(work_mode=["remote"])
         job = _job(structured={"remote": True, "hybrid": True})
@@ -229,7 +229,7 @@ class TestRemoteOnlyMismatch:
     @patch("evaluator.dealbreakers.job_repository.update_score_and_status")
     @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
     def test_rejects_hybrid_only_job_when_remote_unknown(self, mock_prefs, mock_update):
-        # remote wasn't extracted (None), but hybrid=True is confirmed — still a
+        # remote wasn't extracted (None), but hybrid=True is confirmed, still a
         # violation, since we only know about the hybrid requirement, not full remote.
         mock_prefs.return_value = _prefs(work_mode=["remote"])
         job = _job(structured={"remote": None, "hybrid": True})
@@ -249,7 +249,7 @@ class TestRemoteOnlyMismatch:
     @patch("evaluator.dealbreakers.job_repository.update_score_and_status")
     @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
     def test_hybrid_candidate_never_filtered_by_work_mode_rule(self, mock_prefs, mock_update):
-        # work_mode includes hybrid, not remote-only — rule only applies to exactly ["remote"].
+        # work_mode includes hybrid, not remote-only, rule only applies to exactly ["remote"].
         mock_prefs.return_value = _prefs(work_mode=["remote", "hybrid"])
         job = _job(structured={"remote": False, "hybrid": False})
         surviving, stats = apply_dealbreaker_filter([job])
@@ -260,7 +260,7 @@ class TestRemoteOnlyMismatch:
 class TestGeoRestriction:
     # Etap 2-4 geo hole: a job can be genuinely remote (passes the remote-only
     # check above) but restricted to countries that don't include the
-    # candidate's — e.g. "Remote — US only" reaching a candidate in Poland.
+    # candidate's, e.g. "Remote, US only" reaching a candidate in Poland.
 
     @patch("evaluator.dealbreakers.job_repository.update_score_and_status")
     @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
@@ -314,7 +314,7 @@ class TestGeoRestriction:
     @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
     def test_missing_remote_regions_key_never_rejects(self, mock_prefs, mock_update):
         # Every job extracted before this field existed has no "remote_regions"
-        # key at all — the entire existing pool must be unaffected by enabling
+        # key at all, the entire existing pool must be unaffected by enabling
         # this check.
         mock_prefs.return_value = _prefs(work_mode=["remote"], remote_countries=["Poland"])
         job = _job(structured={"remote": True})  # pre-migration shape, key absent
@@ -334,7 +334,7 @@ class TestGeoRestriction:
     @patch("evaluator.dealbreakers.job_repository.update_score_and_status")
     @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
     def test_non_remote_job_never_checked_for_geo(self, mock_prefs, mock_update):
-        # remote is False — a hybrid/onsite posting, a different dealbreaker's
+        # remote is False, a hybrid/onsite posting, a different dealbreaker's
         # concern, not the geo-remote one. Uses work_mode=["remote","hybrid"] so
         # _remote_only_reason's own (unrelated, exact-match-["remote"]) rule
         # doesn't also fire and mask what this test is isolating.
@@ -356,7 +356,7 @@ class TestGeoRestriction:
     @patch("evaluator.dealbreakers.job_repository.update_score_and_status")
     @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
     def test_geo_check_applies_even_when_candidate_also_open_to_hybrid(self, mock_prefs, mock_update):
-        # Broadened trigger: "remote" in work_mode, not work_mode == ["remote"] —
+        # Broadened trigger: "remote" in work_mode, not work_mode == ["remote"],
         # a candidate open to both hybrid and remote still cares whether a
         # specific remote posting's geo restriction excludes them.
         mock_prefs.return_value = _prefs(work_mode=["remote", "hybrid"], remote_countries=["Poland"])
@@ -451,7 +451,7 @@ class TestNoSalaryDisclosed:
     @patch("evaluator.dealbreakers.job_repository.update_score_and_status")
     @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
     def test_unset_key_defaults_to_showing_undisclosed_salary_jobs(self, mock_prefs, mock_update):
-        # Preferences saved before this field existed — must not suddenly
+        # Preferences saved before this field existed, must not suddenly
         # start hiding jobs for an existing candidate.
         mock_prefs.return_value = _prefs(show_jobs_without_salary=None)
         job = _job(structured={})
@@ -471,7 +471,7 @@ class TestNoSalaryDisclosed:
 
 class TestCompanyTypeFilter:
     # Regression: questionnaire.html promises "Selecting anything here filters
-    # out every other type" for the company-type chips — previously saved and
+    # out every other type" for the company-type chips, previously saved and
     # never read anywhere.
 
     @patch("evaluator.dealbreakers.job_repository.update_score_and_status")
@@ -551,7 +551,7 @@ class TestCompanyTypeFilter:
     @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
     def test_product_preference_unknown_outsourcing_axis_skipped(self, mock_prefs, mock_update):
         # company_type known as "startup" (not directly relevant to the "product"
-        # axis) but product_vs_outsourcing is unstated — can't confirm a mismatch.
+        # axis) but product_vs_outsourcing is unstated, can't confirm a mismatch.
         mock_prefs.return_value = _prefs(preferred_company_types=["product"])
         job = _job(structured={"company_type": "startup"})
         surviving, stats = apply_dealbreaker_filter([job])
@@ -580,7 +580,7 @@ class TestCompanyTypeFilter:
     @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
     def test_product_preference_mixed_outsourcing_treated_as_inconclusive(self, mock_prefs, mock_update):
         # Regression: "mixed" is a genuine partial match, not evidence of a
-        # mismatch — it used to resolve to a confirmed False (reject) the same
+        # mismatch, it used to resolve to a confirmed False (reject) the same
         # way a hard "outsourcing" value does, which is wrong.
         mock_prefs.return_value = _prefs(preferred_company_types=["product"])
         job = _job(structured={"product_vs_outsourcing": "mixed"})
@@ -639,7 +639,7 @@ class TestWorkingLanguageMismatch:
     @patch("evaluator.dealbreakers.candidate_preferences_repository.get_active")
     def test_below_working_level_does_not_count_as_covering_the_language(self, mock_prefs, mock_update):
         # B2 is the minimum "usable for work" threshold, same as
-        # collector/language_filter.py — A1 Polish shouldn't count, even though
+        # collector/language_filter.py, A1 Polish shouldn't count, even though
         # English (present, at working level) doesn't help for a Polish-only job.
         mock_prefs.return_value = _prefs(languages=[
             {"language": "english", "level": "c1"}, {"language": "polish", "level": "a1"},

@@ -44,7 +44,7 @@ def _embed_with_retry(client: VoyageClient, texts: list[str], max_retries: int =
                 time.sleep(wait)
             else:
                 raise
-    return client.embed(texts)  # final attempt — let it raise
+    return client.embed(texts)  # final attempt, let it raise
 
 
 def index_jobs(jobs: list[dict]) -> int:
@@ -79,10 +79,9 @@ def index_jobs(jobs: list[dict]) -> int:
 
 
 def _max_scores(job_ids: list[str], vectors: list[list[float]]) -> dict[str, float]:
-    """For each job_id, the max cosine similarity across all given vectors — one
-    /api/embeddings/similarity call per vector (each returns only {job_id: float}
-    for the whole pool, never raw vectors, so this stays cheap per call; it's just
-    more of them than the old single-centroid approach needed)."""
+    # Max cosine similarity per job_id across all given vectors. One
+    # /api/embeddings/similarity call per vector; each returns only
+    # {job_id: float}, never raw vectors, so this stays cheap per call.
     best: dict[str, float] = {}
     for vec in vectors:
         for job_id, score in score_by_similarity(job_ids, vec).items():
@@ -92,29 +91,20 @@ def _max_scores(job_ids: list[str], vectors: list[list[float]]) -> dict[str, flo
 
 
 def score_pool_by_similarity(job_ids: list[str], candidate_profile: str | None = None) -> tuple[dict[str, float], str | None]:
-    """Score every job in job_ids for semantic fit to the candidate.
-    Returns ({job_id: score}, basis) — basis is None when there's nothing to score
-    against at all (no applied history and no candidate_profile/HyDE text), matching
-    the old build_ideal_vector()'s "return None" case.
-
-    With applied-job history: max-sim kNN — score(job) = max cosine-sim to ANY
-    individual applied vector, minus 0.3x max cosine-sim to any rejected vector.
-    Replaces the old single-centroid approach (average all applied vectors into one
-    point, average all rejected into another, then combine): a centroid over
-    multi-modal applied history — e.g. some backend Python roles, some data-
-    engineering roles — can land in semantic no-man's-land close to neither
-    cluster, silently starving one whole side of the candidate's actual interests
-    even though every individual applied job is a real, valid example of "similar
-    to something I applied to". max-sim instead credits a job for being close to
-    ANY one applied example, which is what that phrase should actually mean.
-
-    Without applied history: falls back to embedding candidate_profile (built by
-    evaluator/profile.py::build_hyde_query, a synthetic ideal-job-posting query) as
-    a single query vector — max-sim needs multiple individual examples to be
-    meaningful, and with zero applied jobs there's nothing to run kNN against. This
-    is the same fallback build_ideal_vector() used to provide; without it a new
-    candidate's semantic retrieval step is skipped entirely and the top-N pool
-    reaching the paid rerank/listwise stages ends up ordered by scrape recency."""
+    # Returns ({job_id: score}, basis); basis is None when there's nothing to
+    # score against (no applied history and no candidate_profile/HyDE text).
+    #
+    # With applied history: max-sim kNN, score(job) = max cosine-sim to ANY
+    # individual applied vector, minus 0.3x max cosine-sim to any rejected
+    # vector. A centroid over multi-modal applied history (e.g. some backend
+    # roles, some data-engineering roles) can land in semantic no-man's-land
+    # close to neither cluster, starving one side of the candidate's real
+    # interests even though every individual applied job is a valid example.
+    #
+    # Without applied history: falls back to embedding candidate_profile (a
+    # synthetic ideal-job-posting query from build_hyde_query) as a single
+    # query vector, since max-sim needs multiple examples and there's nothing
+    # to run kNN against with zero applied jobs.
     if not job_ids:
         return {}, None
 
@@ -145,7 +135,7 @@ def score_by_similarity(job_ids: list[str], ideal: list[float]) -> dict[str, flo
     Computed server-side (JobAgentWeb has the vectors already) instead of
     fetching every raw vector over HTTP just to reduce each one to a single
     float locally: a 1024-dim vector is ~22 KB of JSON, so the old approach
-    shipped tens of MB for a pool of a couple thousand jobs — and retried the
+    shipped tens of MB for a pool of a couple thousand jobs, and retried the
     whole transfer on any timeout, since api_client treats those as retryable."""
     if not job_ids or not ideal:
         return {}

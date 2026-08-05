@@ -1,4 +1,4 @@
-"""Working Nomads source — public JSON API, no auth required."""
+"""Working Nomads source, public JSON API, no auth required."""
 from datetime import datetime, timedelta, timezone
 
 import httpx

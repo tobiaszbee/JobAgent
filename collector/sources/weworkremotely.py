@@ -1,4 +1,4 @@
-"""We Work Remotely source — public RSS feed, no auth required."""
+"""We Work Remotely source, public RSS feed, no auth required."""
 import xml.etree.ElementTree as ET
 from email.utils import parsedate_to_datetime
 from datetime import datetime, timedelta, timezone
@@ -71,7 +71,7 @@ def _region_matches(wwr_region: str, search_location: str) -> bool:
     if "canada" in region and "only" in region:
         return loc == "canada"
 
-    # Specific country named in region — check if search location matches
+    # Specific country named in region, check if search location matches
     if loc in region:
         return True
     # Reverse alias check

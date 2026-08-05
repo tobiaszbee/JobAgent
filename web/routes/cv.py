@@ -64,7 +64,7 @@ def upload_cv():
     except Exception as e:
         return jsonify({"error": f"Failed to read PDF: {e}"}), 400
     if not raw_text.strip():
-        return jsonify({"error": "Could not extract text from PDF (may be a scanned image — use a text-based PDF)"}), 400
+        return jsonify({"error": "Could not extract text from PDF (may be a scanned image, use a text-based PDF)"}), 400
     try:
         parsed = _parse_with_claude(raw_text)
     except Exception as e:
@@ -85,11 +85,11 @@ def activate_profile(id):
 _SUGGEST_PROMPT = """Based on this candidate profile, suggest LinkedIn job search criteria.
 Respond ONLY with JSON, no other text:
 {{
-    "search_queries": ["1-3 broad search terms used as LinkedIn search queries — wide enough to catch relevant jobs, narrow enough to avoid noise"],
-    "titles": ["5-8 specific job titles used for scoring fit — what the candidate actually wants"],
+    "search_queries": ["1-3 broad search terms used as LinkedIn search queries, wide enough to catch relevant jobs, narrow enough to avoid noise"],
+    "titles": ["5-8 specific job titles used for scoring fit, what the candidate actually wants"],
     "locations": ["2-4 locations or regions to search in"],
-    "required": ["3-6 must-have keywords — core technologies the candidate knows well and won't compromise on"],
-    "preferred": ["4-8 nice-to-have keywords — technologies, methodologies, or traits the candidate likes but aren't dealbreakers"]
+    "required": ["3-6 must-have keywords, core technologies the candidate knows well and won't compromise on"],
+    "preferred": ["4-8 nice-to-have keywords, technologies, methodologies, or traits the candidate likes but aren't dealbreakers"]
 }}
 
 Rules:

@@ -1,4 +1,4 @@
-"""Remotive.io source — free public JSON API, no auth required."""
+"""Remotive.io source, free public JSON API, no auth required."""
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -48,7 +48,7 @@ class RemotiveSource(JobSource):
         if resp.status_code != 200:
             return []
         jobs = resp.json().get("jobs", [])
-        # Remotive searches full descriptions — keep only jobs where the keyword
+        # Remotive searches full descriptions, keep only jobs where the keyword
         # appears in the title or tags, not just buried in the description.
         if title:
             keyword = title.lower()

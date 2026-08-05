@@ -29,7 +29,7 @@ _DISTILL_TOOL = {
                         },
                         "n_match": {
                             "type": "integer",
-                            "description": "X in n=X/Y — jobs matching this signal.",
+                            "description": "X in n=X/Y, jobs matching this signal.",
                         },
                         "n_total": {
                             "type": "integer",

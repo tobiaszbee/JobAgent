@@ -13,7 +13,7 @@ def test_main_records_a_run_summary_on_success(
     mock_record, mock_run_script, mock_run_extraction, mock_evaluate, mock_get_new, mock_collect,
 ):
     # Regression: run_all.py never went through web/routes/runner.py's
-    # started_at -> record_run_summary envelope — every run's cost (collector,
+    # started_at -> record_run_summary envelope, every run's cost (collector,
     # distill, extractor, evaluator, prune, ranking) was silently missing from
     # cost_summaries entirely.
     mock_collect.return_value = {"jobs_found": 0, "jobs_new": 0}
@@ -31,7 +31,7 @@ def test_main_records_a_run_summary_on_success(
 @patch("scripts.run_all.usage_repository.record_run_summary")
 def test_main_records_a_run_summary_even_when_collector_fails(mock_record, mock_collect):
     # A run that fails partway through (the collector, here) can still have
-    # billed real API calls up to that point — the cost snapshot must not be
+    # billed real API calls up to that point, the cost snapshot must not be
     # skipped just because the run overall failed.
     mock_collect.side_effect = Exception("network error")
 

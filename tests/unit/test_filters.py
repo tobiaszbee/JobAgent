@@ -123,7 +123,7 @@ class TestRunE2Filter:
     def test_uses_the_given_jobs_list_instead_of_fetching_its_own(self):
         # Regression guard: collector/runner.py shares one get_new() fetch between
         # the language and keyword filters instead of each independently pulling
-        # the full 'new' pool — confirms an explicit list is actually honored.
+        # the full 'new' pool, confirms an explicit list is actually honored.
         criteria_repository.insert("rejected", "junior")
         job_id = _insert_job(title="Senior PHP Developer", description="Backend role")
         explicit_jobs = [{"id": job_id, "title": "Junior PHP Developer", "company": "Acme", "description": "Backend role"}]
@@ -156,7 +156,7 @@ class TestContainsKeywordSymbolBoundaries:
     # Regression for the audit's "\b never matches symbol-suffixed keywords"
     # finding: plain \b{kw}\b requires a \w/non-\w transition on *both* sides,
     # but "c++" followed by a space has a non-word char on both sides of that
-    # trailing boundary, so \b never fires there — silently making c++/c#/.net
+    # trailing boundary, so \b never fires there, silently making c++/c#/.net
     # inert in both the required and rejected keyword lists.
     def test_plain_word_still_matches_as_whole_word(self):
         assert _contains_keyword("senior php developer", "php") is True

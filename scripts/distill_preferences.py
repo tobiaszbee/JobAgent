@@ -14,13 +14,13 @@ result = run()
 if result.get("ok"):
     reason = result.get("reason", "")
     if reason == "no_new_data":
-        print("Preferences up to date — no new feedback since last distillation.")
+        print("Preferences up to date, no new feedback since last distillation.")
     else:
         n = len(result.get("signals", []))
         print(f"Distillation complete. {n} preference signal(s) saved.")
 else:
     reason = result.get("reason", "unknown")
     if reason == "no_data":
-        print("No feedback yet — skipping distillation.")
+        print("No feedback yet, skipping distillation.")
     else:
         print(f"Distillation skipped: {reason}")

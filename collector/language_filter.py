@@ -11,11 +11,9 @@ logger = logging.getLogger(__name__)
 # (and this filter's rejections) non-reproducible run to run.
 DetectorFactory.seed = 0
 
-# Every language langdetect's classifier can actually recognize (see its `profiles/`
-# directory) — the candidate can type any language name in the questionnaire (free
-# text with suggestions, not a fixed dropdown), so this covers the full set the
-# detector supports, not just a handful. A name not in this table simply can't be
-# matched against a detection result and is ignored (see _candidate_language_codes).
+# Every language langdetect's classifier can recognize (see its `profiles/`
+# directory), since the questionnaire lets the candidate type any language
+# name. A name not in this table can't be matched and is ignored.
 _LANGUAGE_CODES = {
     "afrikaans": "af", "arabic": "ar", "bulgarian": "bg", "bengali": "bn", "catalan": "ca",
     "czech": "cs", "welsh": "cy", "danish": "da", "german": "de", "greek": "el",
@@ -32,15 +30,12 @@ _LANGUAGE_CODES = {
     "chinese (traditional)": "zh-tw", "cantonese": "zh-tw",
 }
 
-_MIN_TEXT_LEN = 20  # shorter text is unreliable for language detection — skip, don't reject
+_MIN_TEXT_LEN = 20  # shorter text is unreliable for language detection, skip, don't reject
 
-# CEFR proficiency ordering, low to high — questionnaire.js's LEVEL_OPTIONS.
+# CEFR proficiency ordering, low to high, questionnaire.js's LEVEL_OPTIONS.
 _CEFR_RANK = {"a1": 0, "a2": 1, "b1": 2, "b2": 3, "c1": 4, "c2": 5, "native": 6}
-# B2 ("professional working proficiency") is the conventional minimum for being
-# able to actually work in a language, not just read a posting written in it —
-# selecting German at A1 shouldn't count as "I can work in German" and let
-# German-language postings through, which is exactly what happened before this
-# threshold existed (the level was collected but never read anywhere).
+# B2 is the conventional minimum for actually working in a language, not just
+# reading a posting written in it.
 _MIN_WORKING_LEVEL = _CEFR_RANK["b2"]
 
 
@@ -51,9 +46,8 @@ def _candidate_language_codes() -> set[str]:
     codes = set()
     for entry in prefs.get("languages") or []:
         level_rank = _CEFR_RANK.get((entry.get("level") or "").strip().lower())
-        # Unrecognized/missing level (e.g. saved before this field existed) is
-        # never treated as a violation — only an explicit sub-B2 level excludes
-        # a language from counting as "usable for work".
+        # Unrecognized/missing level is never treated as a violation, only an
+        # explicit sub-B2 level excludes a language.
         if level_rank is not None and level_rank < _MIN_WORKING_LEVEL:
             continue
         code = _LANGUAGE_CODES.get((entry.get("language") or "").strip().lower())
@@ -63,9 +57,8 @@ def _candidate_language_codes() -> set[str]:
 
 
 def _detected_codes(text: str) -> set[str]:
-    """All plausible languages for this text (not just the top guess) — a posting
-    that mixes two languages (e.g. a German company writing tech requirements in
-    English) should match if the candidate speaks either one."""
+    # All plausible languages, not just the top guess, so a posting mixing
+    # two languages matches if the candidate speaks either one.
     try:
         return {lang.lang for lang in detect_langs(text)}
     except LangDetectException:
@@ -73,16 +66,11 @@ def _detected_codes(text: str) -> set[str]:
 
 
 def apply_language_filter(jobs: list[dict] | None = None) -> dict:
-    """Hard-reject jobs written in a language the candidate didn't select in the
-    questionnaire. Deterministic, no LLM call — runs as early as possible, right
-    after collection, before any paid filter/scoring step. Skips gracefully (never
-    rejects) when the candidate hasn't configured any languages, the text is too
-    short, or detection is inconclusive — absence of a clear signal is never
-    treated as a violation.
-
-    `jobs` lets a caller that's also running apply_keyword_filter() share one
-    get_new() fetch instead of each independently pulling the full 'new' pool
-    (with descriptions) over HTTP. Defaults to fetching its own when omitted."""
+    # Hard-rejects jobs written in a language the candidate didn't select.
+    # Deterministic, no LLM call, runs before any paid filter/scoring step.
+    # Skips gracefully rather than rejecting when signal is missing or
+    # inconclusive. `jobs` lets a caller also running apply_keyword_filter()
+    # share one get_new() fetch instead of each pulling its own.
     candidate_codes = _candidate_language_codes()
     if not candidate_codes:
         return {"checked": 0, "auto_rejected": 0, "rejected_ids": []}
@@ -108,6 +96,6 @@ def apply_language_filter(jobs: list[dict] | None = None) -> dict:
         job_repository.update_score_and_status(job["id"], 0.0, reason, "auto_rejected")
         auto_rejected += 1
         rejected_ids.append(job["id"])
-        logger.info(f"  [language] {job['title']} @ {job['company']} — {reason}")
+        logger.info(f"  [language] {job['title']} @ {job['company']}, {reason}")
 
     return {"checked": len(jobs), "auto_rejected": auto_rejected, "rejected_ids": rejected_ids}

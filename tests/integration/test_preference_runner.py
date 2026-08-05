@@ -7,7 +7,7 @@ from preference_agent.runner import run
 
 
 def _unique_url(url: str) -> str:
-    """job_postings is shared/global and never truncated between tests — reusing
+    """job_postings is shared/global and never truncated between tests, reusing
     a literal url would reuse another test's stale posting fields instead of
     creating a fresh one for this test."""
     return f"{url}?t={uuid.uuid4().hex}"
@@ -156,8 +156,8 @@ class TestPreferenceRunner:
         _insert_rejected()
         mixed_signals = [
             {"type": "ACCEPT", "dim": "company_type", "value": "product_saas", "conf": "HIGH", "n_match": 1, "n_total": 1},
-            {"type": "PREFER", "dim": "broken"},  # invalid type — should be dropped
-            {"type": "REJECT", "dim": "compensation"},  # valid — should be kept
+            {"type": "PREFER", "dim": "broken"},  # invalid type, should be dropped
+            {"type": "REJECT", "dim": "compensation"},  # valid, should be kept
         ]
         with _patched_api(_mock_response(signals=mixed_signals)):
             result = run()
@@ -188,7 +188,7 @@ class TestPreferenceRunner:
 
     def test_prompt_includes_previous_profile_on_redistillation(self):
         # Regression: the distiller re-derived the profile from scratch every run
-        # with no view of its own prior conclusions — the same evidence could flip
+        # with no view of its own prior conclusions, the same evidence could flip
         # a signal's value/conf on pure model variance instead of a real change.
         _insert_applied()
         _insert_rejected()
@@ -224,7 +224,7 @@ class TestPreferenceRunner:
         assert "REJECTED" in prompt_content
 
     def test_dismissed_only_triggers_run(self):
-        # No applied/rejected feedback at all — a lone dismissed score factor must
+        # No applied/rejected feedback at all, a lone dismissed score factor must
         # still be enough to run distillation, not just apply/reject decisions.
         jid = job_repository.insert(
             title="Dev", company="Corp", location="Remote", source="linkedin",

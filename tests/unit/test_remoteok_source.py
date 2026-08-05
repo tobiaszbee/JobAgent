@@ -1,4 +1,4 @@
-"""Unit tests for Remote OK source — no HTTP calls made."""
+"""Unit tests for Remote OK source, no HTTP calls made."""
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
@@ -195,7 +195,7 @@ class TestRemoteOKSourceSearch:
         assert results[0].company == "GlobalTech"
 
     def test_posted_at_captures_the_publication_date(self):
-        # "date" was already parsed for the days_back cutoff, then discarded —
+        # "date" was already parsed for the days_back cutoff, then discarded,
         # RawJob.posted_at carries it through instead.
         src = _build_source([_make_job(days_ago=5)])
         results = src.search("PHP", "Remote")

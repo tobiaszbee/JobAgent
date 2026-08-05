@@ -26,7 +26,7 @@ def get_preferences():
 
 @bp.post("/api/preferences/distill")
 def distill():
-    # A manual distill runs an Opus call outside any tracked pipeline run — same
+    # A manual distill runs an Opus call outside any tracked pipeline run, same
     # started_at -> record_run_summary envelope web/routes/runner.py's
     # _run_pipeline_ws uses, so this cost stops silently missing from
     # cost_summaries. Recorded even on failure (the try/finally): a failed

@@ -48,7 +48,7 @@ class TestBuildExcerpt:
         assert len(result) == 5000
 
     def test_junk_stripped_before_cap_applied(self):
-        # Real content is short, but total (incl. junk) exceeds the cap — the cap
+        # Real content is short, but total (incl. junk) exceeds the cap, the cap
         # must apply to the cleaned text, not silently include junk up to 6000 chars.
         desc = "Real content." + "\n\nSet alert for similar jobs\n\n" + ("y" * 10000)
         result = build_excerpt(desc, "linkedin")
@@ -56,7 +56,7 @@ class TestBuildExcerpt:
 
     def test_linkedin_caps_at_8000_not_6000(self):
         # Regression: a sample of 100 recent LinkedIn postings found 20% still over
-        # 6000 chars even after junk-stripping — real content (once, an entire
+        # 6000 chars even after junk-stripping, real content (once, an entire
         # "Benefits found in job post" section) silently cut, not junk. LinkedIn's
         # own fetch_description() never returns more than 8000 chars to begin with
         # (collector/sources/linkedin.py), so capping here at 8000 instead just stops
@@ -74,7 +74,7 @@ class TestBuildExcerpt:
 class TestExcerptLooksIncomplete:
     def test_empty_excerpt_is_not_incomplete(self):
         # A missing description is a different, already-handled case (build_excerpt
-        # already returns "" for it) — not this function's concern.
+        # already returns "" for it), not this function's concern.
         assert excerpt_looks_incomplete("") is False
 
     def test_short_excerpt_is_incomplete(self):

@@ -85,7 +85,7 @@ class TestDetectionBehavior:
     @patch("collector.language_filter.candidate_preferences_repository.get_active")
     @patch("collector.language_filter.detect_langs")
     def test_mixed_language_posting_passes_if_either_matches(self, mock_detect, mock_prefs, mock_jr):
-        # A posting detect_langs finds plausible in both German and English —
+        # A posting detect_langs finds plausible in both German and English,
         # candidate only speaks English, should still pass (overlap exists).
         mock_prefs.return_value = _prefs([{"language": "english", "level": "C1"}])
         mock_jr.get_new.return_value = [_job()]
@@ -140,7 +140,7 @@ class TestDetectionBehavior:
 class TestCEFRThreshold:
     # Regression for the audit's exact finding: the level was collected but
     # never read anywhere, so selecting a language at A1 counted identically
-    # to selecting it at C2 — a German posting sailed through for a candidate
+    # to selecting it at C2, a German posting sailed through for a candidate
     # who listed German only at A1 (barely beginner).
 
     @patch("collector.language_filter.job_repository")
@@ -200,7 +200,7 @@ class TestCEFRThreshold:
     @patch("collector.language_filter.candidate_preferences_repository.get_active")
     @patch("collector.language_filter.detect_langs")
     def test_missing_level_key_counts_as_usable_for_backward_compat(self, mock_detect, mock_prefs, mock_jr):
-        # Preferences saved before the level field existed — never treat a
+        # Preferences saved before the level field existed, never treat a
         # missing/unrecognized signal as a violation.
         mock_prefs.return_value = _prefs([{"language": "german"}])
         mock_jr.get_new.return_value = [_job()]
@@ -226,7 +226,7 @@ class TestCEFRThreshold:
     @patch("collector.language_filter.job_repository")
     @patch("collector.language_filter.candidate_preferences_repository.get_active")
     def test_only_sub_b2_languages_configured_skips_everything(self, mock_prefs, mock_jr):
-        # No language clears the working-proficiency bar — same as having
+        # No language clears the working-proficiency bar, same as having
         # configured no languages at all, skip rather than reject everything.
         mock_prefs.return_value = _prefs([{"language": "german", "level": "A1"}])
         result = apply_language_filter()
@@ -235,7 +235,7 @@ class TestCEFRThreshold:
 
 
 class TestRealDetection:
-    """A handful of cases against the real langdetect library, not mocked —
+    """A handful of cases against the real langdetect library, not mocked,
     guards against the library's API or default behavior changing under us."""
 
     @patch("collector.language_filter.job_repository")

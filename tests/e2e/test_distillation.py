@@ -165,7 +165,7 @@ class TestDistillation:
         )
 
     def test_captures_agency_rejection_signal(self):
-        """5/5 rejected jobs are agencies — profile must contain a REJECT for agency/staffing."""
+        """5/5 rejected jobs are agencies, profile must contain a REJECT for agency/staffing."""
         result = run_distillation()
         assert result["ok"]
         rejects = [s for s in result["signals"] if s.get("type") == "REJECT"]

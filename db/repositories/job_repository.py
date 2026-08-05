@@ -1,5 +1,5 @@
 """Every function here calls JobAgentWeb's /api/jobs/* over HTTP (api_client.py)
-instead of touching a local database — JobAgentWeb is the sole data store now,
+instead of touching a local database, JobAgentWeb is the sole data store now,
 shared across every user's collector/evaluator/ranker."""
 import api_client
 
@@ -27,7 +27,7 @@ def insert(
 
 def get_all_urls() -> set[str]:
     """Return all known job URLs (system-wide, not just this user's) as a set
-    for fast early-stop deduplication — see JobAgentWeb's jobs_repo.get_all_urls."""
+    for fast early-stop deduplication, see JobAgentWeb's jobs_repo.get_all_urls."""
     return set(api_client.get("/api/jobs/urls").json()["urls"])
 
 
@@ -67,7 +67,7 @@ def get_unscored() -> list[dict]:
 
 
 def get_new_with_descriptions() -> list[dict]:
-    """All 'new' jobs that have descriptions — used for force-rescore."""
+    """All 'new' jobs that have descriptions, used for force-rescore."""
     return api_client.get("/api/jobs/new-with-descriptions").json()
 
 
@@ -133,7 +133,7 @@ def count_by_filter(statuses: list[str], date_from: str | None = None, date_to: 
 
 
 def delete_by_filter(statuses: list[str], date_from: str | None = None, date_to: str | None = None) -> int:
-    """'Delete' removes these jobs from *your* view only — see JobAgentWeb's
+    """'Delete' removes these jobs from *your* view only, see JobAgentWeb's
     jobs_repo.delete_by_filter for why the shared posting itself is untouched."""
     if not statuses:
         return 0
@@ -173,7 +173,7 @@ def update_ranking_scores_batch(items: list[dict]) -> int:
 
 
 def get_jobs_for_ranking(limit: int = 2000) -> list[dict]:
-    """All 'new' jobs with descriptions — the whole active pool is re-ranked together every
+    """All 'new' jobs with descriptions, the whole active pool is re-ranked together every
     run (not just newly-arrived jobs) so listwise_rank stays comparable across the full list."""
     return api_client.get("/api/jobs/for-ranking", params={"limit": limit}).json()
 
@@ -192,7 +192,7 @@ def count_decisions() -> int:
 
 
 def get_query_outcome_stats(source: str) -> list[dict]:
-    """Per search_query outcome totals for one source — feeds scripts/prune_search_queries.py."""
+    """Per search_query outcome totals for one source, feeds scripts/prune_search_queries.py."""
     return api_client.get("/api/jobs/query-outcome-stats", params={"source": source}).json()
 
 

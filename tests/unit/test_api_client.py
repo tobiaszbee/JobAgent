@@ -12,11 +12,11 @@ def _clean_client_state(tmp_path, monkeypatch):
     real JobAgentWeb user and saves a real session cookie for every test in the
     whole suite (this project's own "hit a real backend, not mocks"
     convention). These tests exercise api_client's request-construction logic
-    itself — the header/branching/error-message decisions — in isolation from
+    itself, the header/branching/error-message decisions, in isolation from
     that, so they start from a deliberately clean slate: no session file, no
     API key, regardless of what already ran. Applied after that fixture (both
     are function-scoped; this one is requested last, in the test module
-    itself, so it runs later in setup) — never touches the real
+    itself, so it runs later in setup), never touches the real
     ~/.jobagent/session.json for this machine's actual installation."""
     monkeypatch.setattr(api_client, "_SESSION_FILE", tmp_path / "isolated_session.json")
     monkeypatch.setattr(api_client, "JOBAGENT_API_KEY", None)
@@ -50,7 +50,7 @@ class TestRequestWithApiKey:
         assert mock_request.call_args.kwargs["headers"]["X-JobAgent-Api-Key"] == "my-secret-key"
 
     def test_no_session_file_required(self, monkeypatch):
-        # Regression: this is the entire point of the API key — no session
+        # Regression: this is the entire point of the API key, no session
         # file needs to exist at all, unlike the cookie-based flow.
         monkeypatch.setattr(api_client, "JOBAGENT_API_KEY", "my-secret-key")
         with patch.object(api_client._client, "request", return_value=_mock_response()):
@@ -105,7 +105,7 @@ class TestApiKeyFallbackToCookie:
 
     def test_no_cookie_to_fall_back_to_raises_immediately(self, monkeypatch):
         # No session file at all (the _clean_client_state fixture's default
-        # state) — same behavior as before this fix, single attempt.
+        # state), same behavior as before this fix, single attempt.
         monkeypatch.setattr(api_client, "JOBAGENT_API_KEY", "my-secret-key")
         with patch.object(api_client._client, "request", return_value=_mock_response(status_code=401)) as mock_request:
             with pytest.raises(api_client.NotLoggedInError, match="JOBAGENT_API_KEY"):

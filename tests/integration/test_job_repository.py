@@ -6,7 +6,7 @@ from db.repositories import job_repository
 
 def _unique_url(url: str) -> str:
     """job_postings is shared/global across every user and never truncated
-    between tests in a session — reusing a literal url across two tests would
+    between tests in a session, reusing a literal url across two tests would
     make the second insert() silently return None (an apparent duplicate from
     another test), not the fresh job the test expects. Every call gets its own
     url so tests never collide with each other or with leftover data."""
@@ -38,7 +38,7 @@ class TestInsert:
         ) is None
 
     def test_different_title_and_company_different_url_both_succeed(self):
-        """The old title+company dedup heuristic is gone in the shared pool —
+        """The old title+company dedup heuristic is gone in the shared pool,
         only url identifies a posting now (see JobAgentWeb's jobs_repo.insert)."""
         id1 = _insert(url="https://a.com/1")
         id2 = _insert(url="https://a.com/2")
@@ -125,7 +125,7 @@ class TestGetUnscored:
 
     def test_excludes_job_with_empty_description(self):
         # update_description() is write-once now (JobAgentWeb no longer lets a
-        # second write clear/overwrite an already-populated description — see
+        # second write clear/overwrite an already-populated description, see
         # jobs_repo.update_description), so this constructs the empty-description
         # state directly at insert time instead of via a follow-up update.
         job_id = _insert(description="")
@@ -337,7 +337,7 @@ class TestGetAllUrls:
             title="PHP Developer", company="Beta", location="Poland",
             url=url2, source="linkedin", description="desc",
         )
-        # get_all_urls() is system-wide (shared job pool) — assert our urls are
+        # get_all_urls() is system-wide (shared job pool), assert our urls are
         # present, not that the result equals exactly {url1, url2}.
         urls = job_repository.get_all_urls()
         assert url1 in urls

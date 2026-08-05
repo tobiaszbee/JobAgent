@@ -8,7 +8,7 @@ _counter = itertools.count()
 
 
 def _terminal_jobs(query, rejected=0, auto_rejected=0, applied=0, reviewed=0, source="linkedin"):
-    # Globally unique url/title/company per job (across separate calls too) — the
+    # Globally unique url/title/company per job (across separate calls too), the
     # title+company AND url dedup rules in job_repository.insert() would otherwise
     # silently drop later jobs sharing an earlier call's values.
     for _ in range(rejected):
@@ -61,7 +61,7 @@ class TestPruneQueriesRejectRate:
         # Regression test: this used to be a one-time boolean (any applied/reviewed
         # job, ever, blocked pruning forever), which meant a single early hit could
         # permanently immunize a query even after its success rate collapsed. 1/40
-        # applied is 2.5% — below max_success_rate — so it should no longer protect.
+        # applied is 2.5%, below max_success_rate, so it should no longer protect.
         monkeypatch.setitem(config.QUERY_PRUNING, "min_terminal_sample", 10)
         monkeypatch.setitem(config.QUERY_PRUNING, "reject_rate_threshold", 0.9)
         monkeypatch.setitem(config.QUERY_PRUNING, "max_success_rate", 0.05)

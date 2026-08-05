@@ -10,21 +10,17 @@ from evaluator.dealbreakers import apply_dealbreaker_filter
 from evaluator.scorer import score_job, build_system_prompt
 from evaluator.profile import load_active_profile, load_questionnaire_preferences
 
-# Cap on how many past ranking mistakes get fed back into the scoring prompt — bounds
+# Cap on how many past ranking mistakes get fed back into the scoring prompt, bounds
 # prompt size as more divergence cases accumulate over time.
 _CALIBRATION_LIMIT = 10
 
 
 def run(force_rescore: bool = False, jobs: list[dict] | None = None) -> dict:
-    """`jobs` lets a caller that already fetched the same list (to check
-    emptiness/print a count before calling this) pass it straight through
-    instead of this function re-fetching it — only meaningful with
-    force_rescore=True, since that's the mode that shares get_new_with_descriptions()
-    with a typical caller."""
-    # rescore_all: whether every surviving job gets sent to the LLM regardless of
-    # whether it already has a score (force_rescore, or an explicit `jobs` list —
-    # existing callers like scripts/rescore_new.py rely on getting back exactly
-    # what they passed in), vs. the normal path, which only scores score IS NULL.
+    # `jobs` lets a caller that already fetched the same list pass it straight
+    # through instead of re-fetching, only meaningful with force_rescore=True.
+    #
+    # rescore_all controls whether every surviving job gets sent to the LLM
+    # regardless of an existing score, vs. the normal path (score IS NULL only).
     if jobs is not None:
         full_pool = jobs
         rescore_all = True
@@ -34,15 +30,11 @@ def run(force_rescore: bool = False, jobs: list[dict] | None = None) -> dict:
             logger.info(f"Force-rescore mode: {len(full_pool)} job(s) will be re-scored.")
         rescore_all = True
     else:
-        # The whole 'new' pool, not just get_unscored() — the dealbreaker filter is
-        # free (no LLM call), so there's no reason to only ever run it once per job.
-        # Two ways a job used to escape it forever: extraction failed on the first
-        # pass (so it got scored with no structured_data to check), or the
-        # questionnaire changed after it was scored (a tightened salary floor, a
-        # newly-added seniority restriction) — get_unscored()'s score IS NULL filter
-        # meant neither case was ever re-evaluated. This only re-runs the free
-        # filter over everyone; the LLM-scoring loop below still only processes
-        # jobs that genuinely have no score yet.
+        # The whole 'new' pool, not just get_unscored(): the dealbreaker
+        # filter is free, so it re-runs over everyone even if a job was
+        # already scored before extraction filled in structured_data or the
+        # questionnaire changed. The LLM-scoring loop below still only
+        # processes jobs that genuinely have no score yet.
         full_pool = job_repository.get_new_with_descriptions()
         rescore_all = False
 
@@ -93,7 +85,7 @@ def run(force_rescore: bool = False, jobs: list[dict] | None = None) -> dict:
         logger.info(f"Preference profile active ({latest_preference['applied_count']} applied, {latest_preference['rejected_count']} rejected)")
         logger.info(f"Grounding examples: {len(positive_examples)} applied, {len(negative_examples)} rejected")
     else:
-        logger.info(f"No preference profile — few-shot: {len(positive_examples)} applied, {len(negative_examples)} rejected")
+        logger.info(f"No preference profile, few-shot: {len(positive_examples)} applied, {len(negative_examples)} rejected")
     logger.info("=" * 50)
 
     auto_reject_threshold = SCORING["auto_reject_at_or_below"]
@@ -105,7 +97,7 @@ def run(force_rescore: bool = False, jobs: list[dict] | None = None) -> dict:
 
         result = score_job(job=job, system_prompt=shared_system_prompt)
         if result["score"] is None:
-            logger.warning(f"  Scoring failed — will retry next run: {result['score_reason']}")
+            logger.warning(f"  Scoring failed, will retry next run: {result['score_reason']}")
             continue
 
         if result["score"] <= auto_reject_threshold:
@@ -113,10 +105,10 @@ def run(force_rescore: bool = False, jobs: list[dict] | None = None) -> dict:
                 job["id"], result["score"], result["score_reason"], "auto_rejected", result.get("breakdown")
             )
             jobs_auto_rejected += 1
-            logger.info(f"  Score: {result['score']}/10 — auto-rejected — {result['score_reason']}")
+            logger.info(f"  Score: {result['score']}/10, auto-rejected, {result['score_reason']}")
         else:
             job_repository.update_score(job["id"], result["score"], result["score_reason"], result.get("breakdown"))
-            logger.info(f"  Score: {result['score']}/10 — {result['score_reason']}")
+            logger.info(f"  Score: {result['score']}/10, {result['score_reason']}")
 
         jobs_scored += 1
 

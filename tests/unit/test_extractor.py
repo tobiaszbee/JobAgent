@@ -40,7 +40,7 @@ def test_extract_job_returns_parsed_dict(mock_get_client):
 class TestExtractionSchema:
     # Regression coverage for the audit's biggest single schema gap: `remote`
     # was a bare boolean with no geo information, so nothing in the pipeline
-    # could ever tell "remote — Poland only" from "remote — US only" apart.
+    # could ever tell "remote, Poland only" from "remote, US only" apart.
     _NEW_FIELDS = {
         "remote_regions", "timezone_requirement", "contract_types",
         "stack_required", "stack_preferred",
@@ -51,7 +51,7 @@ class TestExtractionSchema:
         assert self._NEW_FIELDS <= props.keys()
 
     def test_new_fields_are_required_so_the_model_always_considers_them(self):
-        # "required" here means "must appear in the tool call" — nullable/empty-
+        # "required" here means "must appear in the tool call", nullable/empty-
         # array fields still satisfy it, this just stops the model from silently
         # omitting the field rather than explicitly saying "unstated".
         required = set(_EXTRACT_TOOL["input_schema"]["required"])
@@ -102,7 +102,7 @@ def test_extract_job_returns_empty_when_no_tool_block(mock_get_client):
 @patch("extractor.runner._get_client")
 def test_extract_job_returns_empty_on_truncated_response(mock_get_client):
     # Regression: a truncated tool_use block can still parse as valid-but-
-    # partial JSON — without an explicit stop_reason check, run_extraction()'s
+    # partial JSON, without an explicit stop_reason check, run_extraction()'s
     # `if data:` guard would treat a truthy-but-incomplete dict as a final,
     # complete extraction and never retry the missing fields.
     payload = {"remote": True}  # as if cut off mid-object
@@ -217,7 +217,7 @@ class TestMergeSourceStructuredData:
 @patch("extractor.runner.job_repository")
 @patch("extractor.runner.extract_job")
 def test_run_extraction_merges_source_structured_data_over_haiku_output(mock_extract, mock_repo):
-    # Regression: justjoin.it discloses salary as a structured API field —
+    # Regression: justjoin.it discloses salary as a structured API field,
     # Haiku's own guess from the description text must not win over it.
     mock_extract.return_value = {"remote": True, "salary_min": None, "salary_max": None}
     jobs = [{

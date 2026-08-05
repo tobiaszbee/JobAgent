@@ -75,7 +75,7 @@ def _fetch_descriptions_stealthily(jobs: list[tuple[str, str]]) -> tuple[int, in
 
 
 def _fetch_descriptions_directly(source_id: str, jobs: list[tuple[str, str]]) -> tuple[int, int]:
-    """Non-LinkedIn path: no login, no stealth pacing needed — one session, straight
+    """Non-LinkedIn path: no login, no stealth pacing needed, one session, straight
     through the list."""
     logger.info(f"\nFetching {len(jobs)} {source_id} description(s)...")
     try:
@@ -111,26 +111,14 @@ def _fetch_descriptions_in_batches(jobs_pending_description: list[tuple[str, str
     logger.info(f"\nDescriptions: {ok_total} fetched, {fail_total} still missing")
 
 
-# Which locations a source actually gets searched with, given the candidate's selected
-# countries (remote-mode) and cities (hybrid/onsite-mode) — both flow into the same
-# criteria["locations"] list. The user no longer picks sources/locations manually per
-# run — this table is the whole routing policy:
-# - LinkedIn: one search per selected location (its own per-term search semantics),
-#   accepts both countries and cities.
-# - Remotive/RemoteOK/WorkingNomads/WeWorkRemotely: single global remote-job boards, not
-#   segmented by country — one search per candidate location instead of a single "Remote"
-#   search. Each source caches its one HTTP fetch per run, so this is a cheap in-memory
-#   refilter per location, not N HTTP calls. A single "Remote" search term used to be used
-#   here as an optimization, but collector/location.py's matching treats "Remote" as
-#   matching *everything* unconditionally (see _REMOTE_TERMS) — that made every candidate
-#   country selection a no-op for these 4 sources, silently letting e.g. "Remote — US only"
-#   through for a candidate who only selected Poland. Falls back to a single "Remote"
-#   search only when the candidate didn't select any countries at all (no restriction to
-#   check a job's disclosed location against).
-# - The Poland-focused boards only ever return anything for a "Poland" search (see each
-#   source's own _POLAND_ALIASES gate) — only run them if the candidate actually wants
-#   Poland, either directly (remote_countries) or via a Polish hybrid/onsite city, and
-#   only ever search "Poland" once, regardless of what else is selected.
+# Routes each source's search calls given the candidate's selected countries
+# (remote-mode) and cities (hybrid/onsite-mode). LinkedIn gets one search per
+# location. The 4 worldwide remote boards get one search per candidate
+# location instead of a single "Remote" search, since collector/location.py
+# treats "Remote" as matching everything unconditionally (_REMOTE_TERMS),
+# which would make a country selection a no-op for these sources. The
+# Poland-focused boards only ever search "Poland", and only when the
+# candidate wants Poland at all.
 _WORLDWIDE_REMOTE_SOURCES = frozenset({"remotive", "remoteok", "workingnomads", "weworkremotely"})
 _POLAND_ONLY_SOURCES = frozenset({"justjoin", "theprotocol", "itpracuj", "nofluffjobs", "solidjobs"})
 _POLAND_ALIASES = frozenset({"poland", "polska", "pl"})
@@ -167,13 +155,9 @@ def _search_pause_seconds(new_count: int) -> float:
     return glance + reading
 
 
-# Hard ceiling on total search calls in one run, independent of max_jobs — a
-# job-count budget doesn't help when searches simply find nothing new (e.g. a
-# niche framework query repeated across many countries), so a long-tail
-# combination like "+Add all EU countries" × several search-query criteria
-# could previously rack up hundreds of stealth-paced searches with no cap at
-# all. This is deliberately generous (most real runs use a handful of
-# sources/queries/locations) — it's a safety rail, not a normal-case limit.
+# Hard ceiling on total search calls in one run, independent of max_jobs,
+# since a job-count budget doesn't help when searches simply find nothing new.
+# Generous on purpose: a safety rail, not a normal-case limit.
 _MAX_TOTAL_SEARCHES = 150
 
 
@@ -200,7 +184,7 @@ def _collect_job_cards(
 
         locations_for_source = _locations_for_source(source_id, locations)
         if not locations_for_source:
-            logger.info(f"\n[{source_id}] Skipping — none of the candidate's selected countries apply to this source.")
+            logger.info(f"\n[{source_id}] Skipping, none of the candidate's selected countries apply to this source.")
             continue
 
         logger.info(f"\n[{source_id}] Starting source...")
@@ -219,11 +203,8 @@ def _collect_job_cards(
                                 logger.info(f"  [prune] Skipping LinkedIn query {q!r} (auto-excluded: {excluded[q]})")
                         queries_for_source = [q for q in search_queries if q not in excluded]
 
-                # Fair-share budgets instead of first-come-first-served: without
-                # this, the first source (and within it, the first query) could
-                # consume the entire max_jobs budget before anything else ever
-                # got a chance to contribute — later sources/queries silently
-                # ran for nothing.
+                # Fair-share budgets instead of first-come-first-served, so the
+                # first source/query can't consume the whole max_jobs budget.
                 source_budget = max(1, max_jobs // max(1, len(selected_sources))) if max_jobs else None
                 query_budget = (
                     max(1, source_budget // len(queries_for_source))
@@ -246,7 +227,7 @@ def _collect_job_cards(
                             break
                         if total_searches >= _MAX_TOTAL_SEARCHES:
                             logger.warning(
-                                f"\n[search-cap] Reached the {_MAX_TOTAL_SEARCHES}-search limit for this run — "
+                                f"\n[search-cap] Reached the {_MAX_TOTAL_SEARCHES}-search limit for this run, "
                                 "stopping early rather than continuing unbounded."
                             )
                             search_cap_hit = True
@@ -286,12 +267,9 @@ def _collect_job_cards(
                                     source_structured_data=raw.source_structured_data,
                                 )
                             except Exception as e:
-                                # A single job's insert failing (e.g. a brief DB
-                                # connection blip when the DB is remote) shouldn't take
-                                # down the whole run — db/connection.py already retries
-                                # transient connection errors on acquisition; anything
-                                # that still fails here is logged and skipped.
-                                logger.warning(f"  Skip (insert failed): {raw.title} @ {raw.company} — {e}")
+                                # A single job's insert failing shouldn't take down
+                                # the whole run.
+                                logger.warning(f"  Skip (insert failed): {raw.title} @ {raw.company}, {e}")
                                 continue
                             if job_id is None:
                                 logger.info(f"  Skip (duplicate): {raw.title} @ {raw.company}")
@@ -307,7 +285,7 @@ def _collect_job_cards(
                                 if reason:
                                     job_repository.update_score_and_status(job_id, 0.0, reason, "auto_rejected")
                                     jobs_prefiltered += 1
-                                    logger.info(f"  [prefilter] {raw.title} @ {raw.company} — {reason}")
+                                    logger.info(f"  [prefilter] {raw.title} @ {raw.company}, {reason}")
                                 else:
                                     jobs_pending_description.append((job_id, raw.url, source_id))
                             logger.info(f"  [{jobs_new}{'/' + str(max_jobs) if max_jobs else ''}] {raw.title} @ {raw.company}")
@@ -321,10 +299,10 @@ def _collect_job_cards(
                             pending_pause = _search_pause_seconds(new_this_search)
 
         except Exception as exc:
-            logger.warning(f"[{source_id}] Source failed — skipping: {exc}")
+            logger.warning(f"[{source_id}] Source failed, skipping: {exc}")
 
     if jobs_prefiltered:
-        logger.info(f"\n[prefilter] Skipped description fetch for {jobs_prefiltered} job(s) — banned keyword in title")
+        logger.info(f"\n[prefilter] Skipped description fetch for {jobs_prefiltered} job(s), banned keyword in title")
 
     return jobs_found, jobs_new, jobs_pending_description
 
@@ -352,18 +330,17 @@ def run(
 
     selected_sources = source_ids or [s["id"] for s in available_sources()]
 
-    # A caller running us as part of a larger pipeline (the dashboard's "Run
-    # Agent") already has an active session spanning the whole run — starting
-    # a second one here would be rejected by JobAgentWeb's concurrent-session
-    # guard, since the outer session is still 'running'. Only start/finish our
-    # own session when nobody handed us one to reuse.
+    # Only start/finish our own session when nobody handed us one to reuse:
+    # a caller running this as one stage of a larger pipeline already has an
+    # active session, and starting a second one would trip JobAgentWeb's
+    # concurrent-session guard.
     owns_session = session_id is None
     if owns_session:
         session_id = session_repository.start()
     jobs_found = 0
     jobs_new = 0
 
-    logger.info(f"Collector starting — last {days_back} day(s), limit: {max_jobs or 'unlimited'}")
+    logger.info(f"Collector starting, last {days_back} day(s), limit: {max_jobs or 'unlimited'}")
     logger.info(f"Sources:        {', '.join(selected_sources)}")
     logger.info(f"Search queries: {', '.join(search_queries)}")
     logger.info(f"Locations:      {', '.join(criteria['locations'])}")
@@ -386,7 +363,7 @@ def run(
             time.sleep(cooldown)
             _fetch_descriptions_in_batches(jobs_pending_description)
 
-        # Fetched once and shared — both filters used to independently pull the
+        # Fetched once and shared, both filters used to independently pull the
         # entire 'new' pool (full descriptions included) over HTTP every run.
         new_jobs = job_repository.get_new()
 
@@ -395,12 +372,10 @@ def run(
         if lang_result["checked"]:
             logger.info(f"Checked {lang_result['checked']} job(s), auto-rejected {lang_result['auto_rejected']}")
         else:
-            logger.info("No languages configured — all jobs passed through")
+            logger.info("No languages configured, all jobs passed through")
 
-        # Excludes whatever the language filter just rejected — otherwise the
-        # keyword filter would re-check jobs against a stale in-memory snapshot
-        # that still shows them as 'new', possibly overwriting a language-based
-        # rejection reason with an unrelated keyword-based one.
+        # Excludes what the language filter just rejected, so the keyword
+        # filter doesn't overwrite that rejection reason with its own.
         already_rejected = set(lang_result["rejected_ids"])
         remaining_jobs = [j for j in new_jobs if j["id"] not in already_rejected]
 
@@ -409,7 +384,7 @@ def run(
         if filter_result["checked"]:
             logger.info(f"Checked {filter_result['checked']} job(s), auto-rejected {filter_result['auto_rejected']}")
         else:
-            logger.info("No criteria configured — all jobs passed through")
+            logger.info("No criteria configured, all jobs passed through")
 
         if owns_session:
             session_repository.mark_collected(session_id)

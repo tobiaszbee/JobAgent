@@ -22,7 +22,7 @@ _EXTRACT_TOOL = {
                 "enum": ["junior", "mid", "senior", "lead", "director", None],
                 "description": "Expected seniority level.",
             },
-            "salary_min":      {"type": ["integer", "null"], "description": "Min salary/rate, gross, in whatever period salary_period identifies (e.g. a B2B rate of '100-145 PLN/h' is salary_min=100 with salary_period='hourly' — do not silently assume monthly/annual)."},
+            "salary_min":      {"type": ["integer", "null"], "description": "Min salary/rate, gross, in whatever period salary_period identifies (e.g. a B2B rate of '100-145 PLN/h' is salary_min=100 with salary_period='hourly', do not silently assume monthly/annual)."},
             "salary_max":      {"type": ["integer", "null"], "description": "Max salary/rate, same period as salary_min."},
             "salary_period": {
                 "type": ["string", "null"],
@@ -44,7 +44,7 @@ _EXTRACT_TOOL = {
                 "description": (
                     "Subset of `stack` explicitly stated as required/must-have (e.g. "
                     "'5 years of Kubernetes required'). Empty array if the posting "
-                    "doesn't distinguish required from nice-to-have — do not guess "
+                    "doesn't distinguish required from nice-to-have, do not guess "
                     "which items in `stack` would belong here."
                 ),
             },
@@ -76,7 +76,7 @@ _EXTRACT_TOOL = {
                     "Geographic regions/countries the posting explicitly says remote work is "
                     "allowed from (e.g. ['Poland'], ['EU'], ['worldwide'], ['Poland', 'Ukraine']). "
                     "Empty array if remote isn't offered (remote=false), OR if remote is offered "
-                    "but the posting never states which locations are eligible — an empty array "
+                    "but the posting never states which locations are eligible, an empty array "
                     "means 'unstated', not 'nowhere', and must never be treated as a geographic "
                     "restriction by anything reading this field."
                 ),
@@ -126,7 +126,7 @@ def extract_job(description: str, source: str | None = None) -> dict:
             max_tokens=600,
             system=(
                 "Extract structured information from the job description. "
-                "Use null for fields not explicitly stated — do not infer or assume."
+                "Use null for fields not explicitly stated, do not infer or assume."
             ),
             messages=[{"role": "user", "content": f"Extract structured data:\n\n{excerpt}"}],
             tools=[_EXTRACT_TOOL],
@@ -136,12 +136,12 @@ def extract_job(description: str, source: str | None = None) -> dict:
 
         if response.stop_reason == "max_tokens":
             # A truncated tool_use block can still parse as valid-but-partial
-            # JSON — without this check a partial dict would be written as if
+            # JSON, without this check a partial dict would be written as if
             # it were the complete, final extraction, permanently leaving the
             # missing fields null instead of retrying the job next run (see
             # run_extraction()'s `if data:` write-guard, which only protects
             # against a *falsy* return, not a truthy-but-incomplete one).
-            logger.warning("Extraction response truncated (max_tokens) — will retry next run.")
+            logger.warning("Extraction response truncated (max_tokens), will retry next run.")
             return {}
 
         tool_block = next((b for b in response.content if b.type == "tool_use"), None)
@@ -153,9 +153,9 @@ def extract_job(description: str, source: str | None = None) -> dict:
 
 
 def _merge_source_structured_data(data: dict, job: dict) -> dict:
-    """A source's own native fields (e.g. justjoin.it's salary/skills API fields —
+    """A source's own native fields (e.g. justjoin.it's salary/skills API fields,
     see collector/sources/justjoin.py) are ground truth, not a guess from the
-    description text — they override whatever Haiku extracted for the same keys.
+    description text, they override whatever Haiku extracted for the same keys.
     Only overlays what the source actually provided; every field a source doesn't
     disclose still comes from Haiku untouched."""
     raw = job.get("source_structured_data")

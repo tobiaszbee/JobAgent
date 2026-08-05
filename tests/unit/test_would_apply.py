@@ -45,7 +45,7 @@ class TestComputeWouldApply:
         assert "#10" in reason
 
     def test_does_not_flag_job_beyond_rank_ceiling(self):
-        # Regression: score alone used to be the entire gate — a high-scoring job
+        # Regression: score alone used to be the entire gate, a high-scoring job
         # ranked deep in the listwise pool (weaker on Opus/debate's holistic
         # judgment) used to get flagged just as readily as the #1 job.
         flagged, reason = compute_would_apply(9.5, None, listwise_rank=11)
@@ -53,7 +53,7 @@ class TestComputeWouldApply:
         assert reason == ""
 
     def test_does_not_flag_job_with_no_rank(self):
-        # "only flag with full evidence" — missing rank must not default to
+        # "only flag with full evidence", missing rank must not default to
         # flagging, same stance as missing score.
         flagged, reason = compute_would_apply(9.5, None, listwise_rank=None)
         assert flagged is False
@@ -61,7 +61,7 @@ class TestComputeWouldApply:
 
     def test_overrated_nudge_can_push_a_job_past_rank_ceiling(self):
         # Deliberate: ranker/debate.py's overrated nudge already moved
-        # listwise_rank by the time this runs — no second, separate penalty for
+        # listwise_rank by the time this runs, no second, separate penalty for
         # the flag itself here, but its effect on rank still applies.
         flagged, _ = compute_would_apply(8.0, "overrated", listwise_rank=11)
         assert flagged is False
@@ -87,14 +87,14 @@ class TestComputeRevocations:
     def test_mixed_pool_only_revokes_the_dropped_ones(self):
         pool = [
             {"id": "j1", "would_apply": True},   # still flagged this run
-            {"id": "j2", "would_apply": True},   # dropped out — should be revoked
-            {"id": "j3", "would_apply": False},  # was never flagged — nothing to revoke
+            {"id": "j2", "would_apply": True},   # dropped out, should be revoked
+            {"id": "j3", "would_apply": False},  # was never flagged, nothing to revoke
         ]
         result = compute_revocations(pool, {"j1"})
         assert [r["job_id"] for r in result] == ["j2"]
 
     def test_job_not_in_pool_is_never_touched(self):
-        # Scoped to pool_jobs only — a job outside the pool (changed status, or
+        # Scoped to pool_jobs only, a job outside the pool (changed status, or
         # aged out past the ranking pool's size limit) wasn't re-evaluated this
         # run, so nothing about it is actually known to have changed.
         pool = [{"id": "j1", "would_apply": True}]

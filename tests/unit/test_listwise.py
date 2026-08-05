@@ -53,7 +53,7 @@ class TestFormatJob:
         assert "Python" in text
 
     def test_short_description_gets_incomplete_note(self):
-        # Regression: itpracuj's search-result preview (its only description source —
+        # Regression: itpracuj's search-result preview (its only description source,
         # see collector/sources/itpracuj.py) runs 113-250 chars in practice. Opus used
         # to have no way to tell that apart from a genuinely short but complete
         # posting, and nothing here stops it reading a stub as the whole ad.
@@ -88,7 +88,7 @@ class TestFormatJob:
 
     def test_no_positional_label_in_output(self):
         # Regression: a "[Job #N]" label matching presentation order let Opus
-        # anchor on position instead of content — only the job's own id
+        # anchor on position instead of content, only the job's own id
         # identifies it now.
         text = _format_job(_job(id="j1"))
         assert "Job #" not in text
@@ -96,7 +96,7 @@ class TestFormatJob:
 
     def test_scorer_rating_included_when_present(self):
         # Regression: the listwise prompt never showed Opus the scorer's own
-        # rating — the most expensive signal in the pipeline was invisible to
+        # rating, the most expensive signal in the pipeline was invisible to
         # the model doing the final ranking.
         text = _format_job(_job(score=8.5, score_reason="Strong Python/Django match"))
         assert "8.5/10" in text
@@ -112,7 +112,7 @@ class TestFormatJob:
 
     def test_posting_age_shown_when_present(self):
         # Regression: posting age was parsed by every collector source (to
-        # apply --days), then discarded — nothing downstream could tell a
+        # apply --days), then discarded, nothing downstream could tell a
         # 5-week-old posting from one collected this morning.
         from datetime import datetime, timedelta, timezone
         posted = (datetime.now(timezone.utc) - timedelta(days=5)).isoformat()
@@ -127,7 +127,7 @@ class TestFormatJob:
 
     def test_posting_age_omitted_when_absent(self):
         # LinkedIn and pre-migration postings have no reliable per-posting
-        # date — never state an age we don't actually have.
+        # date, never state an age we don't actually have.
         text = _format_job(_job(posted_at=None))
         assert "Posted:" not in text
 
@@ -141,7 +141,7 @@ class TestFormatJob:
 def test_listwise_rank_shuffles_presentation_order(mock_anthropic, mock_shuffle):
     # Regression: jobs used to be presented to Opus in the reranker's own
     # best-first order with sequential labels, which a listwise ranker tends
-    # to mostly echo back — shuffling breaks that positional anchor.
+    # to mostly echo back, shuffling breaks that positional anchor.
     jobs = [_job("j1"), _job("j2"), _job("j3")]
     ranking = [{"job_id": j["id"], "reason": "x"} for j in jobs]
     mock_anthropic.return_value.messages.create.return_value = _make_ranking_response(ranking)
@@ -208,10 +208,10 @@ def test_listwise_rank_safety_net_adds_missed_jobs(mock_anthropic):
 @patch("ranker.listwise.anthropic.Anthropic")
 def test_listwise_rank_no_duplicate_ranks_when_hallucinated_id_precedes_an_omission(mock_anthropic):
     # Regression: rank_pos used to come from enumerate(ranking)'s raw index,
-    # which still advances past a skipped (hallucinated) job_id — leaving a
+    # which still advances past a skipped (hallucinated) job_id, leaving a
     # gap the safety-net loop (numbering from len(result) + 1) could collide
     # with. Here "ghost" (hallucinated) precedes "j2", and "j3" is omitted
-    # entirely — j2 used to land on the same listwise_rank as j3's safety-net
+    # entirely, j2 used to land on the same listwise_rank as j3's safety-net
     # entry.
     jobs = [_job("j1"), _job("j2"), _job("j3")]
     ranking = [
@@ -249,7 +249,7 @@ def test_listwise_rank_fallback_on_api_error(mock_anthropic):
 @patch("ranker.retry.time.sleep")
 @patch("ranker.listwise.anthropic.Anthropic")
 def test_listwise_rank_retries_a_transient_error_instead_of_falling_back(mock_anthropic, mock_sleep):
-    # Regression: listwise_rank used to have no retry at all — a single
+    # Regression: listwise_rank used to have no retry at all, a single
     # transient hiccup (rate limit, a 5xx, a network blip) fell straight
     # through to _fallback_ranking, discarding the whole batch's Opus judgment
     # for that run even though a second attempt would likely have succeeded.
@@ -300,7 +300,7 @@ def test_listwise_rank_empty_input():
 @patch("ranker.listwise.anthropic.Anthropic")
 def test_system_prompt_forbids_deliberation_in_reason(mock_anthropic):
     # Opus has leaked raw self-correction ("wait, correcting...") directly into a
-    # "reason" value before — guard against the prompt instruction being dropped.
+    # "reason" value before, guard against the prompt instruction being dropped.
     jobs = [_job("j1")]
     mock_anthropic.return_value.messages.create.return_value = _make_ranking_response(
         [{"job_id": "j1", "reason": "Good match"}]
@@ -316,7 +316,7 @@ def test_system_prompt_forbids_deliberation_in_reason(mock_anthropic):
 def test_system_prompt_frames_scorers_rating_as_one_data_point(mock_anthropic):
     # Regression: adding "Scorer's rating: X/10" to each job's text (a
     # directly-comparable ordinal) without framing it risks Opus just sorting
-    # by that number — the exact positional-anchoring failure #29 already
+    # by that number, the exact positional-anchoring failure #29 already
     # shuffled presentation order to avoid, just via a numeric signal instead
     # of a positional one. The comparative judgment across the whole batch is
     # what listwise ranking is for; a per-job score can't provide that.

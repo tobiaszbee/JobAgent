@@ -2,7 +2,7 @@
 the auto-reject threshold (config.SCORING) to status='auto_rejected'.
 
 evaluator/runner.py now auto-rejects low scores as they're produced, but that only
-applies going forward — this catches jobs that were scored before that logic existed.
+applies going forward, this catches jobs that were scored before that logic existed.
 Safe to rerun any time; it's a no-op once nothing 'new' is left at/below the threshold.
 """
 import sys

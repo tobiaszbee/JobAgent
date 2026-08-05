@@ -4,7 +4,7 @@ from embeddings.client import VoyageClient
 
 logger = logging.getLogger(__name__)
 
-# Voyage rerank-2 accepts far more than this — the cap exists to bound the
+# Voyage rerank-2 accepts far more than this, the cap exists to bound the
 # fallback path (evaluator.profile.build_retrieval_query's raw CV+preferences
 # concatenation, unbounded in principle), not to fit an API limit. Sized to
 # comfortably cover the common case, evaluator.profile.build_hyde_query's
@@ -25,7 +25,7 @@ def rerank_jobs(jobs: list[dict], query: str, top_k: int = 20) -> list[dict]:
     """
     Cross-encoder rerank using Voyage Rerank API.
     Returns up to top_k jobs sorted by rerank score (best first).
-    Falls back to original order on failure — those jobs are marked
+    Falls back to original order on failure, those jobs are marked
     _rerank_unreliable so callers re-fusing rerank_score as an RRF leg (see
     scripts/rank_jobs.py) know not to treat it as a real signal.
     """
@@ -35,11 +35,11 @@ def rerank_jobs(jobs: list[dict], query: str, top_k: int = 20) -> list[dict]:
     query_text = (query or "").strip()
     if not query_text:
         # A generic placeholder query (e.g. "software engineer developer") would still
-        # produce a rerank_score that looks considered but isn't — the cross-encoder
+        # produce a rerank_score that looks considered but isn't, the cross-encoder
         # would just be measuring "looks like a tech job" for every candidate, which is
         # worse than not reranking at all. Skip the call and preserve embedding-score
         # order instead (jobs already arrive sorted by _embedding_score descending).
-        logger.warning("rerank_jobs called with no candidate query (e.g. no CV uploaded yet) — skipping cross-encoder rerank")
+        logger.warning("rerank_jobs called with no candidate query (e.g. no CV uploaded yet), skipping cross-encoder rerank")
         for job in jobs:
             job.setdefault("rerank_score", job.get("_embedding_score") or 0.0)
             job["_rerank_unreliable"] = True
@@ -56,7 +56,7 @@ def rerank_jobs(jobs: list[dict], query: str, top_k: int = 20) -> list[dict]:
     try:
         results = client.rerank(query=query_text, documents=documents, top_k=min(top_k, len(documents)))
     except Exception as e:
-        logger.error(f"Voyage rerank failed: {e} — falling back to embedding order")
+        logger.error(f"Voyage rerank failed: {e}, falling back to embedding order")
         for job in jobs:
             job.setdefault("rerank_score", job.get("_embedding_score", 0.0))
             job["_rerank_unreliable"] = True

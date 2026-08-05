@@ -1,4 +1,4 @@
-"""Unit tests for the theprotocol.it scraper — no real browser calls made."""
+"""Unit tests for the theprotocol.it scraper, no real browser calls made."""
 import json
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
@@ -123,7 +123,7 @@ class TestSalaryText:
         assert _salary_text(offer) == ""
 
     def test_partial_salary_range_skipped(self):
-        # e.g. only "from" disclosed, no upper bound — don't fabricate a range
+        # e.g. only "from" disclosed, no upper bound, don't fabricate a range
         offer = {"attributes": {"employment": {"typesOfContracts": [
             {"name": "B2B", "salary": {"from": 23000, "to": None, "currencyCode": "zł"}}
         ]}}}
@@ -259,7 +259,7 @@ class TestTheProtocolSourceSearch:
 
     def test_posted_at_captures_the_publication_date(self):
         # publicationDateUtc was already parsed for the days_back cutoff, then
-        # discarded — RawJob.posted_at carries it through instead.
+        # discarded, RawJob.posted_at carries it through instead.
         src = _make_source()
         src._page.eval_on_selector.return_value = json.dumps(_search_payload([_offer(days_ago=2)]))
         results = src.search("PHP", "Poland")
@@ -277,7 +277,7 @@ class TestFetchDescription:
 
     def test_salary_prepended_when_present(self):
         # Regression: theprotocol.it discloses salary as a structured field separate
-        # from textSections — a scraper reading only textSections silently drops it,
+        # from textSections, a scraper reading only textSections silently drops it,
         # and the evaluator then dings the job for "no salary disclosed" on a listing
         # that plainly had one on the site.
         offer = {

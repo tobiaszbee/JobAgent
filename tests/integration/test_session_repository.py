@@ -21,7 +21,7 @@ class TestStart:
 
     def test_second_start_while_one_is_running_raises(self):
         # A run launched directly from a terminal used to have no guard at all
-        # against a second concurrent run — only the dashboard's in-process
+        # against a second concurrent run, only the dashboard's in-process
         # _RunGuard did, which a terminal invocation bypasses entirely. This is
         # now enforced server-side, so it holds regardless of which client starts it.
         session_repository.start()
@@ -109,7 +109,7 @@ class TestMarkCollected:
 
     def test_finish_alone_does_not_count_as_collected(self):
         # Regression: a ranking/rescoring/re-evaluating session finishes 'done'
-        # exactly like a real collection does — only an explicit mark_collected()
+        # exactly like a real collection does, only an explicit mark_collected()
         # call (from the collector stage itself) should move this forward.
         sid = session_repository.start()
         session_repository.finish(sid, jobs_found=5, jobs_scored=5, status="done")
