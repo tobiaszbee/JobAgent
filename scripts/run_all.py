@@ -16,6 +16,7 @@ from datetime import datetime
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 from collector.runner import run as collect
+from db.repositories import usage_repository
 from evaluator.runner import run as evaluate
 from extractor.runner import run_extraction
 
@@ -72,6 +73,11 @@ def main() -> int:
     args = parser.parse_args()
 
     handlers = _configure_logging(args.log_file)
+    # This CLI entry point never went through web/routes/runner.py's
+    # started_at -> record_run_summary envelope, so every run_all.py run's
+    # cost (collector, distill, extractor, evaluator, prune, ranking — all of
+    # it) was silently missing from cost_summaries entirely.
+    started_at = usage_repository.now_iso()
 
     try:
         logger.info("=" * 60)
@@ -133,6 +139,7 @@ def main() -> int:
         return 0
 
     finally:
+        usage_repository.record_run_summary("run_all", started_at)
         for h in handlers:
             h.close()
             logging.getLogger().removeHandler(h)

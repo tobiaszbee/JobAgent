@@ -1,6 +1,6 @@
 from flask import Blueprint, jsonify
 
-from db.repositories import preference_repository
+from db.repositories import preference_repository, usage_repository
 from preference_agent import runner as preference_runner
 from preference_agent.profile import render_signals
 
@@ -26,7 +26,16 @@ def get_preferences():
 
 @bp.post("/api/preferences/distill")
 def distill():
-    result = preference_runner.run()
+    # A manual distill runs an Opus call outside any tracked pipeline run — same
+    # started_at -> record_run_summary envelope web/routes/runner.py's
+    # _run_pipeline_ws uses, so this cost stops silently missing from
+    # cost_summaries. Recorded even on failure (the try/finally): a failed
+    # distill can still have billed a real Anthropic call before erroring.
+    started_at = usage_repository.now_iso()
+    try:
+        result = preference_runner.run()
+    finally:
+        usage_repository.record_run_summary("distill_preferences", started_at)
     if not result["ok"]:
         return jsonify(result), 400
     return jsonify(result)
