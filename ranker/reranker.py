@@ -4,6 +4,13 @@ from embeddings.client import VoyageClient
 
 logger = logging.getLogger(__name__)
 
+# Voyage rerank-2 accepts far more than this — the cap exists to bound the
+# fallback path (evaluator.profile.build_retrieval_query's raw CV+preferences
+# concatenation, unbounded in principle), not to fit an API limit. Sized to
+# comfortably cover the common case, evaluator.profile.build_hyde_query's
+# synthetic job posting: max_tokens=400 there, so ~1600 chars worst case.
+_MAX_QUERY_CHARS = 2000
+
 _client: VoyageClient | None = None
 
 
@@ -36,7 +43,7 @@ def rerank_jobs(jobs: list[dict], query: str, top_k: int = 20) -> list[dict]:
         return jobs[:top_k]
 
     client = _get_client()
-    query_text = query_text[:500]
+    query_text = query_text[:_MAX_QUERY_CHARS]
 
     documents = []
     for job in jobs:

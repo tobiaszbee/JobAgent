@@ -113,8 +113,8 @@ def build_retrieval_query(candidate_profile: str) -> str:
     — both previously only ever saw the CV, missing everything the candidate told the
     questionnaire directly (extra tech interests, preferred industries, etc.). Kept
     dense and unlabeled, unlike load_questionnaire_preferences() above (meant for an
-    LLM prompt): rerank_jobs truncates its query to 500 chars, so every character here
-    should be a real retrieval term, not prose structure."""
+    LLM prompt): rerank_jobs truncates its query to _MAX_QUERY_CHARS, so every
+    character here should be a real retrieval term, not prose structure."""
     prefs = candidate_preferences_repository.get_active()
     if not prefs:
         return candidate_profile

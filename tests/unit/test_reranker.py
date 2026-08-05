@@ -1,6 +1,6 @@
 from unittest.mock import MagicMock, patch
 
-from ranker.reranker import rerank_jobs
+from ranker.reranker import rerank_jobs, _MAX_QUERY_CHARS
 
 
 def _job(id="j1", title="Developer", company="Corp", description="Python dev role"):
@@ -61,6 +61,46 @@ class TestRerankJobs:
         assert len(captured) == 1
         assert "x" * 6001 not in captured[0]
         assert "x" * 6000 in captured[0]
+
+    def test_truncates_query_to_max_query_chars(self):
+        long_query = "x" * 3000
+        jobs = [_job("j1")]
+        captured = {}
+
+        def capture_rerank(query, documents, top_k):
+            captured["query"] = query
+            return [{"index": 0, "score": 0.5}]
+
+        with patch("ranker.reranker._get_client") as mock_get:
+            mock_client = MagicMock()
+            mock_client.rerank.side_effect = capture_rerank
+            mock_get.return_value = mock_client
+
+            rerank_jobs(jobs, long_query)
+
+        assert len(captured["query"]) == _MAX_QUERY_CHARS
+
+    def test_does_not_truncate_a_realistic_hyde_length_query(self):
+        # Regression test: evaluator.profile.build_hyde_query's synthetic job posting
+        # (max_tokens=400, "under 200 words") runs up to ~1600 chars worst case — the
+        # cap used to be 500, silently cutting HyDE's output right around the company
+        # blurb and losing the stack/seniority/preferences that follow.
+        hyde_length_query = "x" * 1600
+        jobs = [_job("j1")]
+        captured = {}
+
+        def capture_rerank(query, documents, top_k):
+            captured["query"] = query
+            return [{"index": 0, "score": 0.5}]
+
+        with patch("ranker.reranker._get_client") as mock_get:
+            mock_client = MagicMock()
+            mock_client.rerank.side_effect = capture_rerank
+            mock_get.return_value = mock_client
+
+            rerank_jobs(jobs, hyde_length_query)
+
+        assert captured["query"] == hyde_length_query
 
     def test_skips_cross_encoder_when_no_query_given(self):
         # A generic placeholder query would produce a rerank_score that looks
