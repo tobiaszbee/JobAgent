@@ -29,6 +29,14 @@ _agent_process: subprocess.Popen | None = None
 _lock = threading.Lock()
 _run_active = False
 
+# Set by _run_pipeline_ws right before each stage header is written, cleared in
+# its finally. Lets /api/agent/status report exact progress for a tab that
+# reattaches mid-run (see openRunModal/_attachToActiveRun in dashboard.js)
+# without re-deriving it by scanning the log tail, which /api/agent/logs
+# truncates to the last 200 lines — too short to still contain early stage
+# headers on a run whose current stage has printed thousands of lines since.
+_stage_progress: dict | None = None
+
 
 def init_sock(app):
     sock.init_app(app)
@@ -108,7 +116,17 @@ def _start_session_or_none(ws) -> int | None:
 
 @bp.get("/api/agent/status")
 def agent_status():
-    return {"running": _is_run_active()}
+    """started_at lets the frontend show an elapsed-time counter after
+    reopening the run modal mid-run (see openRunModal in dashboard.js) — the
+    browser has no other way to know when an already-in-progress run began,
+    since a page reload or modal close/reopen loses any client-side timer."""
+    running = _is_run_active()
+    started_at = None
+    if running:
+        latest = session_repository.get_latest()
+        if latest:
+            started_at = latest.get("started_at")
+    return {"running": running, "started_at": started_at, "stage": _stage_progress}
 
 
 @bp.get("/api/agent/query-suggestions")
@@ -261,7 +279,7 @@ def _run_pipeline_ws(ws, run_label: str, build_stages) -> None:
     before it, which would let that read happen even when a run is already
     active. Return None from build_stages to abort after already sending your
     own error message (e.g. invalid params)."""
-    global _agent_process
+    global _agent_process, _stage_progress
 
     with _RunGuard() as acquired:
         if not acquired:
@@ -286,6 +304,7 @@ def _run_pipeline_ws(ws, run_label: str, build_stages) -> None:
         try:
             with _open_log() as log_file:
                 for i, (label, script_path, args, stop_if_fails) in enumerate(stages):
+                    _stage_progress = {"index": i + 1, "total": len(stages), "label": label}
                     prefix = "" if i == 0 else "\n"
                     header = f"{prefix}=== {label} ===\n"
                     log_file.write(header)
@@ -305,6 +324,7 @@ def _run_pipeline_ws(ws, run_label: str, build_stages) -> None:
             session_repository.finish(session_id, jobs_found=0, jobs_scored=0, status=status)
             usage_repository.record_run_summary(run_label, started_at)
             _agent_process = None
+            _stage_progress = None
             _safe_send(ws, "\n__DONE__\n")
 
 

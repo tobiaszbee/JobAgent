@@ -15,7 +15,7 @@
   </div>
   <div class="top-actions">
     <span class="last-run" id="last-run">last run —</span>
-    <button class="running-pill" id="running-pill" onclick="openActivityModal()">
+    <button class="running-pill" id="running-pill" onclick="openRunModal()">
       <span class="blip"></span> Agent running
     </button>
     <button class="icon-btn" onclick="openActionsModal()">
@@ -194,14 +194,19 @@
           <span class="st-tx"><span class="t">Search since last run</span><span class="d">Automatically covers every day since the last successful run.</span></span>
         </label>
         <div class="run-params">
-          <label class="f disabled" id="run-days-label">Search last <input type="number" id="run-days" value="1" min="1" max="60" disabled> days</label>
+          <label class="f disabled" id="run-days-label">Search last <input type="number" id="run-days" value="1" min="1" max="60" disabled oninput="_onDaysInput()"> days</label>
         </div>
         <p class="modal-hint">Search queries, countries, and sources are derived from your <a href="/questionnaire">preferences</a>.</p>
+        <p class="modal-hint modal-hint--warn">A full run typically takes 1-3 hours (LinkedIn descriptions are fetched slowly on purpose, to avoid detection) — it keeps running after you close this window, and you can reopen it any time from the "Run agent" button to check progress.</p>
+        <p class="modal-hint modal-hint--warn" id="run-days-warn" style="display:none"></p>
         <p class="modal-hint modal-hint--warn">First run only: a Chrome window will open for LinkedIn login — check your taskbar if the log below looks stalled after starting.</p>
       </div>
       <div class="progress-wrap" id="run-progress" style="display:none">
         <div class="progress-bar-track"><div class="progress-bar-fill" id="run-progress-bar" style="width:0%"></div></div>
-        <div class="progress-label" id="run-progress-label">Stage 0 / 6</div>
+        <div class="progress-label-row">
+          <div class="progress-label" id="run-progress-label">Stage 0 / 6</div>
+          <div class="progress-label" id="run-progress-elapsed"></div>
+        </div>
       </div>
       <div class="run-log" id="run-log"></div>
     </div>

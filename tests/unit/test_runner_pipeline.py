@@ -12,8 +12,10 @@ from web.routes.runner import _post_collect_stages, _days_since_last_run, _is_ru
 @pytest.fixture(autouse=True)
 def _reset_run_active():
     runner_module._run_active = False
+    runner_module._stage_progress = None
     yield
     runner_module._run_active = False
+    runner_module._stage_progress = None
 
 
 class TestPostCollectStages:
@@ -208,3 +210,57 @@ class TestSessionSpansWholeHandler:
             runner_module._rank_run(MagicMock())
 
         assert session_repository.get_last_collected_at() is None
+
+
+class TestAgentStatus:
+    """Covers /api/agent/status's started_at and stage fields, added so a tab
+    that closes and reopens the Run Agent modal (or a fresh page load) can
+    reattach to an already-in-progress run instead of only ever seeing the
+    fresh-start form (see openRunModal/_attachToActiveRun in dashboard.js)."""
+
+    def test_not_running_reports_no_started_at_or_stage(self):
+        status = runner_module.agent_status()
+        assert status == {"running": False, "started_at": None, "stage": None}
+
+    def test_reports_started_at_and_stage_mid_run(self):
+        mock_ws = MagicMock()
+        mock_ws.receive.return_value = json.dumps({"days": 1})
+        seen = []
+
+        def _fake_run_script(*args, **kwargs):
+            seen.append(runner_module.agent_status())
+            return 0
+
+        with patch("web.routes.runner._run_script", side_effect=_fake_run_script):
+            runner_module._agent_run(mock_ws)
+
+        assert len(seen) == 6  # collector + 5 post-collect stages
+        assert all(s["running"] is True for s in seen)
+        assert all(s["started_at"] is not None for s in seen)
+        # Same started_at across every stage — the whole run is one session, not
+        # a fresh one restarting the clock per stage.
+        assert len({s["started_at"] for s in seen}) == 1
+
+        expected_labels = ["COLLECTOR (days=1)"] + [label for label, _, _, _ in _post_collect_stages()]
+        assert [s["stage"]["label"] for s in seen] == expected_labels
+        assert [s["stage"]["index"] for s in seen] == [1, 2, 3, 4, 5, 6]
+        assert all(s["stage"]["total"] == 6 for s in seen)
+
+    def test_stage_and_started_at_cleared_once_run_finishes(self):
+        mock_ws = MagicMock()
+        mock_ws.receive.return_value = json.dumps({"days": 1})
+
+        with patch("web.routes.runner._run_script", return_value=0):
+            runner_module._agent_run(mock_ws)
+
+        assert runner_module.agent_status() == {"running": False, "started_at": None, "stage": None}
+
+    def test_stage_cleared_even_if_a_stage_raises(self):
+        mock_ws = MagicMock()
+        mock_ws.receive.return_value = json.dumps({"days": 1})
+
+        with patch("web.routes.runner._run_script", side_effect=RuntimeError("boom")):
+            with pytest.raises(RuntimeError):
+                runner_module._agent_run(mock_ws)
+
+        assert runner_module._stage_progress is None

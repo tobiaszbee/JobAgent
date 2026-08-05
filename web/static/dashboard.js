@@ -1414,17 +1414,136 @@ function _onSinceLastToggle() {
   const checked = document.getElementById('run-since-last').checked;
   document.getElementById('run-days').disabled = checked;
   document.getElementById('run-days-label').classList.toggle('disabled', checked);
+  _onDaysInput();
+}
+
+// A large --days window means more postings clear the cutoff, which means more
+// LinkedIn descriptions to stealth-fetch — the actual dominant cost, and one
+// the "typically 1-3 hours" hint alone doesn't convey scales with this field.
+function _onDaysInput() {
+  const warn = document.getElementById('run-days-warn');
+  if (document.getElementById('run-since-last').checked) { warn.style.display = 'none'; return; }
+  const days = parseInt(document.getElementById('run-days').value) || 1;
+  if (days > 3) {
+    warn.textContent = `Searching ${days} days back means more to process than usual — this could run considerably longer than the typical 1-3 hours.`;
+    warn.style.display = '';
+  } else {
+    warn.style.display = 'none';
+  }
+}
+
+function _formatElapsed(ms) {
+  const totalSec = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  return h > 0 ? `${h}h ${m}m` : `${m}m ${s}s`;
+}
+
+let _logPollTimer = null;
+let _runStartedAtMs = null;
+
+function _clearLogPollTimer() {
+  if (_logPollTimer) { clearInterval(_logPollTimer); _logPollTimer = null; }
+}
+
+function _renderLogAndProgress(lines, stage) {
+  const log = document.getElementById('run-log');
+  const text = (lines || []).join('\n');
+  log.textContent = text;
+  log.scrollTop = log.scrollHeight;
+
+  if (stage) {
+    // Authoritative — reported by the server itself (see _stage_progress in
+    // runner.py), not derived by scanning log text: /api/agent/logs only
+    // returns the last 200 lines, which can lose an early stage's "===" header
+    // once a later stage has printed enough of its own output.
+    const pct = Math.round(stage.index / stage.total * 100);
+    document.getElementById('run-progress-bar').style.width = pct + '%';
+    document.getElementById('run-progress-label').textContent =
+      `Stage ${stage.index} / ${stage.total}: ${stage.label}`;
+  }
+  _updateElapsedLabel();
+}
+
+function _updateElapsedLabel() {
+  const el = document.getElementById('run-progress-elapsed');
+  if (el) el.textContent = _runStartedAtMs ? 'Elapsed: ' + _formatElapsed(Date.now() - _runStartedAtMs) : '';
+}
+
+// Polls the log file directly (written continuously server-side regardless of
+// any websocket's state) instead of a live push — the one live /ws/agent
+// stream belongs to whichever tab called startAgent(); a tab that reopens
+// this modal after closing it (or a fresh page load) has no socket to
+// reattach to, so this is the mechanism that makes "closing the modal loses
+// the log forever" not true anymore.
+async function _pollActiveRunOnce() {
+  try {
+    const [logsResp, statusResp] = await Promise.all([fetch('/api/agent/logs'), fetch('/api/agent/status')]);
+    const { lines } = await logsResp.json();
+    const { running, stage } = await statusResp.json();
+    _renderLogAndProgress(lines, stage);
+    return running;
+  } catch (e) {
+    return true; // a transient fetch blip shouldn't tear down the view
+  }
+}
+
+async function _attachToActiveRun(startedAt) {
+  document.getElementById('run-modal-params').style.display = 'none';
+  document.getElementById('query-suggestions').style.display = 'none';
+  document.getElementById('btn-start').style.display = 'none';
+  document.getElementById('btn-generic-stop').style.display = '';
+  document.getElementById('run-progress').style.display = '';
+  document.getElementById('run-progress-bar').style.width = '0%';
+  document.getElementById('run-progress-label').textContent = `Stage 0 / ${_AGENT_STAGE_COUNT}`;
+
+  _runStartedAtMs = startedAt ? new Date(startedAt).getTime() : null;
+  _clearLogPollTimer();
+
+  const stillRunning = await _pollActiveRunOnce();
+  if (!stillRunning) {
+    _runStartedAtMs = null;
+    document.getElementById('btn-generic-stop').style.display = 'none';
+    _updateAgentIndicator(false);
+    loadStats();
+    loadJobs();
+    return;
+  }
+  _logPollTimer = setInterval(async () => {
+    const running = await _pollActiveRunOnce();
+    if (!running) {
+      _clearLogPollTimer();
+      _runStartedAtMs = null;
+      document.getElementById('btn-generic-stop').style.display = 'none';
+      _updateAgentIndicator(false);
+      loadStats();
+      loadJobs();
+    }
+  }, 4000);
 }
 
 async function openRunModal() {
   document.getElementById('run-modal-title').textContent = 'Run agent';
+  document.getElementById('run-modal').classList.add('open');
+
+  let running = false, startedAt = null;
+  try {
+    const r = await fetch('/api/agent/status');
+    ({ running, started_at: startedAt } = await r.json());
+  } catch (e) {}
+
+  if (running) {
+    await _attachToActiveRun(startedAt);
+    return;
+  }
+
   document.getElementById('run-modal-params').style.display = '';
   document.getElementById('btn-start').style.display = '';
   document.getElementById('btn-generic-stop').style.display = 'none';
   document.getElementById('run-progress').style.display = 'none';
-  document.getElementById('run-modal').classList.add('open');
   document.getElementById('run-log').textContent = '';
-  checkAgentStatus();
+  _onDaysInput();
   await _loadQuerySuggestions();
 }
 
@@ -1473,7 +1592,12 @@ async function _applyCheckedQuerySuggestions() {
 
 function closeRunModal() {
   document.getElementById('run-modal').classList.remove('open');
+  // Only tears down this tab's view of the run — the pipeline itself is a
+  // server-side process untouched by closing the socket or the poll timer.
+  // stopAgent() (the only thing that actually ends the run) is a separate,
+  // explicit button click.
   if (agentSocket) { agentSocket.close(); agentSocket = null; }
+  _clearLogPollTimer();
   const btn = document.getElementById('btn-start');
   btn.textContent = 'Start';
   btn.onclick = startAgent;
@@ -1520,6 +1644,12 @@ function pollAgentStatus() {
 // server-side protocol change needed.
 const _AGENT_STAGE_COUNT = 6;
 
+// One shared ticker for the elapsed-time label, rather than a per-flow
+// setInterval — both startAgent()'s live websocket run and
+// _attachToActiveRun()'s reattach-to-an-in-progress-run path set
+// _runStartedAtMs and share this same display.
+setInterval(_updateElapsedLabel, 1000);
+
 async function startAgent() {
   await _applyCheckedQuerySuggestions();
   document.getElementById('query-suggestions').style.display = 'none';
@@ -1543,6 +1673,8 @@ async function startAgent() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   agentSocket = new WebSocket(`${proto}://${location.host}/ws/agent`);
 
+  _runStartedAtMs = Date.now();
+
   agentSocket.onopen = () => {
     _agentRunning = true;
     _updateAgentIndicator(true);
@@ -1552,6 +1684,7 @@ async function startAgent() {
   function _resetStartBtn() {
     btn.textContent = 'Start';
     btn.onclick = startAgent;
+    _runStartedAtMs = null;
   }
 
   agentSocket.onmessage = e => {

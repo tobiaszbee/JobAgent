@@ -486,6 +486,8 @@ h1,h2,h3 { text-wrap: balance; }
 .progress-bar-track { height: 6px; border-radius: 3px; background: var(--meter-track); overflow: hidden; }
 .progress-bar-fill { height: 100%; background: var(--signal); border-radius: 3px; transition: width .2s; }
 .progress-label { font-size: 0.74rem; color: var(--ink-faint); margin-top: 6px; font-family: var(--font-mono); }
+.progress-label-row { display: flex; justify-content: space-between; gap: 8px; }
+.progress-label-row .progress-label { margin-top: 6px; }
 
 .del-field { margin-bottom: 14px; }
 .del-label { font-size: 0.78rem; color: var(--ink-soft); display: block; margin-bottom: 8px; }
