@@ -4,11 +4,8 @@ from embeddings.client import VoyageClient
 
 logger = logging.getLogger(__name__)
 
-# Voyage rerank-2 accepts far more than this, the cap exists to bound the
-# fallback path (evaluator.profile.build_retrieval_query's raw CV+preferences
-# concatenation, unbounded in principle), not to fit an API limit. Sized to
-# comfortably cover the common case, evaluator.profile.build_hyde_query's
-# synthetic job posting: max_tokens=400 there, so ~1600 chars worst case.
+# Voyage rerank-2 accepts far more than this; the cap bounds the fallback
+# path's unbounded raw-text concatenation, not an API limit.
 _MAX_QUERY_CHARS = 2000
 
 _client: VoyageClient | None = None
@@ -22,23 +19,17 @@ def _get_client() -> VoyageClient:
 
 
 def rerank_jobs(jobs: list[dict], query: str, top_k: int = 20) -> list[dict]:
-    """
-    Cross-encoder rerank using Voyage Rerank API.
-    Returns up to top_k jobs sorted by rerank score (best first).
-    Falls back to original order on failure, those jobs are marked
-    _rerank_unreliable so callers re-fusing rerank_score as an RRF leg (see
-    scripts/rank_jobs.py) know not to treat it as a real signal.
-    """
+    # Falls back to original order on failure; those jobs are marked
+    # _rerank_unreliable so callers re-fusing rerank_score as an RRF leg know
+    # not to treat it as a real signal.
     if not jobs:
         return []
 
     query_text = (query or "").strip()
     if not query_text:
-        # A generic placeholder query (e.g. "software engineer developer") would still
-        # produce a rerank_score that looks considered but isn't, the cross-encoder
-        # would just be measuring "looks like a tech job" for every candidate, which is
-        # worse than not reranking at all. Skip the call and preserve embedding-score
-        # order instead (jobs already arrive sorted by _embedding_score descending).
+        # A generic placeholder query would still produce a rerank_score that
+        # looks considered but isn't, worse than not reranking at all. Skip
+        # the call and preserve embedding-score order instead.
         logger.warning("rerank_jobs called with no candidate query (e.g. no CV uploaded yet), skipping cross-encoder rerank")
         for job in jobs:
             job.setdefault("rerank_score", job.get("_embedding_score") or 0.0)

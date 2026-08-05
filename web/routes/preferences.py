@@ -26,11 +26,10 @@ def get_preferences():
 
 @bp.post("/api/preferences/distill")
 def distill():
-    # A manual distill runs an Opus call outside any tracked pipeline run, same
-    # started_at -> record_run_summary envelope web/routes/runner.py's
-    # _run_pipeline_ws uses, so this cost stops silently missing from
-    # cost_summaries. Recorded even on failure (the try/finally): a failed
-    # distill can still have billed a real Anthropic call before erroring.
+    # A manual distill runs an Opus call outside any tracked pipeline run, so
+    # it needs its own started_at -> record_run_summary envelope to show up
+    # in cost_summaries. Recorded even on failure, since a failed distill can
+    # still have billed a real Anthropic call before erroring.
     started_at = usage_repository.now_iso()
     try:
         result = preference_runner.run()

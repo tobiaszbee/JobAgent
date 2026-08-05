@@ -1,9 +1,7 @@
 """Recompute embeddings for every job that already has one. Needed whenever
-embeddings/indexer.py's _job_to_text() changes (e.g. the 2026-07-25 fix that routed
-it through collector.utils.build_excerpt so LinkedIn page-chrome junk no longer
-pollutes the embedded text), job_embeddings rows written before such a fix keep the
-old, stale vector until explicitly recomputed; index_jobs()'s normal call sites only
-embed jobs that don't have a row yet.
+embeddings/indexer.py's _job_to_text() changes: job_embeddings rows written
+before such a change keep the old, stale vector until explicitly recomputed,
+since index_jobs()'s normal call sites only embed jobs with no row yet.
 
 Usage:
     python scripts/reindex_embeddings.py

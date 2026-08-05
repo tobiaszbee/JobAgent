@@ -118,7 +118,6 @@ def _get_client() -> anthropic.Anthropic:
 
 
 def extract_job(description: str, source: str | None = None) -> dict:
-    """Extract structured data from a single job description using Haiku. Returns {} on failure."""
     excerpt = build_excerpt(description, source)[:3000]
     try:
         response = _get_client().messages.create(
@@ -136,11 +135,9 @@ def extract_job(description: str, source: str | None = None) -> dict:
 
         if response.stop_reason == "max_tokens":
             # A truncated tool_use block can still parse as valid-but-partial
-            # JSON, without this check a partial dict would be written as if
-            # it were the complete, final extraction, permanently leaving the
-            # missing fields null instead of retrying the job next run (see
-            # run_extraction()'s `if data:` write-guard, which only protects
-            # against a *falsy* return, not a truthy-but-incomplete one).
+            # JSON; returning {} here (not the partial dict) lets
+            # run_extraction()'s `if data:` guard retry the job next run
+            # instead of permanently writing missing fields as null.
             logger.warning("Extraction response truncated (max_tokens), will retry next run.")
             return {}
 
@@ -153,11 +150,9 @@ def extract_job(description: str, source: str | None = None) -> dict:
 
 
 def _merge_source_structured_data(data: dict, job: dict) -> dict:
-    """A source's own native fields (e.g. justjoin.it's salary/skills API fields,
-    see collector/sources/justjoin.py) are ground truth, not a guess from the
-    description text, they override whatever Haiku extracted for the same keys.
-    Only overlays what the source actually provided; every field a source doesn't
-    disclose still comes from Haiku untouched."""
+    # A source's own native fields are ground truth, not a guess from the
+    # description text, so they override whatever Haiku extracted for the
+    # same keys. Only overlays what the source actually provided.
     raw = job.get("source_structured_data")
     if not raw:
         return data
@@ -169,7 +164,6 @@ def _merge_source_structured_data(data: dict, job: dict) -> dict:
 
 
 def run_extraction(jobs: list[dict]) -> int:
-    """Extract structured data for jobs that don't have it yet. Returns count updated."""
     to_extract = [j for j in jobs if j.get("description") and not j.get("structured_data")]
     if not to_extract:
         return 0

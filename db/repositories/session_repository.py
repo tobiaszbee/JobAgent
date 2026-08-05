@@ -16,7 +16,6 @@ def cancel_active() -> None:
 
 
 def has_active_run() -> bool:
-    """True if a session started within the last 6 hours is still running."""
     return api_client.get("/api/sessions/has-active").json()["active"]
 
 

@@ -11,17 +11,14 @@ class RawJob:
     source: str
     source_id: str | None = None
     description: str | None = None
-    # ISO 8601 string, not a datetime, every source that parses one already does
-    # so to apply days_back, and isoformat() is what job_repository.insert sends
-    # over the API as-is. None for sources with no reliable per-posting date
-    # (LinkedIn shows only relative text like "2 days ago" in its UI).
+    # ISO 8601 string, not a datetime, since that's what job_repository.insert
+    # sends over the API as-is. None for sources with no reliable per-posting
+    # date (LinkedIn shows only relative text like "2 days ago").
     posted_at: str | None = None
-    # Structured fields (e.g. salary_min/max/currency/period, using the same keys
-    # and vocabulary as extractor/runner.py's schema) a source's own API already
-    # provides natively, extractor/runner.py overlays these on top of Haiku's
-    # extraction, source-native beating an LLM guess for the same keys, rather
-    # than skipping extraction entirely (Haiku still needs to fill in everything
-    # a source doesn't provide). None for sources/postings with no such data.
+    # Structured fields a source's own API already provides natively.
+    # extractor/runner.py overlays these on top of Haiku's extraction,
+    # source-native beating an LLM guess, without skipping extraction
+    # entirely (Haiku still fills in what a source doesn't provide).
     source_structured_data: dict | None = None
 
 

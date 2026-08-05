@@ -53,10 +53,8 @@ def _configure_logging(log_path: str | None) -> list[logging.Handler]:
 
 
 def _run_script(name: str) -> int:
-    """Runs a scripts/*.py file with no importable entrypoint (no `if __name__`
-    guard, see scripts/distill_preferences.py, scripts/prune_search_queries.py,
-    scripts/rank_jobs.py) as a subprocess, matching the actual dashboard
-    pipeline's approach for these same stages (web/routes/runner.py)."""
+    # These scripts have no importable entrypoint, so run as a subprocess,
+    # matching the dashboard pipeline's own approach for these stages.
     import subprocess
     script_path = os.path.join(ROOT, "scripts", name)
     return subprocess.run([sys.executable, script_path], check=False).returncode

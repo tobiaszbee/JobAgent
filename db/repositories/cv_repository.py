@@ -2,7 +2,6 @@ import api_client
 
 
 def insert(filename: str, raw_text: str, parsed: dict) -> int:
-    """Insert a new CV profile, making it the active one. Returns the new row id."""
     resp = api_client.post("/api/cv-profiles", json={"filename": filename, "raw_text": raw_text, "parsed": parsed})
     return resp.json()["id"]
 

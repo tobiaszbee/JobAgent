@@ -7,23 +7,18 @@ logger = logging.getLogger(__name__)
 
 
 def _contains_keyword(text: str, keyword: str) -> bool:
-    """Whole-word match so short acronyms (e.g. 'php') don't false-positive on
-    substrings inside unrelated words or other acronyms (e.g. clinical 'IOP/PHP').
-
-    Uses an explicit non-alphanumeric lookaround rather than \\b: \\b only fires
-    between a \\w char and a non-\\w char, so a keyword ending in a symbol (c++,
-    c#, .net) followed by whitespace has non-word characters on *both* sides of
-    the trailing \\b and it never matches, silently making these keywords
-    inert everywhere they're used (rejected-keyword bans and required-keyword
-    gates alike)."""
+    # Explicit non-alphanumeric lookaround rather than \b: \b only fires
+    # between a \w char and a non-\w char, so a keyword ending in a symbol
+    # (c++, c#, .net) followed by whitespace has non-word characters on both
+    # sides of the trailing \b and would never match.
     pattern = rf"(?<![A-Za-z0-9]){re.escape(keyword)}(?![A-Za-z0-9])"
     return re.search(pattern, text) is not None
 
 
 def title_banned_reason(title: str, rejected_kw: list[str]) -> str | None:
-    """Banned-keyword check using the title alone. Used to skip the description
-    fetch entirely for jobs already guaranteed to be auto-rejected, required-keyword
-    checks still need the full text and stay in apply_keyword_filter()."""
+    # Used to skip the description fetch entirely for jobs already guaranteed
+    # to be auto-rejected; required-keyword checks need the full text and
+    # stay in apply_keyword_filter().
     text = title.lower()
     for kw in rejected_kw:
         if _contains_keyword(text, kw):
@@ -32,14 +27,10 @@ def title_banned_reason(title: str, rejected_kw: list[str]) -> str | None:
 
 
 def apply_keyword_filter(jobs: list[dict] | None = None) -> dict:
-    """Hard-reject jobs based on two checks (in order):
-    1. Banned keywords (rejected): any match in title+description → reject.
-    2. Required keywords: none present anywhere in title+description → reject.
-
-    `jobs` lets a caller that's also running apply_language_filter() share one
-    get_new() fetch instead of each independently pulling the full 'new' pool
-    (with descriptions) over HTTP. Defaults to fetching its own when omitted,
-    so standalone callers (scripts/reevaluate_rejected.py) are unaffected."""
+    # Hard-rejects on two checks: any banned keyword present, or no required
+    # keyword present at all. `jobs` lets a caller also running
+    # apply_language_filter() share one get_new() fetch instead of each
+    # pulling its own.
     rejected_kw = [r.lower() for r in criteria_repository.get_active("rejected")]
     required_kw = [r.lower() for r in criteria_repository.get_active("required")]
 

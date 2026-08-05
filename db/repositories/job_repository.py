@@ -62,12 +62,10 @@ def get_new() -> list[dict]:
 
 
 def get_unscored() -> list[dict]:
-    """Jobs that are new and have not been scored yet. Used by the evaluator."""
     return api_client.get("/api/jobs/unscored").json()
 
 
 def get_new_with_descriptions() -> list[dict]:
-    """All 'new' jobs that have descriptions, used for force-rescore."""
     return api_client.get("/api/jobs/new-with-descriptions").json()
 
 
@@ -187,7 +185,6 @@ def get_rejected_job_ids() -> list[str]:
 
 
 def count_decisions() -> int:
-    """Total number of applied + rejected decisions. Used for auto-distillation trigger."""
     return api_client.get("/api/jobs/decisions-count").json()["count"]
 
 

@@ -2,7 +2,6 @@ import api_client
 
 
 def insert(cv_profile_id: int | None, fields: dict | None = None) -> int:
-    """Create a new active preferences snapshot, deactivating any previous one."""
     try:
         resp = api_client.post("/api/candidate-preferences", json={
             "cv_profile_id": cv_profile_id, "fields": fields or {},
@@ -32,7 +31,6 @@ def set_active(id_: int) -> None:
 
 
 def update(id_: int, fields: dict) -> None:
-    """Partially update an existing preferences row in place."""
     if not fields:
         return
     try:
