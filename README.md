@@ -131,12 +131,12 @@ On first visit you land on a landing page and are routed to `/questionnaire`. Up
 
 | Section | Feeds into |
 |---------|-----------|
-| Work mode & location | Remote countries / hybrid-onsite cities — drives the deterministic remote-only dealbreaker filter, the collector's search locations, and the dashboard's Countries/Cities filters |
-| Compensation | Annual salary floor + currency — drives the deterministic salary-floor dealbreaker filter (job pay is normalized to annual before comparing, whatever period it's quoted in) |
-| Seniority & role | Soft scoring context; also feeds auto-derived search queries |
-| Company | Preferred company type/product-vs-outsourcing — soft scoring context |
+| Work mode & location | Remote countries / hybrid-onsite cities — drives the deterministic remote-only *and* geo-restriction dealbreaker filters, the collector's search locations, and the dashboard's Countries/Cities filters |
+| Compensation | Annual salary floor + currency — drives the deterministic salary-floor dealbreaker filter (job pay is normalized to annual before comparing, whatever period it's quoted in), and the separate "no salary disclosed" dealbreaker if you opt to hide postings that don't list one |
+| Seniority & role | Seniority drives a deterministic seniority-mismatch dealbreaker filter; role types also feed auto-derived search queries and soft scoring context |
+| Company | Preferred company type/product-vs-outsourcing — a **hard dealbreaker filter**, not just scoring context: a job that doesn't match any selected type is auto-rejected |
 | Technologies (required / avoid) | Auto-derived search titles + the rejected-keyword filter |
-| Languages | Auto-rejects postings whose detected language doesn't match any you listed |
+| Languages | Two separate checks: the collector auto-rejects postings whose *detected posting-text* language doesn't match any you listed, and the dealbreaker filter separately rejects jobs whose extracted *company working language* doesn't match your working-level (CEFR B2+) languages |
 | Anything else | Free-text notes injected into the candidate profile |
 
 Every section is optional except the CV — leave one blank and it's simply not used as a filter or signal, never treated as a violation. Saving the questionnaire also regenerates the collector's search criteria (titles derived by Claude from your tech/role/seniority, locations from work mode, rejected keywords from avoided tech) — there's no separate criteria-editing UI; it's fully driven by this form.
@@ -151,7 +151,7 @@ The pipeline runs in order:
 1. Collect jobs from configured sources
 2. Distill preferences from your history (skipped on first run — no history yet)
 3. Extract structured data (remote/hybrid, seniority, stack, salary, company type) — must run before scoring, since both the dealbreaker filter and the scorer read it
-4. Apply the deterministic dealbreaker pre-filter (salary floor, remote-only mismatch) — zero LLM cost for jobs it catches
+4. Apply the deterministic dealbreaker pre-filter (salary floor, remote-only, geo, seniority, company type, working language, no-salary-disclosed) — zero LLM cost for jobs it catches
 5. Score surviving jobs with Claude Sonnet
 6. Embed, rerank, and listwise-rank the pool, then run the debate/second-opinion pass over the top-20
 
@@ -370,10 +370,15 @@ Fields default to `null` when not explicitly stated — no inference. `salary_pe
 
 #### 4. Dealbreaker pre-filter
 
-`evaluator/dealbreakers.py::apply_dealbreaker_filter()` — deterministic, no LLM call, runs immediately before the scoring loop over not-yet-scored jobs. Auto-rejects (score `0.0`, `status='auto_rejected'`, reason in `score_reason`) any job that violates a **structured**-field dealbreaker from the questionnaire:
+`evaluator/dealbreakers.py::apply_dealbreaker_filter()` — deterministic, no LLM call, runs immediately before the scoring loop over not-yet-scored jobs. Auto-rejects (score `0.0`, `status='auto_rejected'`, reason in `score_reason`) any job that violates a **structured**-field dealbreaker from the questionnaire. Every check below fails open: missing, unclear, or unconvertible data is skipped, never treated as a violation.
 
-- **Salary floor** — job pay is normalized to an annual-gross basis (`_annualize()`: hourly ×2016, monthly ×12) before comparing against the candidate's annual `salary_min`. Currency mismatches and unknown pay periods are **skipped, not rejected** — absence of comparable data is never treated as a violation.
-- **Remote-only mismatch** — if the candidate's `work_mode` is exactly `["remote"]` and the job's structured data says `hybrid=true` or `remote=false`, it's rejected. Missing remote/hybrid data is skipped, never guessed.
+- **Salary floor** — job pay is normalized to an annual-gross basis (`_annualize()`: hourly ×2016, monthly ×12) before comparing against the candidate's annual `salary_min`. Currency mismatches and unknown pay periods are skipped.
+- **Remote-only mismatch** — if the candidate's `work_mode` is exactly `["remote"]` and the job's structured data says `hybrid=true` or `remote=false`, it's rejected.
+- **Geo restriction** — a job can be genuinely remote but still restricted to countries that don't include the candidate's selected `remote_countries` (e.g. "Remote, US only" reaching a candidate who only selected Poland).
+- **Seniority mismatch** — the job's extracted seniority isn't in the candidate's selected `seniority_levels`.
+- **Company type mismatch** — the job's `company_type`/`product_vs_outsourcing` doesn't match any of the candidate's selected `preferred_company_types`; a hard filter per the questionnaire's own copy, not just a scoring signal.
+- **Working language mismatch** — the job's extracted `working_language` isn't among the candidate's working-level (CEFR B2+) languages.
+- **No salary disclosed** — only applies if the candidate explicitly unchecked "also show postings with no salary listed"; a job that does disclose a salary is never touched by this check.
 
 This is the only auto-reject path that runs on structured data rather than title/description keywords — it exists to catch dealbreakers a keyword filter structurally can't (e.g. a rate that's only wrong once you know the currency and pay period).
 
@@ -446,7 +451,7 @@ Most jobs get no flag at all — the prompt explicitly discourages flagging just
 
 #### 10. Would-apply flag
 
-`ranker/would_apply.py` — phase 1 of an eventual auto-apply feature. Flags jobs the agent would apply to, purely for the candidate to validate — **never sends anything**. Gate is an absolute score floor (`config.WOULD_APPLY["score_floor"]`, currently 7.0), not a relative top-N cut, so a weak ranking run yields zero flagged jobs instead of always flagging "the best of a bad batch." A `dealbreaker_risk` debate flag always suppresses the would-apply flag.
+`ranker/would_apply.py` — phase 1 of an eventual auto-apply feature. Flags jobs the agent would apply to, purely for the candidate to validate — **never sends anything**. Three conditions must all hold: an absolute score floor (`config.WOULD_APPLY["score_floor"]`, currently 7.0, not a relative top-N cut, so a weak ranking run yields zero flagged jobs instead of always flagging "the best of a bad batch"), a rank ceiling on the final post-debate `listwise_rank` (`config.WOULD_APPLY["rank_ceiling"]`, currently 10, so a job whose score alone clears the floor but sits deep in the pool still isn't flagged), and no `dealbreaker_risk` debate flag.
 
 #### Evaluation metrics
 
@@ -625,7 +630,7 @@ JobAgent has no local database, so `tests/conftest.py` spins up a **real** JobAg
 
 **`overloaded` from Anthropic** — the evaluator retries automatically (3×, 30 s / 60 s). If it keeps failing, wait and retry.
 
-**Dashboard shows "Running" with nothing running** — a session was left in `status='running'` after a crash. It auto-clears after 6 hours, or click **Actions → Stop** to cancel it immediately via JobAgentWeb's API.
+**Dashboard shows "Running" with nothing running** — a session was left in `status='running'` after a crash. It auto-clears after 24 hours (sized for a real LinkedIn stealth-paced collector run, which can itself take 4+ hours), or click **Actions → Stop** to cancel it immediately via JobAgentWeb's API.
 
 **Jobs missing descriptions** — open **Actions → Fetch missing descriptions**.
 
