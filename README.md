@@ -2,7 +2,7 @@
 
 An AI-powered job search assistant that collects remote job listings, ranks them with a multi-stage AI pipeline, and learns your preferences from your apply/reject decisions over time.
 
-JobAgent is a local, single-user client with **no database of its own** — every read and write goes through [JobAgentWeb](../JobAgentWeb), the Postgres-backed API service that owns all data. This split lets the scraped job pool be shared across users while each user's scoring/ranking/decisions stay private.
+JobAgent is a local, single-user client with **no database of its own** — every read and write goes through [JobAgentWeb](https://github.com/tobiaszbee/JobAgentWeb), the Postgres-backed API service that owns all data. This split lets the scraped job pool be shared across users while each user's scoring/ranking/decisions stay private.
 
 ---
 
@@ -66,7 +66,7 @@ Each run makes the next one smarter: your decisions feed the preference distille
 
 ## Setup
 
-This is a two-repo, self-hosted setup — JobAgent (this repo, the local client) plus [JobAgentWeb](../JobAgentWeb) (a separate FastAPI + Postgres backend you also deploy yourself), not a single pip-install tool. Budget for standing up both before you have a working system.
+This is a two-repo, self-hosted setup — JobAgent (this repo, the local client) plus [JobAgentWeb](https://github.com/tobiaszbee/JobAgentWeb) (a separate FastAPI + Postgres backend you also deploy yourself), not a single pip-install tool. Budget for standing up both before you have a working system.
 
 ### Prerequisites
 
@@ -75,7 +75,7 @@ This is a two-repo, self-hosted setup — JobAgent (this repo, the local client)
 - [Anthropic API key](https://console.anthropic.com/) — Claude Sonnet, Haiku, Opus
 - [Voyage AI API key](https://www.voyageai.com/) — embeddings + reranker
 - A LinkedIn account
-- A running [JobAgentWeb](../JobAgentWeb) instance, reachable from this machine (see below)
+- A running [JobAgentWeb](https://github.com/tobiaszbee/JobAgentWeb) instance, reachable from this machine (see below)
 
 ### Installation
 
@@ -265,7 +265,7 @@ Below that, **"What the agent learned"** renders the distilled preference profil
 
 ### Data ownership
 
-JobAgent holds no database. Every `db/repositories/*.py` module is a thin wrapper over `api_client.py`, which makes authenticated HTTP calls to JobAgentWeb. The schema itself — `job_postings`/`job_embeddings` (shared across every user) plus `user_job_states` and everything else (per-user) — lives in [JobAgentWeb's `migrations.py`](../JobAgentWeb/migrations.py); see that repo's README for the full table layout.
+JobAgent holds no database. Every `db/repositories/*.py` module is a thin wrapper over `api_client.py`, which makes authenticated HTTP calls to JobAgentWeb. The schema itself — `job_postings`/`job_embeddings` (shared across every user) plus `user_job_states` and everything else (per-user) — lives in [JobAgentWeb's `migrations.py`](https://github.com/tobiaszbee/JobAgentWeb/blob/main/migrations.py); see that repo's README for the full table layout.
 
 Two consequences worth knowing:
 - **"Delete jobs"** removes rows from *your* `user_job_states` only — the underlying shared posting stays untouched for other users who've found the same URL.
