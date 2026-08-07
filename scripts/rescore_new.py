@@ -1,7 +1,9 @@
 """Re-score all 'new' jobs using current preferences (overwrites existing scores safely)."""
+import os
 import sys
 import logging
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.stdout.reconfigure(line_buffering=True)
 logging.basicConfig(level=logging.INFO, stream=sys.stdout, format="%(message)s")
 

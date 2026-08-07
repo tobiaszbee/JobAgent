@@ -7,9 +7,11 @@ Re-rank the entire active ('new') job pool using the full AI pipeline:
 Runs over ALL 'new' jobs every time (not just newly-collected ones), so listwise_rank
 stays comparable across the whole list instead of being scoped to one day's batch.
 """
+import os
 import sys
 import logging
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.stdout.reconfigure(line_buffering=True)
 # No local logger, this script prints its own output directly, but still
 # needs this so log messages from imported modules (e.g. ranker/retry.py's

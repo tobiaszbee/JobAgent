@@ -8,7 +8,10 @@ Usage:
     python scripts/reindex_embeddings.py --yes   # skip the confirmation prompt
 """
 import argparse
+import os
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import api_client
 from config import MODEL_COSTS, VOYAGE_EMBED_MODEL

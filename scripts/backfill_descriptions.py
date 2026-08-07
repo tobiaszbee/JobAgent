@@ -1,6 +1,9 @@
 """Retry fetching descriptions for jobs that are missing them (any source, stealth-safe
 for LinkedIn, direct for everything else)."""
+import os
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from db.repositories import job_repository
 from collector.runner import _fetch_descriptions_stealthily, _fetch_descriptions_directly

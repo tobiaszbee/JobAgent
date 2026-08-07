@@ -1,6 +1,12 @@
 import logging
+import os
+import sys
 
 from flask import Flask, jsonify, redirect, render_template, request
+
+# Run directly as `python web/app.py`, sys.path[0] is web/, not the repo root
+# api_client/config/db live in — add it so those imports resolve.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import api_client
 from config import JOBAGENTWEB_BASE_URL

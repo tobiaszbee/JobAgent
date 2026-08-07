@@ -5,9 +5,11 @@ evaluator/runner.py now auto-rejects low scores as they're produced, but that on
 applies going forward, this catches jobs that were scored before that logic existed.
 Safe to rerun any time; it's a no-op once nothing 'new' is left at/below the threshold.
 """
+import os
 import sys
 import logging
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.stdout.reconfigure(line_buffering=True)
 logging.basicConfig(level=logging.INFO, stream=sys.stdout, format="%(message)s")
 logger = logging.getLogger(__name__)
