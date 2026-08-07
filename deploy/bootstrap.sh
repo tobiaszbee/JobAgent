@@ -11,7 +11,7 @@ set -euo pipefail
 
 APP_USER="jobagent"
 APP_DIR="/opt/jobagentweb"
-REPO_URL="https://github.com/tobiaszbee/JobAgentWeb.git"
+REPO_URL="https://github.com/BaranskiTomasz/JobAgentWeb.git"
 
 echo "== apt update/upgrade =="
 apt-get update -y
